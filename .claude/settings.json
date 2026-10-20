@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(uv sync *)",
+      "Bash(uv lock --check *)",
+      "Bash(uv tree *)",
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff *)",
+      "Bash(uv run ty *)",
+      "Bash(uv run pre-commit *)",
+      "Bash(uv run coverage *)",
+      "Bash(uv run python -m ems.experiments.run *)",
+      "Bash(docker compose -f infra/docker-compose.yml ps *)",
+      "Bash(docker compose -f infra/docker-compose.yml logs *)",
+      "Bash(docker compose -f infra/docker-compose.yml config *)",
+      "Bash(helm lint *)",
+      "Bash(helm template *)",
+      "Bash(helm dependency list *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "WebFetch(domain:docs.restate.dev)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.astral.sh)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:helm.sh)",
+      "WebFetch(domain:kind.sigs.k8s.io)",
+      "WebFetch(domain:kafka.apache.org)",
+      "WebFetch(domain:api.raporty.pse.pl)",
+      "WebFetch(domain:isap.sejm.gov.pl)",
+      "WebFetch(domain:api.sejm.gov.pl)",
+      "WebFetch(domain:www.ure.gov.pl)",
+      "WebFetch(domain:transparency.entsoe.eu)",
+      "WebFetch(domain:open-meteo.com)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(rm *)",
+      "Bash(make deploy-local *)",
+      "Bash(make install-uv *)",
+      "Bash(helm install *)",
+      "Bash(helm upgrade *)",
+      "Bash(helm uninstall *)",
+      "Bash(helm rollback *)",
+      "Bash(kubectl *)",
+      "Bash(kind delete *)",
+      "Bash(docker compose * down -v *)",
+      "Bash(uv add *)",
+      "Bash(uv remove *)",
+      "Bash(uv lock --upgrade *)",
+      "Bash(uv lock -U *)",
+      "Bash(uv tool install *)",
+      "Bash(brew install *)",
+      "Bash(brew upgrade *)",
+      "Bash(specify init *)",
+      "Bash(specify self upgrade *)",
+      "Edit(/frontend/**)",
+      "Edit(/docs/bootstrap/**)",
+      "Edit(/reference/**)",
+      "Edit(/.claude/skills/speckit-*/**)",
+      "Edit(/.specify/scripts/**)",
+      "Edit(/.specify/templates/*.md)",
+      "Edit(/.specify/integrations/**)",
+      "Edit(/.specify/memory/constitution.md)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(/experiments/results/**)"
+    ]
+  },
+  "attribution": {
+    "commit": "",
+    "sessionUrl": false
+  },
+  "skillOverrides": {
+    "speckit-implement": "user-invocable-only",
+    "speckit-taskstoissues": "off"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

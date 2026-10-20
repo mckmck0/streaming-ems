@@ -19,5 +19,11 @@ node_modules/
 .env
 .env.*
 
-# Restate spike (prototype test)
-restate-ems-spike
+# Restate spike as unpacked at the repo root (anchored, so a later reference/restate-ems-spike/ stays tracked)
+/restate-ems-spike/
+
+# Claude Code: personal and machine-local files (shared config in .claude/ is committed)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/agent-memory-local/
+CLAUDE.local.md

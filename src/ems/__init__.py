@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from masters-thesis!")
+"""EMS: counterfactual multi-strategy energy management on durable stateful actors."""

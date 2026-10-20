@@ -1,5 +1,7 @@
-# Template. Pin every `rev` to a release at least two weeks old (VERIFY current tags).
-# The ruff-pre-commit rev must match the ruff version locked in uv.lock.
+# Pin every `rev` to a release at least two weeks old. The ruff-pre-commit rev must equal the ruff pin in
+# pyproject.toml (ruff==0.16.10). The original template is in templates/.pre-commit-config.yaml.
+# reference/ (spike) and docs/bootstrap/ (frozen brief) are kept byte-identical.
+exclude: ^(reference|docs/bootstrap)/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -14,9 +16,9 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.1
+    rev: v0.16.10
     hooks:
-      - id: ruff-check   # older releases name this hook `ruff`
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
@@ -24,7 +26,7 @@ repos:
     hooks:
       - id: ty
         name: ty check
-        entry: uv run ty check
+        entry: uv run --locked ty check
         language: system
         types: [python]
         pass_filenames: false

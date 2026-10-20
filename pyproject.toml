@@ -1,7 +1,7 @@
 [project]
-name = "masters-thesis"
+name = "ems"
 version = "0.1.0"
-description = "Add your description here"
+description = "Counterfactual multi-strategy energy management on durable stateful actors (MSc thesis)"
 readme = "README.md"
 authors = [
     { name = "Mikolaj Wegner", email = "mikolajwegner0@gmail.com" }
@@ -9,9 +9,28 @@ authors = [
 requires-python = ">=3.13"
 dependencies = []
 
-[project.scripts]
-masters-thesis = "masters_thesis:main"
+[dependency-groups]
+# Exact pins only where behaviour depends on the version: ruff must equal the ruff-pre-commit rev in
+# .pre-commit-config.yaml, and ty is pre-1.0. Everything else is pinned by uv.lock.
+dev = [
+    "pre-commit",
+    "pytest",
+    "ruff==0.16.10",
+    "ty==0.0.84",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# Every locked version must be at least two weeks old. Move this date deliberately, then `uv lock --upgrade`.
+exclude-newer = "2026-10-02T00:00:00Z"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["reference", "docs/bootstrap"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "SIM", "RUF"]
