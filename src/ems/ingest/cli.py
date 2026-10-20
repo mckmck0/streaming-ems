@@ -154,9 +154,12 @@ def tail(
     key: Annotated[str | None, typer.Option(help="Only records with this key.")] = None,
     from_beginning: Annotated[bool, typer.Option(help="Start at the oldest record.")] = False,
     max_records: Annotated[int, typer.Option("--max", help="Stop after N records.")] = 20,
+    follow: Annotated[
+        bool, typer.Option("--follow", "-f", help="Keep waiting for new records.")
+    ] = False,
     bootstrap: BootstrapOpt = None,
 ) -> None:
-    """Pretty-print key, partition, offset, headers and value."""
+    """Pretty-print key, partition, offset, headers and value (``--follow`` to keep tailing)."""
     _need_ingest()
     import json
 
@@ -164,7 +167,10 @@ def tail(
 
     s = _settings(bootstrap=bootstrap)
     shown = 0
-    for rec in read_topic(s.kafka_bootstrap, s.topic_prefix + topic, from_beginning=from_beginning):
+    records = read_topic(
+        s.kafka_bootstrap, s.topic_prefix + topic, from_beginning=from_beginning, follow=follow
+    )
+    for rec in records:
         if key is not None and rec.key != key:
             continue
         value = json.loads(rec.value) if rec.value else None
@@ -263,6 +269,12 @@ def run(
     if chosen not in ("backfill", "accelerated", "realtime"):
         typer.echo(f"unknown mode {chosen}", err=True)
         raise typer.Exit(2)
+    import signal
+
+    def _stop(_signum: int, _frame: object) -> None:  # docker stop: shut down like Ctrl+C
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _stop)
     try:
         w_start, w_end = parse_window(start, end, days)
         if w_start is None and chosen != "realtime":
@@ -278,6 +290,9 @@ def run(
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
+    except KeyboardInterrupt:
+        typer.echo("stopped; buffered records flushed and manifest written")
+        raise typer.Exit(0) from None
     typer.echo(f"events {dict(result.counts)}; manifest {result.manifest}")
     raise typer.Exit(result.exit_code)
 

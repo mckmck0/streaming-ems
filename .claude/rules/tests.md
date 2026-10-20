@@ -5,11 +5,12 @@ paths:
 
 # Tests (`tests/`)
 
-- Tiers and markers: `unit` and `property` need no infrastructure; `integration` runs against a real Restate
-  server (`make up`); `e2e` replays data and compares strategy state bit-exactly with the offline reference;
+- Tiers and markers: `unit` and `property` need no infrastructure; `integration` runs against real services
+  from `make up` (Kafka now, Restate later), isolated per run by a topic prefix; `e2e` replays data and compares strategy state bit-exactly with the offline reference;
   `fault` kills the SDK service or the server with `kill -9` during replay.
 - Directory = tier: `tests/unit/`, `tests/property/`, `tests/integration/`, `tests/e2e/`, `tests/fault/`.
-  Every test carries exactly one tier marker (strict markers: an unknown marker is an error).
+  Every test carries exactly one tier marker, added from its directory by `tests/conftest.py` (strict markers:
+  an unknown marker is an error).
 - Write the failing test first (the `test-engineer` subagent does this for approved tasks). Every change adds
   at least one new test; invariants get `hypothesis` property tests with a fixed seed profile in CI.
 - Integration and e2e tests use real services, never mocks of Restate. Pin any container image by digest.

@@ -30,8 +30,12 @@ def read_topic(
     start_offsets: dict[int, int] | None = None,
     max_records: int | None = None,
     timeout_s: float = 30.0,
+    follow: bool = False,
 ) -> Iterator[Record]:
-    """Yield the records present now (up to each partition's high watermark), then stop."""
+    """Yield the records present now (up to each partition's high watermark), then stop.
+
+    With ``follow`` it keeps waiting for new records (until ``max_records`` or interruption).
+    """
     consumer = Consumer(
         base_config(bootstrap, "ems-gen-reader")
         | {"group.id": f"ems-gen-reader-{uuid.uuid4().hex}", "enable.auto.commit": False}
@@ -49,7 +53,7 @@ def read_topic(
                 start = start_offsets.get(p, low)
             else:
                 start = OFFSET_BEGINNING if from_beginning else high
-            if (start if start >= 0 else low) < high:
+            if follow or (start if start >= 0 else low) < high:
                 assignment.append(TopicPartition(topic, p, start))
                 ends[p] = high
         if not assignment:
@@ -57,16 +61,18 @@ def read_topic(
         consumer.assign(assignment)
         done: set[int] = set()
         count = 0
-        while len(done) < len(ends):
-            msg = consumer.poll(timeout_s)
+        while follow or len(done) < len(ends):
+            msg = consumer.poll(timeout_s if not follow else 1.0)
             if msg is None:
+                if follow:
+                    continue
                 raise TimeoutError(f"no record from {topic} within {timeout_s}s")
             if msg.error():
                 raise RuntimeError(str(msg.error()))
             p = msg.partition()
             off = msg.offset()
             assert p is not None and off is not None
-            if off >= ends[p] - 1:
+            if off >= ends.get(p, 0) - 1:
                 done.add(p)
             raw_headers = msg.headers() or []
             key = msg.key()

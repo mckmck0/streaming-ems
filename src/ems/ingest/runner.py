@@ -215,6 +215,8 @@ async def run(
         end=end.isoformat() if end else None,
         sites=len(sites),
     )
+    stats: SinkStats | None = None
+    manifest: Path | None = None
     try:
         for emit_at, stream, build in emissions(model, cfg, start, end, run_id):
             if mode != "backfill":
@@ -231,30 +233,31 @@ async def run(
             if sum(counts.values()) % 1000 == 0:
                 await asyncio.sleep(0)
     finally:
+        # Also on Ctrl+C / SIGTERM: flush, then record what was produced (principle 14).
         stats = sink.close()
-    elapsed = time.monotonic() - wall0
-    run_dir = settings.data_dir / "runs" / (run_id or f"{mode}-{start:%Y%m%dT%H%M%SZ}")
-    manifest = write_manifest(
-        run_dir,
-        cfg=cfg,
-        settings=settings,
-        mode=mode,
-        start=start,
-        end=end,
-        run_id=run_id,
-        counts=counts,
-        stats=stats,
-        sites=len(sites),
-    )
-    total = sum(counts.values())
-    log.info(
-        "run_done",
-        events=total,
-        events_per_s=round(total / elapsed, 1) if elapsed > 0 else None,
-        elapsed_s=round(elapsed, 2),
-        manifest=str(manifest),
-        exit_code=stats.exit_code(),
-    )
+        elapsed = time.monotonic() - wall0
+        run_dir = settings.data_dir / "runs" / (run_id or f"{mode}-{start:%Y%m%dT%H%M%SZ}")
+        manifest = write_manifest(
+            run_dir,
+            cfg=cfg,
+            settings=settings,
+            mode=mode,
+            start=start,
+            end=end,
+            run_id=run_id,
+            counts=counts,
+            stats=stats,
+            sites=len(sites),
+        )
+        total = sum(counts.values())
+        log.info(
+            "run_done",
+            events=total,
+            events_per_s=round(total / elapsed, 1) if elapsed > 0 else None,
+            elapsed_s=round(elapsed, 2),
+            manifest=str(manifest),
+            exit_code=stats.exit_code(),
+        )
     return RunResult(counts=counts, stats=stats, manifest=manifest, elapsed_s=elapsed)
 
 

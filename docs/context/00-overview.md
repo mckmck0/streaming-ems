@@ -17,9 +17,10 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
 | Spec Kit v1.1.0 (`.specify/`, `.claude/skills/speckit-*`) | Built; constitution v1.0.0 generated from 07 |
-| Canonical docs | 00, 07, 10 written; the others are written with the spec that needs them (see README index) |
-| ADRs | Index and template in `docs/adr/README.md`; 0001–0009 are candidates from the brief, not yet written |
-| Data pipeline (Kafka, contracts, generators) | Planned: specs 001–004 below |
+| Canonical docs | 00, 05, 06, 07, 08, 09, 10, 12, 13 written; the others land with the spec that needs them |
+| ADRs | 0010–0015 accepted (spec 001); 0001–0009 are candidates from the brief, not yet written |
+| Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
+| Live data, scale and faults, more assets (specs 002–004) | Planned |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
@@ -28,9 +29,7 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 - Helm 4 (4.2.4, released 2026-08-13) replaces the brief's Helm 3.
 - The Python project is named `ems` (was `masters-thesis`).
 - 2026-10-20: data comes first. The data-generator work ("Plan 1") is delivered as specs 001–004 and specs are
-  written as we go, one piece at a time. Decisions taken for it (Kafka push for external data, market-keyed price
-  topic, two measurement topics, the generator never simulating EMS-managed batteries, Apache Kafka 4.3 as the
-  broker) become ADRs in spec 001.
+  written as we go, one piece at a time. Its decisions are ADRs 0010–0015.
 
 ### Repo map (current and planned)
 

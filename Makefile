@@ -86,9 +86,10 @@ topics:
 topics-describe:
 	uv run ems-gen topics describe --profile $(PROFILE)
 gen:
-	$(COMPOSE) --profile gen up -d ems-gen
+	$(COMPOSE) --profile gen up -d --build ems-gen
 gen-fast:
-	uv run ems-gen run --mode accelerated --speed 96
+	uv run ems-gen topics ensure --profile sim --apply-config
+	EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode accelerated --speed 96 --start $(START)
 gen-backfill:
 	uv run ems-gen topics ensure --profile sim --apply-config
 	EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode backfill --start $(START) --days $(DAYS)

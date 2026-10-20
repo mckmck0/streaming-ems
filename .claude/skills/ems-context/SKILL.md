@@ -26,6 +26,7 @@ Read only the docs the task needs, usually one to three, not the whole folder. E
 | Planning a change, Spec Kit setup and loop, checklists | `10-planning-guide.md` |
 | Experiments, metrics, statistics, spike results | `11-experiments.md` |
 | Battery model, units, time base, settlement, net-billing, actions, glossary | `12-domain-model.md` |
+| Data generators, site catalog, synthetic models, live sources, `ems-gen`, Kafka topics in use | `13-subsystem-ingest.md` |
 | Why a decision was made | `docs/adr/README.md` (index of ADRs and candidates) |
 
 ## Which source wins

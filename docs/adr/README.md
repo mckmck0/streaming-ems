@@ -16,8 +16,12 @@ a new ADR that supersedes the old one, and `docs/context/` is updated in the sam
 | 0007 | Licence boundary (Restate BSL) | Candidate (brief §2) |
 | 0008 | One repository with subproject folders | Candidate (brief §2) |
 | 0009 | Docker Compose inner loop, Helm on kind | Candidate (brief §2) |
-
-New decisions start at 0010.
+| 0010 | [Apache Kafka 4.3 KRaft broker](0010-kafka-4-kraft-broker.md) | Accepted |
+| 0011 | [External data enters through Kafka](0011-external-data-via-kafka.md) | Accepted |
+| 0012 | [Price topic keyed by market](0012-market-keyed-price-topic.md) | Accepted |
+| 0013 | [Two measurement topics](0013-two-measurement-topics.md) | Accepted |
+| 0014 | [No simulation of EMS-managed batteries](0014-no-simulation-of-ems-managed-batteries.md) | Accepted |
+| 0015 | [Wire contract v1 identity and run scope](0015-wire-contract-v1-identity.md) | Accepted |
 
 ## Template
 

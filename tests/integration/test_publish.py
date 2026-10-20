@@ -40,3 +40,24 @@ def test_ac_001_13_16_publish_validate_and_dlq(
     dlq = list(read_topic(bootstrap, plan.name_for("ems.gen.dlq.v1")))
     assert len(dlq) == 1 and dlq[0].key == "PL-LOC-000001"
     assert "t must be" in dlq[0].headers["error"]
+
+
+def test_fr_012_tail_follow_sees_new_records(
+    bootstrap: str, run_tag: str, topics_factory: Any
+) -> None:
+    import threading
+    import time
+
+    prefix = f"{run_tag}."
+    plan = topics_factory("sim", prefix)
+    name = plan.name_for("ems.price.v1")
+
+    def later() -> None:
+        time.sleep(2)
+        sink = KafkaSink(bootstrap, topic_prefix=prefix)
+        sink.publish(golden_examples()["price.json"])
+        sink.close()
+
+    threading.Thread(target=later, daemon=True).start()
+    got = list(read_topic(bootstrap, name, from_beginning=False, follow=True, max_records=1))
+    assert len(got) == 1 and got[0].key == "PL:RCE"
