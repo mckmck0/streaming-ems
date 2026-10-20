@@ -20,4 +20,4 @@
 - [x] T009 [US4] Compose `cluster` profile; integration test (AC-004-09)
 
 ## Phase 6: Polish
-- [ ] T010 Docs (13, 05, 09, 00), `make ci`, integration tests
+- [x] T010 Docs (13, 05, 09, 00), `make ci`, integration tests

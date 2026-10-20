@@ -22,7 +22,7 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
 | Scale, background batteries, faults, stats, benchmark (spec 003) | Built |
-| Other assets and site types, 3-broker profile (spec 004) | Planned |
+| Other assets and site types, 3-broker profile (spec 004) | Built |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
@@ -39,9 +39,9 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 CLAUDE.md, .claude/          harness (rules, skills, agents, hooks)
 .specify/, specs/NNN-*/      Spec Kit workspace and feature specs
 docs/context/                canonical docs (this folder); docs/adr/ decisions; docs/bootstrap/ frozen brief
-src/ems/                     contracts/ (wire models, planned), ingest/ (generators, planned), domain/, actors/,
+src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery), actors/,
                              strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
-config/, mappings/, schemas/ generator config, live-source mappings, exported JSON Schemas (planned, spec 001/002)
+config/, mappings/, schemas/ generator config, live-source mappings, exported JSON Schemas (specs 001–004)
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka now, Restate later), Dockerfiles
 helm/ems/                    umbrella chart (later)

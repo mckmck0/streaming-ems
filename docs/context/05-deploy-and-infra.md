@@ -50,13 +50,14 @@ Kafka settings and why (sources: apache/kafka 4.3.1 `docker/` sources and exampl
 ### Topic profiles (`config/topics.yaml`)
 
 `live` (CreateTime, `message.timestamp.after.max.ms` 1 h, `before.max.ms` = retention), `sim` (retention −1,
-any timestamp), `scale` (48/3 partitions, `retention.bytes` cap), `cluster` (RF 3, min ISR 2). Reason: Kafka 4.0
+any timestamp), `scale` (48/3 partitions, `retention.bytes` cap), `cluster` (RF 3, min ISR 2; compose profile `cluster`: one
+KRaft controller and three brokers, `make cluster-up`). Reason: Kafka 4.0
 changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-timestamped data within minutes;
 `ems-gen run` preflight refuses incompatible combinations.
 
 ### Ports reserved on the host (all bound to 127.0.0.1)
 
-9092 Kafka, 8088 Kafka UI; reserved for later: 8080 Restate ingress, 9070 admin, 5122 node, 9080/9081 SDK.
+9092 Kafka, 8088 Kafka UI, 19092–19094 the `cluster` profile's brokers (spec 004); reserved for later: 8080 Restate ingress, 9070 admin, 5122 node, 9080/9081 SDK.
 
 ### Versions verified 2026-10-20
 
@@ -73,7 +74,6 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 ## What to build
 
 - Dev-environment spec: Restate in the same compose project, `make register`, e2e/fault tiers and coverage.
-- Spec 004: the 3-broker `cluster` compose profile.
 - Helm deployment spec (later): umbrella chart on kind.
 
 ## Prerequisites

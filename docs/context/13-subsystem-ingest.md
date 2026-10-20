@@ -5,7 +5,7 @@
 `ems-gen` (`src/ems/ingest/`) streams contract events (`08-contracts.md`) for Polish sites to Kafka. External
 data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
 live sources, record/replay and hybrid mode (spec 002), scale, background batteries and faults (spec
-003); spec 004 adds more assets.
+003), other assets, site types and a 3-broker profile (spec 004).
 
 ```mermaid
 flowchart LR
@@ -127,16 +127,55 @@ test fixtures.
   | 10,000 | 3.0 s | 1.74 M in 199 s (8.7k/s) | 6.2 GB | — |
 
   Per-event object building and validation dominate, not the models; forecasts are ~70 % of the bytes.
+  Rerun 2026-10-20 after spec 004 (households with EVs; `benchmark-20261020T204019Z`): 1,000 sites 174,562
+  events in 15.0 s, 627 MB; 10,000 sites 1.74 M in 210 s, 6.3 GB; produce 171,202 in 33 s (5.2k/s), 0 failures.
+
+### Other assets and site types (spec 004)
+
+- **Site types** (`catalog/build.py`): `scale.site_mix` gives shares of `household`, `commercial`,
+  `industrial`, `wind_farm`, `solar_farm`, `biogas_plant`, `hydro_plant`; empty means households only. The
+  type comes from its own hash of (catalog seed, location), and household EVs (20 %, overnight 3.7–11 kW) from
+  another, so households keep all earlier draws. Plant sites are background sites (never EMS-managed); their
+  region follows the voivodeship wind/PV weights (hydro: the southern voivodeships). Commercial sites get C11
+  or C21 (the 40 kW / 63 A rule), PV and daytime 22 kW chargers; industrial sites a CHP (C21).
+- **Wind** (`synthetic/wind.py`): vendored curves `config/turbines/power_curves.csv` (5 types from
+  windpowerlib's data, ODbL, NOTICE), `np.interp` with zero below cut-in and above cut-out, IEC density
+  correction `v·(ρ/1.225)^(1/3)` with ρ from pvlib `alt2pres` and the hub temperature, power-law shear from
+  10 m (`wind.shear_alpha.wind_farm` 0.14). Catalog hub heights are Polish-typical (105–137 m), not the CSV's.
+  A Pomeranian farm over 2025 gives capacity factors 19–30 % by type, mean ≈ 25 % (2025 PL onshore ≈ 24–25 %).
+- **CHP**: heat-led (`heat_kw_per_k · max(0, 15 − T) + heat_base_kw`, 85 % on weekends), electric = heat ×
+  power-to-heat, off below `min_load`, capped at rating; emits `heat_energy` beside `active_energy`.
+- **Biogas**: ≈ 93 % level with slow AR noise, capacity factor 80–95 % after outages.
+- **Biomass**: follows the price (min load at ≤ 100 PLN/MWh, rated at ≥ 700), ramp-limited per interval; the
+  level carries across chunks (a function of each interval's price, so chunking never changes a value).
+- **Hydro** (run-of-river): seasonal flow (spring peak mid-April, low late August) × lognormal AR noise.
+- **Outages** (`synthetic/outages.py`): whole days, keyed per (seed, site, kind, day): forced 2 % of days for
+  wind, 0.5–1 % for plants, plus one planned block a year (14 days thermal, 7 days hydro).
+- **EV** (`synthetic/ev.py`): one session per site and local day (overnight 18:30 → 07:00, daytime 08:30 →
+  16:30, normal jitter), charging at the charger limit from arrival until the lognormal need is met or the car
+  leaves.
+- Production events carry `wind`, `chp` (energy and heat), `biogas`, `biomass`, `hydro`; consumption events
+  `ev_charger`. Grid flows of unmanaged sites include every asset. A mixed 1,000-site day builds in ≈ 13 s.
+
+### 3-broker profile (spec 004)
+
+`docker compose --profile cluster` (`make cluster-up` / `cluster-down`): one KRaft controller (`kafka-ctl`)
+and brokers `kafka-1..3` on 127.0.0.1:19092–19094, no volumes; topics via `topics ensure --profile cluster`
+(RF 3, min ISR 2). Integration test: one broker stopped → writes succeed; two stopped → `NOT_ENOUGH_REPLICAS`.
+The controller is separate (the plan said combined nodes) because with combined nodes two stopped nodes also
+lose the quorum, so the ISR never shrinks and writes only time out.
 
 ### How to add an asset model
 
 Add parameters to `catalog/sites.py` (new `kind`), a vectorised function in `synthetic/` returning
 `[n_loc, n_steps]` kWh from the truth arrays, a builder line in `generator._meter_builders` (production or
-consumption by direction), and property tests for bounds and balance.
+consumption by direction; generation kinds go in `PLANT_KINDS` so grid flows include them), and property
+tests for bounds and balance.
 
 ## What to build
 
-- Spec 004: wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker profile.
+- Ingestion spec (Plan 2): consume these topics into Restate.
+- Later, if needed: weather-cell keyed forecasts (G6), DSO standard profiles for C-tariff shapes.
 
 ## Prerequisites
 
