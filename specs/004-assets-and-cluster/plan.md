@@ -41,3 +41,10 @@ profile up, stop 1 node → write OK, stop 2 → NOT_ENOUGH_REPLICAS.
 
 ## Complexity Tracking
 None.
+
+## Implementation notes (2026-10-20)
+- The `cluster` profile uses one dedicated KRaft controller plus three brokers instead of three combined
+  nodes: with combined nodes, two stopped nodes also lose the quorum, the ISR never shrinks and writes time out
+  rather than failing with `NOT_ENOUGH_REPLICAS` (AC-004-09). Recorded in 13 and 09 (K8).
+- Biomass follows the price level within a fixed band instead of the day's price rank, so a chunk border
+  inside a local day never changes a value.

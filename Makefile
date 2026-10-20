@@ -8,7 +8,7 @@ SHELL := /bin/bash
 
 .PHONY: help install format lint type-check test test-unit test-integration ci clean \
         up down reset topics topics-describe gen gen-fast gen-backfill tail validate schemas \
-        gen-live record replay stats bench
+        gen-live record replay stats bench cluster-up cluster-down
 
 help:
 	@echo ""
@@ -30,6 +30,7 @@ help:
 	@echo "  gen-live    hybrid realtime (live PSE + Open-Meteo for live.locations, synthetic rest)"
 	@echo "  record NAME=...  replay NAME=...   record live sources / publish a recording"
 	@echo "  stats       gaps, duplicates, late events per topic; bench  generation + producer benchmark"
+	@echo "  cluster-up / cluster-down   3-broker profile (127.0.0.1:19092-19094, RF 3, min ISR 2)"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
 
@@ -120,6 +121,15 @@ replay:
 # ── Spec 003: scale and faults ──
 bench:
 	uv run python jobs/benchmark.py
+
+# ── Spec 004: other assets, site types, 3-broker profile ──
+CLUSTER := kafka-ctl kafka-1 kafka-2 kafka-3
+cluster-up:
+	$(COMPOSE) --profile cluster up -d --wait $(CLUSTER)
+	EMS_KAFKA_BOOTSTRAP=127.0.0.1:19092,127.0.0.1:19093,127.0.0.1:19094 \
+	  uv run ems-gen topics ensure --profile cluster --apply-config
+cluster-down:
+	$(COMPOSE) --profile cluster rm -f -s $(CLUSTER)
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)

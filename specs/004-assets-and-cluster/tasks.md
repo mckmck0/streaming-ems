@@ -17,7 +17,7 @@
 - [x] T008 [US3] Implement `synthetic/ev.py`, site-type generators, generator measurements
 
 ## Phase 5: US4 cluster (P3)
-- [ ] T009 [US4] Compose `cluster` profile; integration test (AC-004-09)
+- [x] T009 [US4] Compose `cluster` profile; integration test (AC-004-09)
 
 ## Phase 6: Polish
 - [ ] T010 Docs (13, 05, 09, 00), `make ci`, integration tests
