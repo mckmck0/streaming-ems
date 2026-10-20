@@ -22,7 +22,7 @@ before 2026-10-02.
 | [08-contracts.md](08-contracts.md) | Message envelope and schemas, Kafka topics, result schemas, versioning rules |
 | [09-risks-and-tech-debt.md](09-risks-and-tech-debt.md) | Known issues and risks with fix hints |
 | [10-planning-guide.md](10-planning-guide.md) | How to plan a change: `ems-plan-change`, Spec Kit setup and loop, checklists |
-| [11-experiments.md](11-experiments.md) *(planned)* | Experiment protocol, metrics, statistics, reference-spike results |
+| [11-experiments.md](11-experiments.md) | Experiment protocol, metrics, statistics, reference-spike results |
 | [12-domain-model.md](12-domain-model.md) | Time base, units, battery model, settlement and net-billing, actions, glossary |
 | [13-subsystem-ingest.md](13-subsystem-ingest.md) | Data generators: site catalog, synthetic models, schedule, `ems-gen` |
 

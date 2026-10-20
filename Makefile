@@ -8,7 +8,7 @@ SHELL := /bin/bash
 
 .PHONY: help install format lint type-check test test-unit test-integration ci clean \
         up down reset topics topics-describe gen gen-fast gen-backfill tail validate schemas \
-        gen-live record replay
+        gen-live record replay stats bench
 
 help:
 	@echo ""
@@ -29,6 +29,7 @@ help:
 	@echo "  tail TOPIC=...  validate   inspect and validate topics; schemas re-exports JSON Schemas"
 	@echo "  gen-live    hybrid realtime (live PSE + Open-Meteo for live.locations, synthetic rest)"
 	@echo "  record NAME=...  replay NAME=...   record live sources / publish a recording"
+	@echo "  stats       gaps, duplicates, late events per topic; bench  generation + producer benchmark"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
 
@@ -100,6 +101,8 @@ tail:
 	uv run ems-gen tail --topic $(TOPIC) --from-beginning --max 20
 validate:
 	uv run ems-gen validate --all --from-beginning
+stats:
+	uv run ems-gen stats
 schemas:
 	uv run ems-gen schemas export
 
@@ -113,6 +116,10 @@ record:
 replay:
 	uv run ems-gen topics ensure --profile sim --apply-config
 	EMS_TOPICS_PROFILE=sim uv run ems-gen replay --name $(NAME)
+
+# ── Spec 003: scale and faults ──
+bench:
+	uv run python jobs/benchmark.py
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)

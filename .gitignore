@@ -30,3 +30,6 @@ CLAUDE.local.md
 
 # Generated data, recordings and run manifests
 /data/
+
+# Raw experiment and benchmark results (reported numbers are copied into docs with their path)
+/experiments/results/

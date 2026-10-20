@@ -17,11 +17,12 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
 | Spec Kit v1.1.0 (`.specify/`, `.claude/skills/speckit-*`) | Built; constitution v1.0.0 generated from 07 |
-| Canonical docs | 00, 05, 06, 07, 08, 09, 10, 12, 13 written; the others land with the spec that needs them |
+| Canonical docs | 00, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 01–04 land with the actor and strategy specs |
 | ADRs | 0010–0015 accepted (spec 001); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
-| Scale and faults, more assets (specs 003–004) | Planned |
+| Scale, background batteries, faults, stats, benchmark (spec 003) | Built |
+| Other assets and site types, 3-broker profile (spec 004) | Planned |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 

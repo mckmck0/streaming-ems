@@ -5,6 +5,7 @@ Contract: ``specs/001-data-pipeline-core/contracts/cli.md``.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -253,6 +254,10 @@ def run(
         str | None, typer.Option(help="Run scope: prefixes keys, enters event ids")
     ] = None,
     config: Annotated[Path, typer.Option(help="Generator config.")] = Path("config/generator.yaml"),
+    faults: Annotated[bool, typer.Option(help="Enable the configured fault injection.")] = False,
+    locations: Annotated[
+        int | None, typer.Option(help="Override scale.synthetic_locations.")
+    ] = None,
     bootstrap: BootstrapOpt = None,
 ) -> None:
     """Generate and publish. Exit 0 all delivered, 1 preflight refused, 3 delivery failures."""
@@ -265,6 +270,10 @@ def run(
 
     s = _settings(bootstrap=bootstrap)
     cfg = load_generator_config(config)
+    if faults:
+        cfg = dataclasses.replace(cfg, faults={**cfg.faults, "enabled": True})
+    if locations is not None:
+        cfg = dataclasses.replace(cfg, synthetic_locations=locations)
     chosen = mode or cfg.mode
     if chosen not in ("backfill", "accelerated", "realtime"):
         typer.echo(f"unknown mode {chosen}", err=True)
@@ -358,6 +367,30 @@ def replay_cmd(
     result = asyncio.run(replay(s, name, root=root, speed=speed))
     typer.echo(f"replayed {dict(result.counts)}")
     raise typer.Exit(result.exit_code)
+
+
+@app.command("stats")
+def stats_cmd(
+    topic: Annotated[str | None, typer.Option(help="Topic name (without prefix).")] = None,
+    profile: ProfileOpt = None,
+    bootstrap: BootstrapOpt = None,
+) -> None:
+    """Counts per key and partition, event-time range, gaps, duplicate ids and late events."""
+    _need_ingest()
+    from ems.contracts.topics import DLQ_TOPIC, load_plan
+    from ems.ingest.tools.reader import read_topic
+    from ems.ingest.tools.stats import topic_stats
+
+    s = _settings(profile, bootstrap)
+    plan = load_plan(s.config_dir, s.topics_profile, s.topic_prefix)
+    names = [s.topic_prefix + topic] if topic else [t.name for t in plan.topics]
+    for name in names:
+        if name.endswith(DLQ_TOPIC):
+            continue
+        stats = topic_stats(name, read_topic(s.kafka_bootstrap, name))
+        meter = name.endswith(("production.v1", "consumption.v1"))
+        for line in stats.lines(meter):
+            typer.echo(line)
 
 
 def main() -> None:  # pragma: no cover

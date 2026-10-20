@@ -35,6 +35,12 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - Experiments use recordings: `ems-gen replay` re-emits recorded events with their ids (`replay:<source>`), so a
   live session can be replayed into the sim profile any number of times.
 
+### Faults (spec 003)
+
+With faults on, a duplicate is the identical record published twice, a late record keeps its event time and id
+but arrives up to `late_max` after newer intervals of its key, and a missing record never arrives. Downstream
+consumers must deduplicate by `event_id` and tolerate out-of-order intervals per key.
+
 ### EMS (later specs)
 
 Sim mode advances on event timestamps with virtual timers in entity state; live mode uses durable delayed

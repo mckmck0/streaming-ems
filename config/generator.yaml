@@ -13,9 +13,22 @@ streams:
   price: {mode: synthetic, emit_initial_day: true}
 meters:
   availability_delay_s: 0   # meter events are emitted at interval end plus this delay
+  emit_registers: false     # add a cumulative grid-import register to unmanaged sites (register faults)
 scale:
   synthetic_locations: 1    # PL-LOC-000001 .. n; config/sites.yaml overrides by id
   catalog_seed: 7
+  site_chunk: 2000          # sites per generation slice (memory bound)
+  site_controlled_bess_share: 0.0   # share of generated batteries controlled by the site (background)
+faults:                     # deterministic per seed; enable with `ems-gen run --faults`
+  enabled: false
+  missing_rate: 0.002
+  duplicate_rate: 0.001
+  late_rate: 0.005
+  late_max: PT2H
+  stuck_value_rate: 0.0005
+  register_reset_rate: 0.0001
+  estimated_rate: 0.001
+  substituted_rate: 0.0005
 chunk_days: 1               # generation chunk for open-ended runs
 live:
   locations: ["PL-LOC-000001"]  # sites that use live sources when a stream's mode is live (hybrid)

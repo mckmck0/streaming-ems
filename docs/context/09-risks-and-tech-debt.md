@@ -16,7 +16,9 @@
 | G3 | Faker locale data changes between versions | Mitigated: exact pin 40.40.0, golden catalog test |
 | G4 | Voivodeship bounding boxes are approximate | Accepted for sampling; VERIFY with GUGiK PRG if needed |
 | G5 | windpowerlib is unmaintained (last release 2024-02-20; 1-D density correction) | Spec 004: vendor curves, numpy power curve |
-| G6 | Forecast volume at 100k sites (tens of GB/day, 7-day retention) | Spec 003: benchmark; weather-cell key option |
+| G6 | Forecast volume at scale: 10k sites ≈ 6.2 GB/day of JSON (benchmark 2026-10-20), ~70 % forecasts | Accepted; a weather-cell key (shared forecasts) can be added additively if Plan 2 needs it |
+| S1 | Event building and strict validation (~8–12k events/s) bound throughput, not the models | Accepted; validation can be sampled for very large runs |
+| S2 | Battery and register state continue across chunks, but chunk borders still carry the AR burn-in residual (G1) | Accepted |
 | D1 | Brief §4 net-billing wording is outdated (RCE default from 2024-07-01; quarter-hourly since 2025-10-01) | Recorded in 12; settlement spec must VERIFY art. 4b |
 | L1 | Open-Meteo ICON-D2 RUC (hourly runs) and the 2026-11-30 native-grid cutover can change run cadence and domain edges | Accepted: `issued_at` comes from meta.json; re-probe coverage and re-record fixtures after the cutover |
 | L2 | Free Open-Meteo API is non-commercial only | Accepted (public research); set `EMS_OPEN_METEO_API_KEY` for any commercial context |

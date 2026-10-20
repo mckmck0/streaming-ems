@@ -32,10 +32,12 @@
   from 2024-07-01 (RCEm remains for earlier cohorts unless they opt in) and it is quarter-hourly, not hourly, since
   2025-10-01. VERIFY against art. 4b of the consolidated RES act before implementing settlement.
 
-### Battery (brief §4 spike defaults; owned by the domain-core spec)
+### Battery (brief §4 spike defaults; `src/ems/domain/battery.py`, spec 003)
 
 10 kWh, 5 kW, one-way efficiency 0.95, SoC 1.0–9.5 kWh, initial 5.0 kWh; charge `soc += p·η·Δt`, discharge
-`soc += p/η·Δt`, clamped by power and SoC bounds.
+`soc += p/η·Δt`, clamped by power and SoC bounds. Implemented as the pure, vectorised
+`ems.domain.battery.step` (property-tested); the generator uses it only for site-controlled batteries (ADR 0014),
+and the domain-core spec reuses it for the Battery actor.
 
 ### Tariff groups
 
@@ -45,7 +47,7 @@ C11 for low voltage ≤ 40 kW **and** fuse ≤ 63 A, otherwise C21. Metering poi
 
 ## What to build
 
-- Domain-core spec: battery model, settlement with RCE/RCEm options, action set, `Policy`, offline reference.
+- Domain-core spec: settlement with RCE/RCEm options, action set, `Policy`, offline reference (battery model exists).
 
 ## Prerequisites
 

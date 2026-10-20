@@ -21,6 +21,7 @@ import structlog
 
 from ems.contracts.time import floor_quarter
 from ems.contracts.topics import STREAM_TOPICS, load_plan
+from ems.ingest.faults import FaultConfig, apply_faults
 from ems.ingest.generator import (
     GeneratorConfig,
     SyntheticModel,
@@ -188,7 +189,11 @@ async def paced_publish(
     max_events: int | None = None,
 ) -> None:
     """Publish the synthetic emissions; in non-backfill modes, pace them against the wall clock."""
-    for emit_at, stream, build in emissions(model, cfg, start, end, run_id):
+    source = emissions(model, cfg, start, end, run_id)
+    faults = FaultConfig.from_dict(cfg.faults)
+    if faults.enabled:
+        source = apply_faults(source, faults, cfg.seed)
+    for emit_at, stream, build in source:
         if mode != "backfill":
             due = wall0 + (emit_at - start).total_seconds() / speed
             delay = due - time.monotonic()

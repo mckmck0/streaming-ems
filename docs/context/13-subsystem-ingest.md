@@ -4,7 +4,8 @@
 
 `ems-gen` (`src/ems/ingest/`) streams contract events (`08-contracts.md`) for Polish sites to Kafka. External
 data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
-live sources, record/replay and hybrid mode (spec 002); specs 003–004 add scale, faults and more assets.
+live sources, record/replay and hybrid mode (spec 002), scale, background batteries and faults (spec
+003); spec 004 adds more assets.
 
 ```mermaid
 flowchart LR
@@ -101,6 +102,32 @@ Attribution: Open-Meteo data is CC BY 4.0 (NOTICE next to fixtures; "Weather dat
 day-ahead prices are not open data, so only hand-written fixtures are committed; PSE data is kept only as a few
 test fixtures.
 
+### Scale, background batteries, faults, stats (spec 003)
+
+- **Fleets**: `scale.synthetic_locations` sites, processed in slices of `scale.site_chunk` (default 2,000);
+  slicing never changes a value (row-wise maths). Batteries and cumulative registers carry their state
+  across consecutive chunks of a run.
+- **Background batteries**: `scale.site_controlled_bess_share` of generated batteries are `control: site`
+  (a separate hash decides, so the share never changes other catalog draws). Their rule policy (PV surplus,
+  cheapest 4 night slots, evening 17–21 local and top-10 % prices) drives the pure domain battery
+  (`src/ems/domain/battery.py`); events carry `bess` charge (consumption), discharge (production), an instant
+  SoC reading (quantity `soc`, direction `charge`) and grid flows that close the balance.
+- **Faults** (`ingest/faults.py`, `faults:` in `generator.yaml`, `ems-gen run --faults`): missing, duplicate
+  (identical event twice), late (up to `late_max`, same event time and id), stuck values, register resets
+  (with `meters.emit_registers`), estimated/substituted flags; each decision is a keyed uniform of (seed,
+  event id, kind), so runs are reproducible.
+- **Stats** (`ems-gen stats`, `make stats`): per topic and key: count, partitions, event-time range, gaps
+  (interior missing quarter-hours), duplicate ids, late arrivals (after a newer interval of the same key).
+- **Benchmark** (`make bench`, `jobs/benchmark.py`; results in `experiments/results/benchmark-*/results.json`).
+  2026-10-20 on the author's Mac (arm64, 10 CPUs), one simulated day:
+
+  | Sites | Arrays | Events built + serialised | Payload | Kafka produce (1,000 sites) |
+  |---|---|---|---|---|
+  | 1,000 | 0.8 s | 174,562 in 14 s (12k/s) | 623 MB | 171,202 events in 35 s (4.9k/s), 0 failures |
+  | 10,000 | 3.0 s | 1.74 M in 199 s (8.7k/s) | 6.2 GB | — |
+
+  Per-event object building and validation dominate, not the models; forecasts are ~70 % of the bytes.
+
 ### How to add an asset model
 
 Add parameters to `catalog/sites.py` (new `kind`), a vectorised function in `synthetic/` returning
@@ -109,7 +136,6 @@ consumption by direction), and property tests for bounds and balance.
 
 ## What to build
 
-- Spec 003: many locations, unmanaged sites with BESS, fault injection, stats, benchmark.
 - Spec 004: wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker profile.
 
 ## Prerequisites
