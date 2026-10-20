@@ -17,3 +17,8 @@ scale:
   synthetic_locations: 1    # PL-LOC-000001 .. n; config/sites.yaml overrides by id
   catalog_seed: 7
 chunk_days: 1               # generation chunk for open-ended runs
+live:
+  locations: ["PL-LOC-000001"]  # sites that use live sources when a stream's mode is live (hybrid)
+  open_meteo: {meta_poll_s: 300}
+  pse: {reports: [rce-pln, csdac-pln]}
+  entsoe: {enabled: false}      # needs EMS_ENTSOE_TOKEN

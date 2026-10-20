@@ -74,6 +74,7 @@ by the spec that enables them. Enable a block with its spec, never ad hoc.
 | `make test-unit` / `make test-integration` / `make ci` | unit+property / against `make up` / lint + type-check + test-unit |
 | `make up` / `make down` / `make topics` | Kafka stack (`infra/docker-compose.yml`) / stop / ensure topics (`PROFILE=`) |
 | `make gen-backfill DAYS=2` / `make validate` / `make tail TOPIC=` | backfill to Kafka (sim profile) / validate topics / inspect |
+| `make gen-live` / `make record NAME=` / `make replay NAME=` | hybrid live run / record live sources / replay a recording |
 | `make clean` | Remove caches and build artefacts |
 
 Dev tools come from the `dev` group in `pyproject.toml` (ruff and ty pinned exactly; the ruff pin must equal

@@ -1,0 +1,24 @@
+# Hybrid realtime config (make gen-live): live prices and live weather for live.locations.
+seed: 4242
+clock:
+  mode: realtime
+  speed: 96.0               # accelerated: simulated seconds per wall second
+  start: "2026-10-20T00:00:00Z"
+  end: null                 # null: run until stopped (realtime/accelerated) or --days
+streams:
+  weather_forecast: {mode: live}       # live for live.locations, synthetic for the rest
+  weather_actual: {mode: off}
+  production: {mode: synthetic}
+  consumption: {mode: synthetic}
+  price: {mode: live}
+meters:
+  availability_delay_s: 0   # meter events are emitted at interval end plus this delay
+scale:
+  synthetic_locations: 3    # PL-LOC-000001 is live; 000002-000003 stay synthetic
+  catalog_seed: 7
+chunk_days: 1               # generation chunk for open-ended runs
+live:
+  locations: ["PL-LOC-000001"]  # sites that use live sources when a stream's mode is live (hybrid)
+  open_meteo: {meta_poll_s: 300}
+  pse: {reports: [rce-pln, csdac-pln]}
+  entsoe: {enabled: false}      # needs EMS_ENTSOE_TOKEN

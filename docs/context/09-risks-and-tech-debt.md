@@ -18,6 +18,11 @@
 | G5 | windpowerlib is unmaintained (last release 2024-02-20; 1-D density correction) | Spec 004: vendor curves, numpy power curve |
 | G6 | Forecast volume at 100k sites (tens of GB/day, 7-day retention) | Spec 003: benchmark; weather-cell key option |
 | D1 | Brief §4 net-billing wording is outdated (RCE default from 2024-07-01; quarter-hourly since 2025-10-01) | Recorded in 12; settlement spec must VERIFY art. 4b |
+| L1 | Open-Meteo ICON-D2 RUC (hourly runs) and the 2026-11-30 native-grid cutover can change run cadence and domain edges | Accepted: `issued_at` comes from meta.json; re-probe coverage and re-record fixtures after the cutover |
+| L2 | Free Open-Meteo API is non-commercial only | Accepted (public research); set `EMS_OPEN_METEO_API_KEY` for any commercial context |
+| L3 | PSE API reuse terms are unpublished; same-day re-publications were observed | Accepted: only a few fixtures committed; revisions become new events |
+| L4 | ENTSO-E A44 has no publication time; `issued_at` = first sight of a content version (stored in recordings) | Accepted: replay keeps ids; live restarts may re-emit once |
+| L5 | Hybrid live-site meters use forecast steps as "truth" weather (no observations) | Accepted: documented; observation sources are a later option |
 | H1 | `Bash(make *)` is allow-listed, so `make reset` (`down -v`) bypasses the `ask` rule | Mitigated: target asks for confirmation; user may add `Bash(make reset*)` to `ask` |
 
 Brief §13 risks (post-restart timer delay, Restate licence and maturity, `ty` pre-1.0, single-household load

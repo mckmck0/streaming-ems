@@ -259,7 +259,7 @@ def run(
     _need_ingest()
     import asyncio
 
-    from ems.ingest.generator import load_generator_config
+    from ems.ingest.generator import load_generator_config, load_sites
     from ems.ingest.runner import PreflightError, parse_window
     from ems.ingest.runner import run as do_run
 
@@ -281,9 +281,19 @@ def run(
             w_start = cfg.start
         if w_end is None and days is None and end is None:
             w_end = cfg.end
-        result = asyncio.run(
-            do_run(s, cfg, mode=chosen, start=w_start, end=w_end, run_id=run_id, speed=speed)
-        )
+        from ems.ingest.runner import run_hybrid
+        from ems.ingest.sources.router import route
+
+        routing = route(cfg, load_sites(s.config_dir, cfg))
+        if routing.needs_live:
+            if chosen != "realtime":
+                typer.echo("live sources need --mode realtime (use replay for past data)", err=True)
+                raise typer.Exit(2)
+            result = asyncio.run(run_hybrid(s, cfg, run_id=run_id))
+        else:
+            result = asyncio.run(
+                do_run(s, cfg, mode=chosen, start=w_start, end=w_end, run_id=run_id, speed=speed)
+            )
     except PreflightError as exc:
         typer.echo(f"preflight refused: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -294,6 +304,59 @@ def run(
         typer.echo("stopped; buffered records flushed and manifest written")
         raise typer.Exit(0) from None
     typer.echo(f"events {dict(result.counts)}; manifest {result.manifest}")
+    raise typer.Exit(result.exit_code)
+
+
+@app.command("record")
+def record_cmd(
+    name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
+    once: Annotated[bool, typer.Option(help="Poll every live source once, then stop.")] = True,
+    duration: Annotated[
+        float | None, typer.Option(help="Seconds to record when not --once.")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Target folder (default data/recordings/NAME).")
+    ] = None,
+    config: Annotated[Path, typer.Option(help="Generator config.")] = Path("config/generator.yaml"),
+) -> None:
+    """Record live PSE prices and Open-Meteo forecasts (raw + events + manifest); no
+    Kafka needed.
+    """
+    _need_ingest()
+    import asyncio
+
+    from ems.ingest.generator import load_generator_config
+    from ems.ingest.runner import record
+
+    s = load_settings()
+    root = asyncio.run(
+        record(
+            s, load_generator_config(config), name=name, out_dir=out, once=once, duration_s=duration
+        )
+    )
+    typer.echo(f"recorded into {root}")
+
+
+@app.command("replay")
+def replay_cmd(
+    name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
+    speed: Annotated[
+        float | None, typer.Option(help="Pace by recorded ingest times / speed.")
+    ] = None,
+    root: Annotated[
+        Path | None, typer.Option(help="Recording folder (default data/recordings/NAME).")
+    ] = None,
+    bootstrap: BootstrapOpt = None,
+) -> None:
+    """Publish a recording; events keep their ids and are marked replay:<source>."""
+    _need_ingest()
+    import asyncio
+
+    from ems.ingest.runner import replay
+
+    s = _settings(bootstrap=bootstrap)
+    result = asyncio.run(replay(s, name, root=root, speed=speed))
+    typer.echo(f"replayed {dict(result.counts)}")
     raise typer.Exit(result.exit_code)
 
 

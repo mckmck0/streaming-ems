@@ -20,7 +20,8 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Canonical docs | 00, 05, 06, 07, 08, 09, 10, 12, 13 written; the others land with the spec that needs them |
 | ADRs | 0010–0015 accepted (spec 001); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
-| Live data, scale and faults, more assets (specs 002–004) | Planned |
+| Live data, record and replay, hybrid mode (spec 002) | Built |
+| Scale and faults, more assets (specs 003–004) | Planned |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 

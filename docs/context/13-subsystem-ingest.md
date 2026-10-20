@@ -3,8 +3,8 @@
 ## Current consensus
 
 `ems-gen` (`src/ems/ingest/`) streams contract events (`08-contracts.md`) for Polish sites to Kafka. External
-data reaches the EMS only through these topics (ADR 0011). Built in spec 001: synthetic data for EMS-managed
-households; specs 002–004 add live sources, scale, faults and more assets.
+data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
+live sources, record/replay and hybrid mode (spec 002); specs 003–004 add scale, faults and more assets.
 
 ```mermaid
 flowchart LR
@@ -68,6 +68,39 @@ now, wall-clock pacing). Wall time is used only for pacing and `ingested_at`.
 `ems-gen` is the only writer of the external inputs: weather forecasts, metered production/consumption of
 uncontrolled assets, and prices. These rows move into `01-architecture.md` when the actor spec writes it.
 
+### Live sources, routing, record and replay (spec 002)
+
+- **Mapping engine** (`ingest/mapping/engine.py`, `mappings/*.yaml`, schema `mappings/_schema/`): raw payload →
+  canonical rows (rows or column layouts, dotted paths or JSON pointers whose segments may contain dots,
+  time zones and labels, units, transforms, sign split, null policy, quality map). Adapters build events from rows.
+- **PSE** (`live/pse.py`; `pse.rce.v2`, `pse.csdac.v2`): one event per report and business day once every
+  local-day slot is there; `issued_at` = PSE publication time (revisions → new events); `nextLink` paging;
+  polls D+1 13:00–18:00 local every 15 min, then hourly, and re-polls D for revisions.
+- **Open-Meteo** (`live/openmeteo.py`; `openmeteo.forecast.v1`): explicit model per site (ICON-D2 inside
+  43.18–58.08 N / 3.94 W–20.34 E, DMI HARMONIE elsewhere), run time from `/data/<model>/static/meta.json`
+  (used ≥ 10 min after availability), run-anchored 192-step window, truncated before the first step with a
+  missing value; free API by default, customer API with the key in an `X-Api-Key` header.
+- **ENTSO-E A44** (`live/entsoe.py`; off until `EMS_ENTSOE_TOKEN` and `live.entsoe.enabled`): hardened lxml
+  parsing by local name, contract type A01, A03 forward-fill to the period end, native resolution (PT60M before
+  2025-10-01), identical duplicate series collapse, conflicting ones are logged and not emitted, token in the
+  `SECURITY_TOKEN` header, 10-minute back-off on 429.
+- **HTTP** (`live/http.py`): retries with jitter on 429/5xx/timeouts only; secrets scrubbed from URLs, errors
+  and recordings.
+- **Router and hybrid** (`sources/router.py`, `sources/live_runner.py`, `runner.run_hybrid`): per-stream modes
+  from the generator config; live weather for `live.locations`, synthetic for the rest, one price source. A live
+  site's synthetic PV and heat pump follow its latest live forecast step for each interval.
+  `config/generator.live.yaml` + `make gen-live` run it.
+- **Record and replay** (`sources/recording.py`): `ems-gen record --name N` stores raw responses (redacted),
+  events (`events.jsonl`) and a manifest in `data/recordings/N/`; `ems-gen replay --name N` re-publishes them
+  with their ids, marked `replay:<source>`.
+- **Calibration** (`ingest/calibration.py`, `jobs/calibrate.py`): price and temperature fits → candidate files in
+  `config/calibration/candidates/` (review before adopting). Example: ERA5 2024 at Poznań gives an annual mean of
+  11.5 °C (a record-warm year; the default 8.7 °C is the 1991–2020 normal).
+
+Attribution: Open-Meteo data is CC BY 4.0 (NOTICE next to fixtures; "Weather data by Open-Meteo.com"); ENTSO-E
+day-ahead prices are not open data, so only hand-written fixtures are committed; PSE data is kept only as a few
+test fixtures.
+
 ### How to add an asset model
 
 Add parameters to `catalog/sites.py` (new `kind`), a vectorised function in `synthetic/` returning
@@ -76,8 +109,6 @@ consumption by direction), and property tests for bounds and balance.
 
 ## What to build
 
-- Spec 002: mapping engine, Open-Meteo, PSE RCE and csdac adapters, ENTSO-E (flag), record/replay, hybrid mode,
-  calibration job.
 - Spec 003: many locations, unmanaged sites with BESS, fault injection, stats, benchmark.
 - Spec 004: wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker profile.
 

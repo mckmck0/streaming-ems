@@ -8,7 +8,8 @@
   2026-10-02T00:00:00Z` (every locked version at least two weeks old), `default-groups = ["dev", "ingest"]`.
 - Dependency layout: `[project].dependencies` hold what contracts and settings need (pydantic, pydantic-settings,
   ruamel.yaml, structlog, typer, tzdata); group `ingest` holds the generator (confluent-kafka, numpy, scipy,
-  pandas, pyarrow, pvlib, demandlib, holidays, faker, jsonschema); group `dev` the tooling.
+  pandas, pyarrow, pvlib, demandlib, holidays, faker, jsonschema, httpx, tenacity, lxml); group `dev` the tooling
+  (incl. respx). The image also ships `mappings/` (`EMS_MAPPINGS_DIR`).
 - Exact pins only where behaviour depends on them: ruff 0.16.10 (= ruff-pre-commit rev), ty 0.0.84, faker
   40.40.0 (locale data feeds a golden catalog test), pvlib 0.16.1 and demandlib 0.2.2 (APIs used directly).
 - Test tiers by directory and marker (`tests/conftest.py` adds the marker): `make test-unit` = unit + property,
@@ -65,6 +66,7 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 | pvlib | 0.16.1 | 2026-09-26 | pypi.org/project/pvlib |
 | demandlib | 0.2.2 | 2025-04-09 | pypi.org/project/demandlib |
 | holidays | 0.105 | 2026-09-21 | pypi.org/project/holidays |
+| httpx / tenacity / lxml / respx (spec 002) | 0.28.1 / 9.1.4 / 6.1.3 / 0.23.1 | 2024-12-06 / 2026-02-07 / 2026-09-02 / 2026-04-08 | pypi.org |
 | Spec Kit | v1.1.0 | 2026-10-02 | github.com/github/spec-kit/releases |
 | restate-server (later) | 1.7.13 (`restatedev/restate:1.7.13-20261005@sha256:65abc8016d40…`) | 2026-10-01 | github.com/restatedev/restate |
 

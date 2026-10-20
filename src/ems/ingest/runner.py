@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import platform
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -170,6 +172,38 @@ def preflight(
         raise PreflightError("; ".join(found))
 
 
+async def paced_publish(
+    model: SyntheticModel,
+    cfg: GeneratorConfig,
+    start: datetime,
+    end: datetime | None,
+    run_id: str | None,
+    sink: Sink,
+    *,
+    mode: str,
+    speed: float,
+    clock: Clock,
+    counts: Counter[str],
+    wall0: float,
+    max_events: int | None = None,
+) -> None:
+    """Publish the synthetic emissions; in non-backfill modes, pace them against the wall clock."""
+    for emit_at, stream, build in emissions(model, cfg, start, end, run_id):
+        if mode != "backfill":
+            due = wall0 + (emit_at - start).total_seconds() / speed
+            delay = due - time.monotonic()
+            while delay > 0:  # sleep in slices so delivery callbacks keep being served
+                await asyncio.sleep(min(delay, 0.5))
+                sink.poll(0)
+                delay = due - time.monotonic()
+        sink.publish(build(clock()))
+        counts[stream] += 1
+        if max_events is not None and sum(counts.values()) >= max_events:
+            break
+        if sum(counts.values()) % 1000 == 0:
+            await asyncio.sleep(0)
+
+
 async def run(
     settings: EmsSettings,
     cfg: GeneratorConfig,
@@ -218,20 +252,20 @@ async def run(
     stats: SinkStats | None = None
     manifest: Path | None = None
     try:
-        for emit_at, stream, build in emissions(model, cfg, start, end, run_id):
-            if mode != "backfill":
-                due = wall0 + (emit_at - start).total_seconds() / speed
-                delay = due - time.monotonic()
-                while delay > 0:  # sleep in slices so delivery callbacks keep being served
-                    await asyncio.sleep(min(delay, 0.5))
-                    sink.poll(0)
-                    delay = due - time.monotonic()
-            sink.publish(build(clock()))
-            counts[stream] += 1
-            if max_events is not None and sum(counts.values()) >= max_events:
-                break
-            if sum(counts.values()) % 1000 == 0:
-                await asyncio.sleep(0)
+        await paced_publish(
+            model,
+            cfg,
+            start,
+            end,
+            run_id,
+            sink,
+            mode=mode,
+            speed=speed,
+            clock=clock,
+            counts=counts,
+            wall0=wall0,
+            max_events=max_events,
+        )
     finally:
         # Also on Ctrl+C / SIGTERM: flush, then record what was produced (principle 14).
         stats = sink.close()
@@ -277,3 +311,191 @@ def parse_window(
             raise ValueError("--days needs --start")
         e = s + timedelta(days=days)
     return s, e
+
+
+async def run_hybrid(
+    settings: EmsSettings,
+    cfg: GeneratorConfig,
+    *,
+    run_id: str | None = None,
+    clock: Clock = wall_clock,
+    sink: Sink | None = None,
+    recorder: Any = None,
+) -> RunResult:
+    """Realtime run: live sources for live locations and prices, synthetic data for
+    every other site.
+    """
+    from ems.ingest.sources.live_runner import LiveRunner, mask_synthetic
+    from ems.ingest.sources.router import route
+
+    sites = load_sites(settings.config_dir, cfg)
+    routing = route(cfg, sites)
+    start = floor_quarter(clock())
+    sink = (
+        sink
+        if sink is not None
+        else KafkaSink(
+            settings.kafka_bootstrap,
+            topic_prefix=settings.topic_prefix,
+            delivery_timeout_ms=settings.delivery_timeout_ms,
+        )
+    )
+    synth_cfg = mask_synthetic(cfg, routing.price == "live")
+    live = LiveRunner(
+        settings,
+        cfg,
+        sink,
+        routing.live_sites,
+        price_live=routing.price == "live",
+        clock=clock,
+        run_id=run_id,
+        recorder=recorder,
+    )
+    counts: Counter[str] = Counter()
+    wall0 = time.monotonic()
+    log.info(
+        "hybrid_start",
+        live=[s.location_id for s in routing.live_sites],
+        synthetic=len(routing.synthetic_sites),
+    )
+    stats: SinkStats | None = None
+    try:
+        tasks = [live.run_forever()]
+        if routing.synthetic_sites:
+            model = SyntheticModel(list(routing.synthetic_sites), cfg.seed, settings.config_dir)
+            tasks.append(
+                paced_publish(
+                    model,
+                    synth_cfg,
+                    start,
+                    None,
+                    run_id,
+                    sink,
+                    mode="realtime",
+                    speed=1.0,
+                    clock=clock,
+                    counts=counts,
+                    wall0=wall0,
+                )
+            )
+        await asyncio.gather(*tasks)
+    finally:
+        stats = sink.close()
+        counts.update(live.state.counts)
+        manifest = write_manifest(
+            settings.data_dir / "runs" / (run_id or f"hybrid-{start:%Y%m%dT%H%M%SZ}"),
+            cfg=cfg,
+            settings=settings,
+            mode="hybrid",
+            start=start,
+            end=None,
+            run_id=run_id,
+            counts=counts,
+            stats=stats,
+            sites=len(sites),
+        )
+    return RunResult(
+        counts=counts, stats=stats, manifest=manifest, elapsed_s=time.monotonic() - wall0
+    )
+
+
+async def record(
+    settings: EmsSettings,
+    cfg: GeneratorConfig,
+    *,
+    name: str,
+    out_dir: Path | None = None,
+    once: bool = True,
+    duration_s: float | None = None,
+    clock: Clock = wall_clock,
+) -> Path:
+    """Record live sources (no Kafka): raw responses, canonical events and a manifest."""
+    from ems.ingest.sources.live_runner import LiveRunner
+    from ems.ingest.sources.recording import Recorder, RecordingSink
+    from ems.ingest.sources.router import route
+
+    secrets = [
+        s.get_secret_value()
+        for s in (settings.open_meteo_api_key, settings.entsoe_token)
+        if s is not None
+    ]
+    root = out_dir or settings.data_dir / "recordings" / name
+    recorder = Recorder(root, secrets=secrets)
+    sites = load_sites(settings.config_dir, cfg)
+    live_cfg = dataclasses.replace(
+        cfg,
+        streams={**cfg.streams, "price": {"mode": "live"}, "weather_forecast": {"mode": "live"}},
+    )
+    routing = route(live_cfg, sites)
+    runner = LiveRunner(
+        settings,
+        live_cfg,
+        RecordingSink(recorder),
+        routing.live_sites,
+        price_live=True,
+        clock=clock,
+        recorder=recorder.raw,
+    )
+    started = clock()
+    try:
+        if once:
+            await runner.once()
+        else:
+            await asyncio.wait_for(runner.run_forever(), timeout=duration_s)
+    except TimeoutError:
+        pass
+    finally:
+        manifest = recorder.close(
+            {
+                "kind": "ems-gen-recording",
+                "name": name,
+                "started": started.isoformat(),
+                "ended": clock().isoformat(),
+                "live_sites": [s.location_id for s in routing.live_sites],
+                "config": cfg.as_dict(),
+                "versions": _versions(),
+                "git_commit": _git_commit(Path.cwd()),
+            }
+        )
+    log.info("recorded", root=str(root), manifest=str(manifest))
+    return root
+
+
+async def replay(
+    settings: EmsSettings,
+    name: str,
+    *,
+    root: Path | None = None,
+    speed: float | None = None,
+    clock: Clock = wall_clock,
+    sink: Sink | None = None,
+) -> RunResult:
+    """Publish a recording: events keep their ids; ``source_system`` becomes ``replay:<orig>``."""
+    from ems.ingest.sources.recording import as_replay, read_events
+
+    root = root or settings.data_dir / "recordings" / name
+    sink = (
+        sink
+        if sink is not None
+        else KafkaSink(
+            settings.kafka_bootstrap,
+            topic_prefix=settings.topic_prefix,
+            delivery_timeout_ms=settings.delivery_timeout_ms,
+        )
+    )
+    counts: Counter[str] = Counter()
+    wall0 = time.monotonic()
+    first: datetime | None = None
+    try:
+        for event in read_events(root):
+            if speed:
+                first = first or event.ingested_at
+                due = wall0 + (event.ingested_at - first).total_seconds() / speed
+                while (delay := due - time.monotonic()) > 0:
+                    await asyncio.sleep(min(delay, 0.5))
+                    sink.poll(0)
+            sink.publish(as_replay(event, clock()))
+            counts[event.stream.value] += 1
+    finally:
+        stats = sink.close()
+    return RunResult(counts=counts, stats=stats, manifest=None, elapsed_s=time.monotonic() - wall0)

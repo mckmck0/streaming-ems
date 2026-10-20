@@ -26,6 +26,15 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - `realtime`: starts at the current quarter-hour, wall-clock pacing; `live` profile.
 - Preflight refuses a run whose record timestamps the target topics would reject or expire.
 
+### Live, hybrid, record and replay (spec 002)
+
+- Live sources poll on the wall clock (allowed outside experiments): PSE every 15 min in the D−1 publication
+  window, then hourly; Open-Meteo model metadata every 5 min, forecasts only for new runs.
+- Hybrid: live locations get live forecasts and synthetic meters driven by them; other locations stay fully
+  synthetic; one price source (live PSE when prices are live).
+- Experiments use recordings: `ems-gen replay` re-emits recorded events with their ids (`replay:<source>`), so a
+  live session can be replayed into the sim profile any number of times.
+
 ### EMS (later specs)
 
 Sim mode advances on event timestamps with virtual timers in entity state; live mode uses durable delayed
@@ -34,8 +43,6 @@ applies the availability rule in `08-contracts.md`.
 
 ## What to build
 
-- Spec 002: record/replay (`replay:<source>`, original ids kept) and hybrid mode (live and synthetic on the same
-  topics).
 - Sim clock and replay driver for the actors (later spec).
 
 ## Prerequisites

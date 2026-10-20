@@ -59,6 +59,7 @@ from ems.ingest.synthetic.weather import (
     ForecastRun,
     SiteArrays,
     TimeAxis,
+    Truth,
     forecast_run,
     generate_truth,
     load_params,
@@ -85,6 +86,14 @@ class GeneratorConfig:
     synthetic_locations: int = 1
     catalog_seed: int = 7
     chunk_days: int = 1
+    live: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def live_locations(self) -> tuple[str, ...]:
+        return tuple(str(x) for x in self.live.get("locations", []))
+
+    def stream_mode(self, name: str) -> str:
+        return str(self.streams.get(name, {}).get("mode", "synthetic"))
 
     def stream_on(self, name: str) -> bool:
         return str(self.streams.get(name, {}).get("mode", "synthetic")) != "off"
@@ -123,6 +132,7 @@ def load_generator_config(path: Path) -> GeneratorConfig:
         synthetic_locations=int(scale.get("synthetic_locations", 1)),
         catalog_seed=int(scale.get("catalog_seed", 7)),
         chunk_days=int(raw.get("chunk_days", 1)),
+        live=dict(raw.get("live") or {}),
     )
 
 
@@ -179,11 +189,19 @@ class SyntheticModel:
         self.annual_kwh = np.array([s.annual_base_load_kwh for s in sites])
         self.profiles = [s.profile for s in sites]
 
-    def chunk(self, t0: int, n: int, forecast_issues: list[int]) -> Chunk:
+    def chunk(
+        self,
+        t0: int,
+        n: int,
+        forecast_issues: list[int],
+        weather_override: Callable[[Truth], Truth] | None = None,
+    ) -> Chunk:
         """Energy for meter intervals ``t0 .. t0+n-1`` and the forecast runs issued in that span."""
         horizon_end = max([t0 + n, *[t + FORECAST_STEPS for t in forecast_issues]])
         axis = TimeAxis.from_range(t0, horizon_end - t0)
         truth = generate_truth(self.arrays, axis, self.seed, self.weather_params)
+        if weather_override is not None:
+            truth = weather_override(truth)
         pv = pv_energy_kwh(truth, self.pv)[:, :n]
         t = axis.t[:n]
         load = base_load_kwh(self.seed, self.arrays.keys, self.profiles, self.annual_kwh, t)
