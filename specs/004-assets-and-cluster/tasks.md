@@ -21,3 +21,7 @@
 
 ## Phase 6: Polish
 - [x] T010 Docs (13, 05, 09, 00), `make ci`, integration tests
+
+## Phase 7: Convergence
+
+- [x] T011 Test that each EV session charges at the charger limit from arrival with at most one partial interval, so the need is delivered when time allows, per AC-004-07 (partial)

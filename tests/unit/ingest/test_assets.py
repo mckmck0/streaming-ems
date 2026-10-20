@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -322,3 +323,28 @@ def test_ac_004_08_mixed_day_events_validate_and_balance() -> None:
         assert supply == pytest.approx(demand, rel=1e-9, abs=1e-6)
         checked += 1
     assert checked > 1000
+
+
+def test_ac_004_07_ev_sessions_charge_at_limit_until_need_met() -> None:
+    """Within a session: full-power intervals, then at most one partial one, then nothing."""
+    keys = np.array([rng.location_key(location_id(i)) for i in range(1, 31)], dtype=np.uint64)
+    t = np.arange(YEAR_T0, YEAR_T0 + 96 * 10, dtype=np.int64)
+    local = local_unix((t * 900).astype(np.float64))
+    full = 7.4 * 0.25
+    e = ev_kwh(
+        4242, keys, local, np.full(keys.size, 7.4), np.full(keys.size, 6.0), ["overnight"] * 30
+    )
+    hours = (local % 86400.0) / 3600.0
+    noon = np.flatnonzero(np.isclose(hours, 12.0))
+    sessions = 0
+    for lo, hi in itertools.pairwise(noon):  # one overnight session per noon-to-noon
+        for row in e[:, lo:hi]:
+            on = np.flatnonzero(row > 0)
+            if on.size == 0:
+                continue
+            sessions += 1
+            block = row[on[0] : on[-1] + 1]
+            assert (block > 0).all()  # contiguous from arrival
+            assert np.allclose(block[:-1], full)  # at the charger limit until the need is met
+            assert 0 < block[-1] <= full + 1e-9
+    assert sessions > 200
