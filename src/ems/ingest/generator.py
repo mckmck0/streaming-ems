@@ -15,6 +15,7 @@ Emission schedule (simulated time):
 
 from __future__ import annotations
 
+import dataclasses
 import heapq
 import itertools
 from collections.abc import Callable, Iterator
@@ -28,12 +29,15 @@ from numpy.typing import NDArray
 from ruamel.yaml import YAML
 
 from ems.contracts.envelope import (
+    Aggregation,
     AssetType,
     Direction,
     Market,
     Measurement,
     MeasurementEvent,
     PriceEvent,
+    Quality,
+    Quantity,
     Stream,
     WeatherForecastEvent,
 )
@@ -49,11 +53,12 @@ from ems.ingest import rng
 from ems.ingest.catalog.build import build_catalog, load_overrides
 from ems.ingest.catalog.sites import Site
 from ems.ingest.catalog.voivodeships import BY_TERYT
-from ems.ingest.localtime import local_hour
+from ems.ingest.localtime import local_hour, local_unix
 from ems.ingest.synthetic.balance import grid_flows
+from ems.ingest.synthetic.bess import BessArrays, dispatch
 from ems.ingest.synthetic.heat_pump import heat_pump_kwh
 from ems.ingest.synthetic.load import base_load_kwh
-from ems.ingest.synthetic.prices import day_prices, price_params, publication_time
+from ems.ingest.synthetic.prices import day_prices, price_curve, price_params, publication_time
 from ems.ingest.synthetic.pv import PvArrays, pv_energy_kwh
 from ems.ingest.synthetic.weather import (
     ForecastRun,
@@ -87,6 +92,10 @@ class GeneratorConfig:
     catalog_seed: int = 7
     chunk_days: int = 1
     live: dict[str, Any] = field(default_factory=dict)
+    site_chunk: int = 2000
+    site_controlled_bess_share: float = 0.0
+    emit_registers: bool = False
+    faults: dict[str, Any] = field(default_factory=dict)
 
     @property
     def live_locations(self) -> tuple[str, ...]:
@@ -129,6 +138,10 @@ def load_generator_config(path: Path) -> GeneratorConfig:
         end=_dt(clock.get("end")),
         streams={str(k): dict(v) for k, v in (raw.get("streams") or {}).items()},
         meter_delay_s=int((raw.get("meters") or {}).get("availability_delay_s", 0)),
+        emit_registers=bool((raw.get("meters") or {}).get("emit_registers", False)),
+        site_chunk=int(scale.get("site_chunk", 2000)),
+        site_controlled_bess_share=float(scale.get("site_controlled_bess_share", 0.0)),
+        faults=dict(raw.get("faults") or {}),
         synthetic_locations=int(scale.get("synthetic_locations", 1)),
         catalog_seed=int(scale.get("catalog_seed", 7)),
         chunk_days=int(raw.get("chunk_days", 1)),
@@ -143,6 +156,7 @@ def load_sites(config_dir: Path, cfg: GeneratorConfig) -> list[Site]:
         catalog_seed=cfg.catalog_seed,
         global_seed=cfg.seed,
         overrides=overrides,
+        site_controlled_bess_share=cfg.site_controlled_bess_share,
     )
 
 
@@ -155,12 +169,36 @@ class Chunk:
     hp_kwh: F64
     truth_axis: TimeAxis
     forecasts: dict[int, ForecastRun]
+    bess_charge_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
+    bess_discharge_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
+    bess_soc_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
+    import_register_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
+
+
+def _take(obj: Any, idx: slice) -> Any:
+    """Row subset of a dataclass of per-site arrays."""
+    return dataclasses.replace(
+        obj, **{f.name: getattr(obj, f.name)[idx] for f in dataclasses.fields(obj)}
+    )
+
+
+def _concat_runs(parts: list[ForecastRun]) -> ForecastRun:
+    first = parts[0]
+    arrays = {
+        f.name: np.concatenate([getattr(p, f.name) for p in parts], axis=0)
+        for f in dataclasses.fields(first)
+        if isinstance(getattr(first, f.name), np.ndarray)
+    }
+    return dataclasses.replace(first, **arrays)
 
 
 class SyntheticModel:
-    def __init__(self, sites: list[Site], seed: int, config_dir: Path) -> None:
+    def __init__(
+        self, sites: list[Site], seed: int, config_dir: Path, site_chunk: int = 2000
+    ) -> None:
         self.sites = sites
         self.seed = seed
+        self.site_chunk = max(1, site_chunk)
         self.weather_params = load_params(config_dir / "calibration" / "weather.yaml")
         self.price_params = price_params(config_dir / "calibration" / "prices.yaml")
         alpha = self.weather_params["wind"]["shear_alpha"]
@@ -188,6 +226,49 @@ class SyntheticModel:
         self.hp_eta = np.array([h.carnot_eta if h else 0.45 for h in hp])
         self.annual_kwh = np.array([s.annual_base_load_kwh for s in sites])
         self.profiles = [s.profile for s in sites]
+        # Site-controlled batteries (background sites); EMS-managed batteries are never simulated.
+        bess = [
+            s.bess if (s.bess is not None and s.bess.control == "site") else None for s in sites
+        ]
+        self.bess = BessArrays(
+            present=np.array([b is not None for b in bess]),
+            capacity_kwh=np.array([b.capacity_kwh if b else 1.0 for b in bess]),
+            p_max_kw=np.array([b.p_max_kw if b else 1.0 for b in bess]),
+            eta=np.array([b.eta if b else 1.0 for b in bess]),
+            soc_min_kwh=np.array([b.soc_min_kwh if b else 0.0 for b in bess]),
+            soc_max_kwh=np.array([b.soc_max_kwh if b else 1.0 for b in bess]),
+        )
+        # State carried from one chunk to the next (SoC, cumulative import register).
+        self._carry_t: int | None = None
+        self._soc = self.bess.initial_soc()
+        self._register = np.zeros(len(sites))
+
+    def _subset(
+        self, idx: slice, axis: TimeAxis, n: int, issues: list[int], override: Any
+    ) -> tuple[F64, F64, F64, dict[int, ForecastRun], Truth]:
+        arrays = _take(self.arrays, idx)
+        truth = generate_truth(arrays, axis, self.seed, self.weather_params)
+        if override is not None:
+            truth = override(truth)
+        pv = pv_energy_kwh(truth, _take(self.pv, idx))[:, :n]
+        t = axis.t[:n]
+        load = base_load_kwh(self.seed, arrays.keys, self.profiles[idx], self.annual_kwh[idx], t)
+        hour_local = local_hour(axis.unix_mid[:n])
+        hp = heat_pump_kwh(
+            truth.temp_c[:, :n],
+            hour_local,
+            self.hp_loss[idx],
+            self.hp_dhw[idx],
+            self.hp_base[idx],
+            self.hp_eta[idx],
+        )
+        runs = {
+            issue: forecast_run(
+                truth, issue, FORECAST_STEPS, self.seed, arrays.keys, self.weather_params
+            )
+            for issue in issues
+        }
+        return pv, load, hp, runs, truth
 
     def chunk(
         self,
@@ -196,28 +277,65 @@ class SyntheticModel:
         forecast_issues: list[int],
         weather_override: Callable[[Truth], Truth] | None = None,
     ) -> Chunk:
-        """Energy for meter intervals ``t0 .. t0+n-1`` and the forecast runs issued in that span."""
+        """Energy for meter intervals ``t0 .. t0+n-1`` and the forecast runs issued in that span.
+
+        Sites are processed in slices of ``site_chunk`` to bound memory; every per-site computation
+        is row-wise, so slicing never changes a value.
+        """
         horizon_end = max([t0 + n, *[t + FORECAST_STEPS for t in forecast_issues]])
         axis = TimeAxis.from_range(t0, horizon_end - t0)
-        truth = generate_truth(self.arrays, axis, self.seed, self.weather_params)
-        if weather_override is not None:
-            truth = weather_override(truth)
-        pv = pv_energy_kwh(truth, self.pv)[:, :n]
-        t = axis.t[:n]
-        load = base_load_kwh(self.seed, self.arrays.keys, self.profiles, self.annual_kwh, t)
-        hour_local = local_hour(axis.unix_mid[:n])
-        hp = heat_pump_kwh(
-            truth.temp_c[:, :n], hour_local, self.hp_loss, self.hp_dhw, self.hp_base, self.hp_eta
-        )
-        forecasts = {
-            issue: forecast_run(
-                truth, issue, FORECAST_STEPS, self.seed, self.arrays.keys, self.weather_params
+        n_loc = len(self.sites)
+        pv_parts, load_parts, hp_parts = [], [], []
+        run_parts: dict[int, list[ForecastRun]] = {i: [] for i in forecast_issues}
+        if weather_override is not None and n_loc > self.site_chunk:
+            raise ValueError("weather overrides need all sites in one slice")
+        for lo in range(0, max(n_loc, 1), self.site_chunk):
+            idx = slice(lo, min(lo + self.site_chunk, n_loc))
+            pv, load, hp, runs, _truth = self._subset(
+                idx, axis, n, forecast_issues, weather_override
             )
-            for issue in forecast_issues
-        }
+            pv_parts.append(pv)
+            load_parts.append(load)
+            hp_parts.append(hp)
+            for issue, run in runs.items():
+                run_parts[issue].append(run)
+        pv_all = np.concatenate(pv_parts, axis=0)
+        load_all = np.concatenate(load_parts, axis=0)
+        hp_all = np.concatenate(hp_parts, axis=0)
+        charge = np.zeros_like(pv_all)
+        discharge = np.zeros_like(pv_all)
+        soc = np.zeros_like(pv_all)
+        if self._carry_t != t0:  # not a continuation: start batteries and registers fresh
+            self._soc = self.bess.initial_soc()
+            self._register = np.zeros(n_loc)
+        if self.bess.present.any():
+            prices = self.price_curve(t0, n)
+            hour_local = local_hour(axis.unix_mid[:n])
+            day_index = (local_unix(axis.unix_start[:n]) // 86400).astype(np.int64)
+            charge, discharge, soc = dispatch(
+                self.bess, load_all + hp_all - pv_all, prices, hour_local, day_index, self._soc
+            )
+            self._soc = soc[:, -1].copy()
+        imports = np.clip(load_all + hp_all + charge - pv_all - discharge, 0.0, None)
+        register = self._register.reshape(-1, 1) + np.cumsum(imports, axis=1)
+        self._register = register[:, -1].copy()
+        self._carry_t = t0 + n
         return Chunk(
-            t0=t0, n=n, pv_kwh=pv, load_kwh=load, hp_kwh=hp, truth_axis=axis, forecasts=forecasts
+            t0=t0,
+            n=n,
+            pv_kwh=pv_all,
+            load_kwh=load_all,
+            hp_kwh=hp_all,
+            truth_axis=axis,
+            forecasts={i: _concat_runs(parts) for i, parts in run_parts.items()},
+            bess_charge_kwh=charge,
+            bess_discharge_kwh=discharge,
+            bess_soc_kwh=soc,
+            import_register_kwh=register,
         )
+
+    def price_curve(self, t0: int, n: int) -> F64:
+        return price_curve(t0, n, self.seed, self.price_params, self.weather_params)
 
     def day_prices(self, day: date) -> F64:
         return day_prices(day, self.seed, self.price_params, self.weather_params)
@@ -230,7 +348,7 @@ class SyntheticModel:
 
 
 def _meter_builders(
-    model: SyntheticModel, chunk: Chunk, i: int, run_id: str | None
+    model: SyntheticModel, chunk: Chunk, i: int, run_id: str | None, emit_registers: bool = False
 ) -> list[tuple[str, Builder]]:
     start = from_quarter_index(chunk.t0 + i)
     out: list[tuple[str, Builder]] = []
@@ -257,12 +375,51 @@ def _meter_builders(
                     float(chunk.hp_kwh[s_idx, i]),
                 )
             )
+        site_bess = site.bess is not None and site.bess.control == "site"
+        if site_bess and chunk.bess_charge_kwh.size:
+            assert site.bess is not None
+            charge = float(chunk.bess_charge_kwh[s_idx, i])
+            discharge = float(chunk.bess_discharge_kwh[s_idx, i])
+            gens.append(energy(site.bess.asset_id, AssetType.BESS, Direction.DISCHARGE, discharge))
+            loads.append(energy(site.bess.asset_id, AssetType.BESS, Direction.CHARGE, charge))
+            loads.append(
+                Measurement(
+                    asset_id=site.bess.asset_id,
+                    asset_type=AssetType.BESS,
+                    quantity=Quantity.SOC,
+                    direction=Direction.CHARGE,
+                    aggregation=Aggregation.INSTANT,
+                    value=float(chunk.bess_soc_kwh[s_idx, i]),
+                    unit="kWh",
+                    quality=Quality.SYNTHETIC,
+                )
+            )
+        else:
+            charge = discharge = 0.0
         if not site.ems_managed:
             gen_total = float(chunk.pv_kwh[s_idx, i])
             load_total = float(chunk.load_kwh[s_idx, i] + chunk.hp_kwh[s_idx, i])
-            imp, exp = grid_flows(np.array([load_total]), np.array([gen_total]))
+            imp, exp = grid_flows(
+                np.array([load_total]),
+                np.array([gen_total]),
+                np.array([charge]),
+                np.array([discharge]),
+            )
             loads.append(energy("grid", AssetType.GRID_CONNECTION, Direction.IMPORT, float(imp[0])))
             loads.append(energy("grid", AssetType.GRID_CONNECTION, Direction.EXPORT, float(exp[0])))
+            if emit_registers and chunk.import_register_kwh.size:
+                loads.append(
+                    Measurement(
+                        asset_id="grid-register",
+                        asset_type=AssetType.GRID_CONNECTION,
+                        quantity=Quantity.ACTIVE_ENERGY,
+                        direction=Direction.IMPORT,
+                        aggregation=Aggregation.REGISTER,
+                        value=float(chunk.import_register_kwh[s_idx, i]),
+                        unit="kWh",
+                        quality=Quality.SYNTHETIC,
+                    )
+                )
 
         def mk(stream: Stream, ms: list[Measurement], site: Site = site) -> Builder:
             def build(ingested_at: datetime) -> Event:
@@ -393,7 +550,7 @@ def emissions(
         chunk = model.chunk(c0, c1 - c0, issues)
         for i in range(chunk.n):
             interval_end = from_quarter_index(c0 + i) + QUARTER
-            for stream, build in _meter_builders(model, chunk, i, run_id):
+            for stream, build in _meter_builders(model, chunk, i, run_id, cfg.emit_registers):
                 if cfg.stream_on(stream):
                     push(interval_end + delay, stream, build)
         avail = timedelta(minutes=float(model.weather_params["forecast"]["availability_delay_min"]))

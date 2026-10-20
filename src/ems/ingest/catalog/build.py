@@ -5,7 +5,7 @@ ones.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from faker import Faker
@@ -32,7 +32,15 @@ def _rng(catalog_seed: int, loc: str) -> np.random.Generator:
     return np.random.default_rng(stable_hash64("catalog", catalog_seed, loc))
 
 
-def generate_household(index: int, *, catalog_seed: int, global_seed: int) -> Site:
+def _bess_control(catalog_seed: int, loc: str, share: float) -> Literal["ems", "site"]:
+    """Separate hash: changing the share never changes any other catalog draw."""
+    u = stable_hash64("bess-control", catalog_seed, loc) / 2**64
+    return "site" if u < share else "ems"
+
+
+def generate_household(
+    index: int, *, catalog_seed: int, global_seed: int, site_controlled_bess_share: float = 0.0
+) -> Site:
     loc = location_id(index)
     rng = _rng(catalog_seed, loc)
     weights = np.array([v.household_weight for v in VOIVODESHIPS])
@@ -73,7 +81,7 @@ def generate_household(index: int, *, catalog_seed: int, global_seed: int) -> Si
                 p_max_kw=cap / 2,
                 soc_min_kwh=0.1 * cap,
                 soc_max_kwh=0.95 * cap,
-                control="ems",
+                control=_bess_control(catalog_seed, loc, site_controlled_bess_share),
             )
         )
     p_lo, p_hi = v.postcode_prefixes
@@ -113,7 +121,12 @@ def load_overrides(path: Path, global_seed: int) -> dict[str, Site]:
 
 
 def build_catalog(
-    n: int, *, catalog_seed: int, global_seed: int, overrides: dict[str, Site] | None = None
+    n: int,
+    *,
+    catalog_seed: int,
+    global_seed: int,
+    overrides: dict[str, Site] | None = None,
+    site_controlled_bess_share: float = 0.0,
 ) -> list[Site]:
     """Sites PL-LOC-000001 .. n, each replaced by its hand-defined override if one exists."""
     overrides = overrides or {}
@@ -122,7 +135,12 @@ def build_catalog(
         loc = location_id(i)
         sites.append(
             overrides.get(loc)
-            or generate_household(i, catalog_seed=catalog_seed, global_seed=global_seed)
+            or generate_household(
+                i,
+                catalog_seed=catalog_seed,
+                global_seed=global_seed,
+                site_controlled_bess_share=site_controlled_bess_share,
+            )
         )
     extra = sorted(set(overrides) - {s.location_id for s in sites})
     sites += [overrides[k] for k in extra]

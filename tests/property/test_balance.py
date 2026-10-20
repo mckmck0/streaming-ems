@@ -51,7 +51,7 @@ def test_ac_001_19_unmanaged_site_balance_closes_per_interval() -> None:
         s for s in build_catalog(30, catalog_seed=7, global_seed=4242) if not s.ems_managed
     ]
     assert unmanaged
-    events = _events(unmanaged[:5])
+    events = _events(sorted(unmanaged, key=lambda s: s.bess is None)[:6])
     by_key: dict[tuple[str, datetime], dict[str, float]] = {}
     for ev in events:
         acc = by_key.setdefault(
@@ -59,9 +59,11 @@ def test_ac_001_19_unmanaged_site_balance_closes_per_interval() -> None:
         )
         for m in ev.payload.measurements:
             assert m.value >= 0
-            if m.direction is Direction.GENERATION:
+            if m.quantity.value != "active_energy":
+                continue  # SoC readings are states, not flows
+            if m.direction in (Direction.GENERATION, Direction.DISCHARGE):
                 acc["gen"] += m.value
-            elif m.direction is Direction.CONSUMPTION:
+            elif m.direction in (Direction.CONSUMPTION, Direction.CHARGE):
                 acc["load"] += m.value
             elif m.direction is Direction.IMPORT:
                 acc["imp"] += m.value
