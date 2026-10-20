@@ -1,0 +1,23 @@
+# Open-Meteo /v1/forecast, section minutely_15 (columns zipped by index), timeformat=unixtime, wind in m/s.
+# Quirks: radiation is the mean over the PRECEDING 15 minutes and is labelled at the interval end;
+# temperature, wind and cloud cover are instants at that label. Only radiation is native 15-minute data in
+# ICON-D2; the other variables are interpolated by Open-Meteo. The horizon can end early (trailing nulls),
+# so rows with nulls are kept as missing and the adapter truncates the run before the first one.
+mapping: openmeteo.forecast.v1
+version: 1
+source: open-meteo
+layout: columns
+records: /minutely_15
+null_policy: missing
+fields:
+  valid_end: {path: time, type: datetime, tz: epoch_s}
+  ghi_wm2: {path: shortwave_radiation, type: float}
+  dni_wm2: {path: direct_normal_irradiance, type: float}
+  dhi_wm2: {path: diffuse_radiation, type: float}
+  temp_air_c: {path: temperature_2m, type: float}
+  cloud_cover_pct: {path: cloud_cover, type: float}
+  wind_10: {path: wind_speed_10m, type: float}
+  wind_100: {path: wind_speed_100m, type: float}
+  wind_120: {path: wind_speed_120m, type: float}
+  wind_dir_deg: {path: wind_direction_10m, type: float}
+time: {field: valid_end, label: end, resolution: PT15M}

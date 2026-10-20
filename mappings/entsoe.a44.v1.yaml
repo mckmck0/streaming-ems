@@ -1,0 +1,17 @@
+# ENTSO-E Transparency Platform, document A44 (day-ahead prices, 12.1.D), PL bidding zone 10YPL-AREA-----S.
+# The adapter first normalises the XML (local names; namespaces 7:0 and 7:3), keeps contract type A01,
+# forward-fills curveType A03 positions to the period end and computes slot starts in UTC, giving one row per
+# slot. Element names contain dots ("price.amount"), so fields use JSON pointers, whose segments may.
+# Prices are not CC BY open data: never commit real responses (tests use hand-written fixtures).
+mapping: entsoe.a44.v1
+version: 1
+source: entsoe
+layout: rows
+records: /rows
+null_policy: skip
+fields:
+  interval_start: {path: /interval_start, type: datetime, tz: utc}
+  price: {path: /price.amount, type: float}
+  currency: {path: /currency_Unit.name, type: str}
+  resolution: {path: /resolution, type: str, transforms: [{enum_map: {PT15M: PT15M, PT60M: PT1H}}]}
+  series: {path: /mRID, type: str}

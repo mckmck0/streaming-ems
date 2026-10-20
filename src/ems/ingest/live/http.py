@@ -76,6 +76,7 @@ class Fetcher:
         wait_initial_s: float = 1.0,
         wait_max_s: float = 60.0,
         recorder: Recorder | None = None,
+        retry_on_429: bool = True,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
@@ -91,6 +92,7 @@ class Fetcher:
         self._attempts = attempts
         self._wait = wait_exponential_jitter(initial=wait_initial_s, max=wait_max_s)
         self._recorder = recorder
+        self._retry_on_429 = retry_on_429
         self._clock = clock
         self._sleep = sleep
 
@@ -112,7 +114,7 @@ class Fetcher:
             ) from exc
         shown = self._redacted_url(response.request)
         body = response.content
-        if response.status_code == 429 or response.status_code >= 500:
+        if (response.status_code == 429 and self._retry_on_429) or response.status_code >= 500:
             raise RetryableError(response.status_code, shown, redact(response.text, self._secrets))
         if response.status_code >= 400:
             raise NonRetryableError(
