@@ -1,0 +1,53 @@
+{
+  "algorithm_id": null,
+  "event_id": "46fc7784-b7da-5ce6-ba37-a83f37f07093",
+  "event_time_kind": "interval",
+  "ingested_at": "2026-10-20T00:15:05Z",
+  "interval_end": "2026-10-20T00:15:00Z",
+  "interval_start": "2026-10-20T00:00:00Z",
+  "issued_at": null,
+  "location_id": "PL-LOC-000001",
+  "metering_point_id": "590322400000000010",
+  "payload": {
+    "measurements": [
+      {
+        "aggregation": "interval_sum",
+        "asset_id": "load-1",
+        "asset_type": "load",
+        "direction": "consumption",
+        "obis": null,
+        "phase": "total",
+        "quality": "synthetic",
+        "quality_raw": null,
+        "quantity": "active_energy",
+        "unit": "kWh",
+        "value": 0.071,
+        "version": 1
+      },
+      {
+        "aggregation": "interval_sum",
+        "asset_id": "hp-1",
+        "asset_type": "heat_pump",
+        "direction": "consumption",
+        "obis": null,
+        "phase": "total",
+        "quality": "synthetic",
+        "quality_raw": null,
+        "quantity": "active_energy",
+        "unit": "kWh",
+        "value": 0.402,
+        "version": 1
+      }
+    ]
+  },
+  "resolution": "PT15M",
+  "run_id": null,
+  "schema": "ems.measurement",
+  "schema_version": "1.0.0",
+  "seed": 42,
+  "source_record_ref": null,
+  "source_system": "synthetic",
+  "stream": "consumption",
+  "synthetic": true,
+  "t": 1991616
+}

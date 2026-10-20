@@ -1,0 +1,69 @@
+# Single source of truth for the EMS Kafka topics (spec 001; contract: specs/001-data-pipeline-core/contracts/topics.md).
+# Loaded by ems.contracts.topics (shared with the ingestion spec) and applied by `ems-gen topics ensure`.
+# Config values are strings, exactly as Kafka stores them. Profiles override defaults; select with EMS_TOPICS_PROFILE.
+defaults:
+  replication_factor: 1
+  configs:
+    cleanup.policy: delete
+    compression.type: producer
+    message.timestamp.type: CreateTime
+    min.insync.replicas: "1"
+
+profiles:
+  # Realtime, live and hybrid runs: reject records more than 1 h in the future, and reject (instead of silently
+  # deleting) records older than the retention, by tying before.max.ms to retention.ms per topic.
+  live:
+    partitions: {location: 3, global: 1}
+    configs:
+      message.timestamp.after.max.ms: "3600000"
+    before_max_equals_retention: true
+  # Backfill, accelerated, replay and integration tests: keep everything, accept any record time.
+  sim:
+    partitions: {location: 3, global: 1}
+    configs:
+      retention.ms: "-1"
+      message.timestamp.after.max.ms: "9223372036854775807"
+      message.timestamp.before.max.ms: "9223372036854775807"
+  scale:
+    partitions: {location: 48, global: 3}
+    configs:
+      retention.ms: "-1"
+      retention.bytes: "2147483648"     # 2 GiB per partition
+      message.timestamp.after.max.ms: "9223372036854775807"
+      message.timestamp.before.max.ms: "9223372036854775807"
+  cluster:
+    replication_factor: 3
+    partitions: {location: 3, global: 1}
+    configs:
+      min.insync.replicas: "2"
+      message.timestamp.after.max.ms: "3600000"
+    before_max_equals_retention: true
+
+topics:
+  - name: ems.weather.forecast.v1
+    class: location
+    key: location_id
+    configs: {retention.ms: "604800000"}       # 7 days
+  - name: ems.weather.actual.v1
+    class: location
+    key: location_id
+    enabled: false
+    configs: {retention.ms: "604800000"}
+  - name: ems.production.v1
+    class: location
+    key: location_id
+    configs: {retention.ms: "604800000"}
+  - name: ems.consumption.v1
+    class: location
+    key: location_id
+    configs: {retention.ms: "604800000"}
+  - name: ems.price.v1
+    class: global
+    key: market
+    configs: {retention.ms: "2592000000"}      # 30 days, not compacted
+  - name: ems.gen.dlq.v1
+    class: global
+    key: original
+    configs:
+      retention.ms: "1209600000"               # 14 days
+      message.timestamp.type: LogAppendTime

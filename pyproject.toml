@@ -7,16 +7,41 @@ authors = [
     { name = "Mikolaj Wegner", email = "mikolajwegner0@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13",
+    "pydantic-settings>=2.10",
+    "ruamel.yaml>=0.19",
+    "structlog>=26.1",
+    "typer>=0.27",
+    "tzdata",
+]
+
+[project.scripts]
+ems-gen = "ems.ingest.cli:app"
 
 [dependency-groups]
 # Exact pins only where behaviour depends on the version: ruff must equal the ruff-pre-commit rev in
 # .pre-commit-config.yaml, and ty is pre-1.0. Everything else is pinned by uv.lock.
 dev = [
+    "hypothesis",
     "pre-commit",
     "pytest",
+    "pytest-asyncio",
     "ruff==0.16.10",
     "ty==0.0.84",
+]
+# Data generator (spec 001+). faker is pinned exactly because its locale data feeds a golden catalog test.
+ingest = [
+    "confluent-kafka>=2.15.1,<2.16",
+    "demandlib==0.2.2",
+    "faker==40.40.0",
+    "holidays>=0.105",
+    "jsonschema>=4.26",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pvlib==0.16.1",
+    "pyarrow",
+    "scipy",
 ]
 
 [build-system]
@@ -26,6 +51,7 @@ build-backend = "uv_build"
 [tool.uv]
 # Every locked version must be at least two weeks old. Move this date deliberately, then `uv lock --upgrade`.
 exclude-newer = "2026-10-02T00:00:00Z"
+default-groups = ["dev", "ingest"]
 
 [tool.ruff]
 target-version = "py313"
@@ -34,3 +60,16 @@ extend-exclude = ["reference", "docs/bootstrap"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-markers", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "unit: no infrastructure",
+    "property: hypothesis property tests, no infrastructure",
+    "integration: real services via make up",
+    "e2e: replay compared bit-exactly with the offline reference",
+    "fault: kill -9 of the SDK service or the server",
+]

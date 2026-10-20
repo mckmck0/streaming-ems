@@ -1,0 +1,39 @@
+{
+  "algorithm_id": null,
+  "event_id": "e83aa650-070c-5eae-a9f8-62220a8ef74e",
+  "event_time_kind": "interval",
+  "ingested_at": "2026-10-20T00:15:05Z",
+  "interval_end": "2026-10-20T00:15:00Z",
+  "interval_start": "2026-10-20T00:00:00Z",
+  "issued_at": null,
+  "location_id": "PL-LOC-000001",
+  "metering_point_id": "590322400000000010",
+  "payload": {
+    "measurements": [
+      {
+        "aggregation": "interval_sum",
+        "asset_id": "pv-1",
+        "asset_type": "pv",
+        "direction": "generation",
+        "obis": null,
+        "phase": "total",
+        "quality": "synthetic",
+        "quality_raw": null,
+        "quantity": "active_energy",
+        "unit": "kWh",
+        "value": 0.0,
+        "version": 1
+      }
+    ]
+  },
+  "resolution": "PT15M",
+  "run_id": null,
+  "schema": "ems.measurement",
+  "schema_version": "1.0.0",
+  "seed": 42,
+  "source_record_ref": null,
+  "source_system": "synthetic",
+  "stream": "production",
+  "synthetic": true,
+  "t": 1991616
+}

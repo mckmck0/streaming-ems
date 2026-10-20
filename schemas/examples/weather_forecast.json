@@ -1,0 +1,60 @@
+{
+  "algorithm_id": null,
+  "event_id": "cfa1d00f-a4d4-5d3c-9409-6cf6baf122a9",
+  "event_time_kind": "forecast",
+  "ingested_at": "2026-10-20T00:15:05Z",
+  "interval_end": "2026-10-20T00:30:00Z",
+  "interval_start": "2026-10-20T00:00:00Z",
+  "issued_at": "2026-10-20T00:00:00Z",
+  "location_id": "PL-LOC-000001",
+  "metering_point_id": null,
+  "payload": {
+    "forecast_model": "synthetic",
+    "steps": [
+      {
+        "cloud_cover_pct": 88,
+        "dhi_wm2": 0.0,
+        "dni_wm2": 0.0,
+        "ghi_wm2": 0.0,
+        "lead_time": "PT15M",
+        "radiation_label": "preceding_mean",
+        "temp_air_c": 7.4,
+        "valid_end": "2026-10-20T00:15:00Z",
+        "valid_start": "2026-10-20T00:00:00Z",
+        "wind_dir_deg": 240,
+        "wind_speed_ms": {
+          "10": 3.1,
+          "100": 6.0,
+          "120": 6.2
+        }
+      },
+      {
+        "cloud_cover_pct": 88,
+        "dhi_wm2": 0.0,
+        "dni_wm2": 0.0,
+        "ghi_wm2": 0.0,
+        "lead_time": "PT30M",
+        "radiation_label": "preceding_mean",
+        "temp_air_c": 7.4,
+        "valid_end": "2026-10-20T00:30:00Z",
+        "valid_start": "2026-10-20T00:15:00Z",
+        "wind_dir_deg": 240,
+        "wind_speed_ms": {
+          "10": 3.1,
+          "100": 6.0,
+          "120": 6.2
+        }
+      }
+    ]
+  },
+  "resolution": "PT15M",
+  "run_id": null,
+  "schema": "ems.weather_forecast",
+  "schema_version": "1.0.0",
+  "seed": 42,
+  "source_record_ref": null,
+  "source_system": "synthetic",
+  "stream": "weather_forecast",
+  "synthetic": true,
+  "t": 1991616
+}

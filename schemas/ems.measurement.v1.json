@@ -1,0 +1,336 @@
+{
+  "$defs": {
+    "Aggregation": {
+      "enum": [
+        "interval_sum",
+        "interval_mean",
+        "instant",
+        "register"
+      ],
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "AssetType": {
+      "enum": [
+        "pv",
+        "wind",
+        "bess",
+        "chp",
+        "hydro",
+        "biogas",
+        "biomass",
+        "heat_pump",
+        "ev_charger",
+        "load",
+        "grid_connection"
+      ],
+      "title": "AssetType",
+      "type": "string"
+    },
+    "Direction": {
+      "enum": [
+        "generation",
+        "consumption",
+        "import",
+        "export",
+        "charge",
+        "discharge"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "Measurement": {
+      "properties": {
+        "aggregation": {
+          "$ref": "#/$defs/Aggregation"
+        },
+        "asset_id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "asset_type": {
+          "$ref": "#/$defs/AssetType"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "obis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Obis"
+        },
+        "phase": {
+          "default": "total",
+          "title": "Phase",
+          "type": "string"
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        },
+        "quality_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quality Raw"
+        },
+        "quantity": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "number"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "asset_id",
+        "asset_type",
+        "quantity",
+        "direction",
+        "aggregation",
+        "value",
+        "unit",
+        "quality"
+      ],
+      "title": "Measurement",
+      "type": "object"
+    },
+    "MeasurementPayload": {
+      "properties": {
+        "measurements": {
+          "items": {
+            "$ref": "#/$defs/Measurement"
+          },
+          "minItems": 1,
+          "title": "Measurements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "measurements"
+      ],
+      "title": "MeasurementPayload",
+      "type": "object"
+    },
+    "Quality": {
+      "enum": [
+        "measured",
+        "estimated",
+        "substituted",
+        "missing",
+        "synthetic"
+      ],
+      "title": "Quality",
+      "type": "string"
+    },
+    "Quantity": {
+      "enum": [
+        "active_energy",
+        "active_power",
+        "reactive_energy",
+        "soc",
+        "heat_energy",
+        "fuel_gas_volume"
+      ],
+      "title": "Quantity",
+      "type": "string"
+    },
+    "Resolution": {
+      "enum": [
+        "PT1M",
+        "PT15M",
+        "PT1H",
+        "P1D"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    }
+  },
+  "$id": "urn:ems:schema:ems.measurement:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "algorithm_id": {
+      "default": null,
+      "title": "Algorithm Id",
+      "type": "null"
+    },
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_time_kind": {
+      "const": "interval",
+      "default": "interval",
+      "title": "Event Time Kind",
+      "type": "string"
+    },
+    "ingested_at": {
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    },
+    "interval_end": {
+      "format": "date-time",
+      "title": "Interval End",
+      "type": "string"
+    },
+    "interval_start": {
+      "format": "date-time",
+      "title": "Interval Start",
+      "type": "string"
+    },
+    "issued_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Issued At"
+    },
+    "location_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Location Id"
+    },
+    "metering_point_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metering Point Id"
+    },
+    "payload": {
+      "$ref": "#/$defs/MeasurementPayload"
+    },
+    "resolution": {
+      "$ref": "#/$defs/Resolution"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "schema": {
+      "const": "ems.measurement",
+      "default": "ems.measurement",
+      "title": "Schema",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "pattern": "^1\\.\\d+\\.\\d+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    },
+    "source_record_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Record Ref"
+    },
+    "source_system": {
+      "pattern": "^(replay:)?[a-z0-9-]+$",
+      "title": "Source System",
+      "type": "string"
+    },
+    "stream": {
+      "enum": [
+        "production",
+        "consumption"
+      ],
+      "title": "Stream",
+      "type": "string"
+    },
+    "synthetic": {
+      "title": "Synthetic",
+      "type": "boolean"
+    },
+    "t": {
+      "title": "T",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "stream",
+    "source_system",
+    "interval_start",
+    "interval_end",
+    "resolution",
+    "t",
+    "ingested_at",
+    "synthetic",
+    "payload"
+  ],
+  "title": "MeasurementEvent",
+  "type": "object"
+}

@@ -1,0 +1,512 @@
+{
+  "algorithm_id": null,
+  "event_id": "4e344c05-4d4f-50b4-9c8d-993937352ac5",
+  "event_time_kind": "interval",
+  "ingested_at": "2026-10-20T12:15:05Z",
+  "interval_end": "2026-10-21T22:00:00Z",
+  "interval_start": "2026-10-20T22:00:00Z",
+  "issued_at": "2026-10-20T11:59:15Z",
+  "location_id": null,
+  "metering_point_id": null,
+  "payload": {
+    "bidding_zone": "PL",
+    "currency": "PLN",
+    "delivery_day": "2026-10-21",
+    "market": "PL_RCE",
+    "publication_time": "2026-10-20T11:59:15Z",
+    "resolution": "PT15M",
+    "slots": [
+      {
+        "interval_end": "2026-10-20T22:15:00Z",
+        "interval_start": "2026-10-20T22:00:00Z",
+        "price": 400.0
+      },
+      {
+        "interval_end": "2026-10-20T22:30:00Z",
+        "interval_start": "2026-10-20T22:15:00Z",
+        "price": 401.0
+      },
+      {
+        "interval_end": "2026-10-20T22:45:00Z",
+        "interval_start": "2026-10-20T22:30:00Z",
+        "price": 402.0
+      },
+      {
+        "interval_end": "2026-10-20T23:00:00Z",
+        "interval_start": "2026-10-20T22:45:00Z",
+        "price": 403.0
+      },
+      {
+        "interval_end": "2026-10-20T23:15:00Z",
+        "interval_start": "2026-10-20T23:00:00Z",
+        "price": 404.0
+      },
+      {
+        "interval_end": "2026-10-20T23:30:00Z",
+        "interval_start": "2026-10-20T23:15:00Z",
+        "price": 405.0
+      },
+      {
+        "interval_end": "2026-10-20T23:45:00Z",
+        "interval_start": "2026-10-20T23:30:00Z",
+        "price": 406.0
+      },
+      {
+        "interval_end": "2026-10-21T00:00:00Z",
+        "interval_start": "2026-10-20T23:45:00Z",
+        "price": 407.0
+      },
+      {
+        "interval_end": "2026-10-21T00:15:00Z",
+        "interval_start": "2026-10-21T00:00:00Z",
+        "price": 408.0
+      },
+      {
+        "interval_end": "2026-10-21T00:30:00Z",
+        "interval_start": "2026-10-21T00:15:00Z",
+        "price": 409.0
+      },
+      {
+        "interval_end": "2026-10-21T00:45:00Z",
+        "interval_start": "2026-10-21T00:30:00Z",
+        "price": 410.0
+      },
+      {
+        "interval_end": "2026-10-21T01:00:00Z",
+        "interval_start": "2026-10-21T00:45:00Z",
+        "price": 411.0
+      },
+      {
+        "interval_end": "2026-10-21T01:15:00Z",
+        "interval_start": "2026-10-21T01:00:00Z",
+        "price": 412.0
+      },
+      {
+        "interval_end": "2026-10-21T01:30:00Z",
+        "interval_start": "2026-10-21T01:15:00Z",
+        "price": 413.0
+      },
+      {
+        "interval_end": "2026-10-21T01:45:00Z",
+        "interval_start": "2026-10-21T01:30:00Z",
+        "price": 414.0
+      },
+      {
+        "interval_end": "2026-10-21T02:00:00Z",
+        "interval_start": "2026-10-21T01:45:00Z",
+        "price": 415.0
+      },
+      {
+        "interval_end": "2026-10-21T02:15:00Z",
+        "interval_start": "2026-10-21T02:00:00Z",
+        "price": 416.0
+      },
+      {
+        "interval_end": "2026-10-21T02:30:00Z",
+        "interval_start": "2026-10-21T02:15:00Z",
+        "price": 417.0
+      },
+      {
+        "interval_end": "2026-10-21T02:45:00Z",
+        "interval_start": "2026-10-21T02:30:00Z",
+        "price": 418.0
+      },
+      {
+        "interval_end": "2026-10-21T03:00:00Z",
+        "interval_start": "2026-10-21T02:45:00Z",
+        "price": 419.0
+      },
+      {
+        "interval_end": "2026-10-21T03:15:00Z",
+        "interval_start": "2026-10-21T03:00:00Z",
+        "price": 420.0
+      },
+      {
+        "interval_end": "2026-10-21T03:30:00Z",
+        "interval_start": "2026-10-21T03:15:00Z",
+        "price": 421.0
+      },
+      {
+        "interval_end": "2026-10-21T03:45:00Z",
+        "interval_start": "2026-10-21T03:30:00Z",
+        "price": 422.0
+      },
+      {
+        "interval_end": "2026-10-21T04:00:00Z",
+        "interval_start": "2026-10-21T03:45:00Z",
+        "price": 423.0
+      },
+      {
+        "interval_end": "2026-10-21T04:15:00Z",
+        "interval_start": "2026-10-21T04:00:00Z",
+        "price": 424.0
+      },
+      {
+        "interval_end": "2026-10-21T04:30:00Z",
+        "interval_start": "2026-10-21T04:15:00Z",
+        "price": 425.0
+      },
+      {
+        "interval_end": "2026-10-21T04:45:00Z",
+        "interval_start": "2026-10-21T04:30:00Z",
+        "price": 426.0
+      },
+      {
+        "interval_end": "2026-10-21T05:00:00Z",
+        "interval_start": "2026-10-21T04:45:00Z",
+        "price": 427.0
+      },
+      {
+        "interval_end": "2026-10-21T05:15:00Z",
+        "interval_start": "2026-10-21T05:00:00Z",
+        "price": 428.0
+      },
+      {
+        "interval_end": "2026-10-21T05:30:00Z",
+        "interval_start": "2026-10-21T05:15:00Z",
+        "price": 429.0
+      },
+      {
+        "interval_end": "2026-10-21T05:45:00Z",
+        "interval_start": "2026-10-21T05:30:00Z",
+        "price": 430.0
+      },
+      {
+        "interval_end": "2026-10-21T06:00:00Z",
+        "interval_start": "2026-10-21T05:45:00Z",
+        "price": 431.0
+      },
+      {
+        "interval_end": "2026-10-21T06:15:00Z",
+        "interval_start": "2026-10-21T06:00:00Z",
+        "price": 432.0
+      },
+      {
+        "interval_end": "2026-10-21T06:30:00Z",
+        "interval_start": "2026-10-21T06:15:00Z",
+        "price": 433.0
+      },
+      {
+        "interval_end": "2026-10-21T06:45:00Z",
+        "interval_start": "2026-10-21T06:30:00Z",
+        "price": 434.0
+      },
+      {
+        "interval_end": "2026-10-21T07:00:00Z",
+        "interval_start": "2026-10-21T06:45:00Z",
+        "price": 435.0
+      },
+      {
+        "interval_end": "2026-10-21T07:15:00Z",
+        "interval_start": "2026-10-21T07:00:00Z",
+        "price": 436.0
+      },
+      {
+        "interval_end": "2026-10-21T07:30:00Z",
+        "interval_start": "2026-10-21T07:15:00Z",
+        "price": 437.0
+      },
+      {
+        "interval_end": "2026-10-21T07:45:00Z",
+        "interval_start": "2026-10-21T07:30:00Z",
+        "price": 438.0
+      },
+      {
+        "interval_end": "2026-10-21T08:00:00Z",
+        "interval_start": "2026-10-21T07:45:00Z",
+        "price": 439.0
+      },
+      {
+        "interval_end": "2026-10-21T08:15:00Z",
+        "interval_start": "2026-10-21T08:00:00Z",
+        "price": 440.0
+      },
+      {
+        "interval_end": "2026-10-21T08:30:00Z",
+        "interval_start": "2026-10-21T08:15:00Z",
+        "price": 441.0
+      },
+      {
+        "interval_end": "2026-10-21T08:45:00Z",
+        "interval_start": "2026-10-21T08:30:00Z",
+        "price": 442.0
+      },
+      {
+        "interval_end": "2026-10-21T09:00:00Z",
+        "interval_start": "2026-10-21T08:45:00Z",
+        "price": 443.0
+      },
+      {
+        "interval_end": "2026-10-21T09:15:00Z",
+        "interval_start": "2026-10-21T09:00:00Z",
+        "price": 444.0
+      },
+      {
+        "interval_end": "2026-10-21T09:30:00Z",
+        "interval_start": "2026-10-21T09:15:00Z",
+        "price": 445.0
+      },
+      {
+        "interval_end": "2026-10-21T09:45:00Z",
+        "interval_start": "2026-10-21T09:30:00Z",
+        "price": 446.0
+      },
+      {
+        "interval_end": "2026-10-21T10:00:00Z",
+        "interval_start": "2026-10-21T09:45:00Z",
+        "price": 447.0
+      },
+      {
+        "interval_end": "2026-10-21T10:15:00Z",
+        "interval_start": "2026-10-21T10:00:00Z",
+        "price": 448.0
+      },
+      {
+        "interval_end": "2026-10-21T10:30:00Z",
+        "interval_start": "2026-10-21T10:15:00Z",
+        "price": 449.0
+      },
+      {
+        "interval_end": "2026-10-21T10:45:00Z",
+        "interval_start": "2026-10-21T10:30:00Z",
+        "price": 450.0
+      },
+      {
+        "interval_end": "2026-10-21T11:00:00Z",
+        "interval_start": "2026-10-21T10:45:00Z",
+        "price": 451.0
+      },
+      {
+        "interval_end": "2026-10-21T11:15:00Z",
+        "interval_start": "2026-10-21T11:00:00Z",
+        "price": 452.0
+      },
+      {
+        "interval_end": "2026-10-21T11:30:00Z",
+        "interval_start": "2026-10-21T11:15:00Z",
+        "price": 453.0
+      },
+      {
+        "interval_end": "2026-10-21T11:45:00Z",
+        "interval_start": "2026-10-21T11:30:00Z",
+        "price": 454.0
+      },
+      {
+        "interval_end": "2026-10-21T12:00:00Z",
+        "interval_start": "2026-10-21T11:45:00Z",
+        "price": 455.0
+      },
+      {
+        "interval_end": "2026-10-21T12:15:00Z",
+        "interval_start": "2026-10-21T12:00:00Z",
+        "price": 456.0
+      },
+      {
+        "interval_end": "2026-10-21T12:30:00Z",
+        "interval_start": "2026-10-21T12:15:00Z",
+        "price": 457.0
+      },
+      {
+        "interval_end": "2026-10-21T12:45:00Z",
+        "interval_start": "2026-10-21T12:30:00Z",
+        "price": 458.0
+      },
+      {
+        "interval_end": "2026-10-21T13:00:00Z",
+        "interval_start": "2026-10-21T12:45:00Z",
+        "price": 459.0
+      },
+      {
+        "interval_end": "2026-10-21T13:15:00Z",
+        "interval_start": "2026-10-21T13:00:00Z",
+        "price": 460.0
+      },
+      {
+        "interval_end": "2026-10-21T13:30:00Z",
+        "interval_start": "2026-10-21T13:15:00Z",
+        "price": 461.0
+      },
+      {
+        "interval_end": "2026-10-21T13:45:00Z",
+        "interval_start": "2026-10-21T13:30:00Z",
+        "price": 462.0
+      },
+      {
+        "interval_end": "2026-10-21T14:00:00Z",
+        "interval_start": "2026-10-21T13:45:00Z",
+        "price": 463.0
+      },
+      {
+        "interval_end": "2026-10-21T14:15:00Z",
+        "interval_start": "2026-10-21T14:00:00Z",
+        "price": 464.0
+      },
+      {
+        "interval_end": "2026-10-21T14:30:00Z",
+        "interval_start": "2026-10-21T14:15:00Z",
+        "price": 465.0
+      },
+      {
+        "interval_end": "2026-10-21T14:45:00Z",
+        "interval_start": "2026-10-21T14:30:00Z",
+        "price": 466.0
+      },
+      {
+        "interval_end": "2026-10-21T15:00:00Z",
+        "interval_start": "2026-10-21T14:45:00Z",
+        "price": 467.0
+      },
+      {
+        "interval_end": "2026-10-21T15:15:00Z",
+        "interval_start": "2026-10-21T15:00:00Z",
+        "price": 468.0
+      },
+      {
+        "interval_end": "2026-10-21T15:30:00Z",
+        "interval_start": "2026-10-21T15:15:00Z",
+        "price": 469.0
+      },
+      {
+        "interval_end": "2026-10-21T15:45:00Z",
+        "interval_start": "2026-10-21T15:30:00Z",
+        "price": 470.0
+      },
+      {
+        "interval_end": "2026-10-21T16:00:00Z",
+        "interval_start": "2026-10-21T15:45:00Z",
+        "price": 471.0
+      },
+      {
+        "interval_end": "2026-10-21T16:15:00Z",
+        "interval_start": "2026-10-21T16:00:00Z",
+        "price": 472.0
+      },
+      {
+        "interval_end": "2026-10-21T16:30:00Z",
+        "interval_start": "2026-10-21T16:15:00Z",
+        "price": 473.0
+      },
+      {
+        "interval_end": "2026-10-21T16:45:00Z",
+        "interval_start": "2026-10-21T16:30:00Z",
+        "price": 474.0
+      },
+      {
+        "interval_end": "2026-10-21T17:00:00Z",
+        "interval_start": "2026-10-21T16:45:00Z",
+        "price": 475.0
+      },
+      {
+        "interval_end": "2026-10-21T17:15:00Z",
+        "interval_start": "2026-10-21T17:00:00Z",
+        "price": 476.0
+      },
+      {
+        "interval_end": "2026-10-21T17:30:00Z",
+        "interval_start": "2026-10-21T17:15:00Z",
+        "price": 477.0
+      },
+      {
+        "interval_end": "2026-10-21T17:45:00Z",
+        "interval_start": "2026-10-21T17:30:00Z",
+        "price": 478.0
+      },
+      {
+        "interval_end": "2026-10-21T18:00:00Z",
+        "interval_start": "2026-10-21T17:45:00Z",
+        "price": 479.0
+      },
+      {
+        "interval_end": "2026-10-21T18:15:00Z",
+        "interval_start": "2026-10-21T18:00:00Z",
+        "price": 480.0
+      },
+      {
+        "interval_end": "2026-10-21T18:30:00Z",
+        "interval_start": "2026-10-21T18:15:00Z",
+        "price": 481.0
+      },
+      {
+        "interval_end": "2026-10-21T18:45:00Z",
+        "interval_start": "2026-10-21T18:30:00Z",
+        "price": 482.0
+      },
+      {
+        "interval_end": "2026-10-21T19:00:00Z",
+        "interval_start": "2026-10-21T18:45:00Z",
+        "price": 483.0
+      },
+      {
+        "interval_end": "2026-10-21T19:15:00Z",
+        "interval_start": "2026-10-21T19:00:00Z",
+        "price": 484.0
+      },
+      {
+        "interval_end": "2026-10-21T19:30:00Z",
+        "interval_start": "2026-10-21T19:15:00Z",
+        "price": 485.0
+      },
+      {
+        "interval_end": "2026-10-21T19:45:00Z",
+        "interval_start": "2026-10-21T19:30:00Z",
+        "price": 486.0
+      },
+      {
+        "interval_end": "2026-10-21T20:00:00Z",
+        "interval_start": "2026-10-21T19:45:00Z",
+        "price": 487.0
+      },
+      {
+        "interval_end": "2026-10-21T20:15:00Z",
+        "interval_start": "2026-10-21T20:00:00Z",
+        "price": 488.0
+      },
+      {
+        "interval_end": "2026-10-21T20:30:00Z",
+        "interval_start": "2026-10-21T20:15:00Z",
+        "price": 489.0
+      },
+      {
+        "interval_end": "2026-10-21T20:45:00Z",
+        "interval_start": "2026-10-21T20:30:00Z",
+        "price": 490.0
+      },
+      {
+        "interval_end": "2026-10-21T21:00:00Z",
+        "interval_start": "2026-10-21T20:45:00Z",
+        "price": 491.0
+      },
+      {
+        "interval_end": "2026-10-21T21:15:00Z",
+        "interval_start": "2026-10-21T21:00:00Z",
+        "price": 492.0
+      },
+      {
+        "interval_end": "2026-10-21T21:30:00Z",
+        "interval_start": "2026-10-21T21:15:00Z",
+        "price": 493.0
+      },
+      {
+        "interval_end": "2026-10-21T21:45:00Z",
+        "interval_start": "2026-10-21T21:30:00Z",
+        "price": 494.0
+      },
+      {
+        "interval_end": "2026-10-21T22:00:00Z",
+        "interval_start": "2026-10-21T21:45:00Z",
+        "price": 495.0
+      }
+    ],
+    "unit": "PLN/MWh"
+  },
+  "resolution": "PT15M",
+  "run_id": null,
+  "schema": "ems.price",
+  "schema_version": "1.0.0",
+  "seed": null,
+  "source_record_ref": null,
+  "source_system": "synthetic",
+  "stream": "price",
+  "synthetic": true,
+  "t": 1991704
+}

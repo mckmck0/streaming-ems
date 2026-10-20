@@ -6,7 +6,8 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install format lint type-check test ci clean
+.PHONY: help install format lint type-check test test-unit test-integration ci clean \
+        up down reset topics topics-describe gen gen-fast gen-backfill tail validate schemas
 
 help:
 	@echo ""
@@ -16,8 +17,15 @@ help:
 	@echo "  format      ruff check --fix + ruff format. Run at the end of every code change"
 	@echo "  lint        uv lock --check + ruff check + ruff format --check"
 	@echo "  type-check  ty check"
-	@echo "  test        pytest (no tests yet counts as a pass until the test tiers exist)"
-	@echo "  ci          lint + type-check + test"
+	@echo "  test        unit + property + integration tests (integration needs make up)"
+	@echo "  test-unit   unit and property tests (no infrastructure)"
+	@echo "  test-integration  integration tests against the compose stack (make up first)"
+	@echo "  ci          lint + type-check + test-unit"
+	@echo ""
+	@echo "  up / down   local Kafka stack (infra/docker-compose.yml); reset wipes its volume (asks)"
+	@echo "  topics      ensure topics (PROFILE=live|sim|scale|cluster); topics-describe shows drift"
+	@echo "  gen         generator in compose (realtime); gen-fast (x96); gen-backfill DAYS=2 START=..."
+	@echo "  tail TOPIC=...  validate   inspect and validate topics; schemas re-exports JSON Schemas"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
 
@@ -41,20 +49,55 @@ lint:
 type-check:
 	uv run ty check
 
-# pytest exits 5 when it collects no tests. Accept that only while the repo has no tests; once the tiers
-# below exist, an empty tier must fail again.
-test:
-	@uv run pytest; status=$$?; \
-	if [ $$status -eq 5 ]; then echo "no tests collected yet"; exit 0; fi; \
-	exit $$status
+test-unit:
+	uv run pytest -m "unit or property"
 
-ci: lint type-check test
+test-integration:
+	uv run pytest -m integration
+
+test: test-unit test-integration
+
+ci: lint type-check test-unit
 	@echo ""
 	@echo "All CI checks passed."
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .hypothesis build dist logs
 	find src -name __pycache__ -type d -prune -exec rm -rf {} +
+
+# ── Spec 001: data pipeline (Kafka stack, topics, generator) ──
+COMPOSE  := docker compose -f infra/docker-compose.yml
+PROFILE  ?= live
+DAYS     ?= 2
+START    ?= 2026-10-20T00:00:00Z
+TOPIC    ?= ems.production.v1
+up:
+	$(COMPOSE) up -d --wait
+down:
+	$(COMPOSE) down
+reset:
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+	  read -r -p "This deletes the Kafka volume and all topic data. Type yes to continue: " ans; \
+	  [ "$$ans" = "yes" ] || { echo "aborted"; exit 1; }; \
+	fi
+	$(COMPOSE) down -v
+topics:
+	uv run ems-gen topics ensure --profile $(PROFILE) --apply-config
+topics-describe:
+	uv run ems-gen topics describe --profile $(PROFILE)
+gen:
+	$(COMPOSE) --profile gen up -d ems-gen
+gen-fast:
+	uv run ems-gen run --mode accelerated --speed 96
+gen-backfill:
+	uv run ems-gen topics ensure --profile sim --apply-config
+	EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode backfill --start $(START) --days $(DAYS)
+tail:
+	uv run ems-gen tail --topic $(TOPIC) --from-beginning --max 20
+validate:
+	uv run ems-gen validate --all --from-beginning
+schemas:
+	uv run ems-gen schemas export
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)
@@ -82,15 +125,10 @@ clean:
 # pre-commit:
 # 	uv run pre-commit run --all-files
 
-# ── Spec 001 (data pipeline) enables up/down for Kafka; the Restate spec adds itself and register ──
-# COMPOSE       := docker compose -f infra/docker-compose.yml
+# ── Spec: dev environment adds Restate to the compose file and `register` ──
 # RESTATE_ADMIN ?= http://localhost:9070
 # SERVICE_URL   ?= http://host.docker.internal:9080
 # FORCE         ?= false   # true overwrites a deployment at the same URI: dev only
-# up:
-# 	$(COMPOSE) up -d --wait
-# down:
-# 	$(COMPOSE) down
 # register:
 # 	curl -fsS -X POST $(RESTATE_ADMIN)/deployments \
 # 	  -H "content-type: application/json" \

@@ -27,3 +27,6 @@ node_modules/
 .claude/worktrees/
 .claude/agent-memory-local/
 CLAUDE.local.md
+
+# Generated data, recordings and run manifests
+/data/
