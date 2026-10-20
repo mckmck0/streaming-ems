@@ -1,11 +1,3 @@
-<!--
-Sync Impact Report (remove before commit)
-- Version change: template → 1.0.0 (initial ratification)
-- Principles: P1–P16 taken verbatim in substance from docs/context/07-design-principles.md
-- Added sections: Core Principles (16), Development Constraints, Development Workflow, Governance
-- Removed sections: none
-- Deferred TODOs: none
--->
 # EMS Constitution
 
 Counterfactual multi-strategy energy management on durable stateful actors (MSc thesis).
