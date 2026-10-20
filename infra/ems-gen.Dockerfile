@@ -18,6 +18,7 @@ RUN useradd --uid 10001 --create-home ems
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY config ./config
+COPY mappings ./mappings
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1
 USER ems
 ENTRYPOINT ["ems-gen"]

@@ -145,7 +145,7 @@ series, PT60M history) mapped offline; calibration job run against recorded hist
 - **AC-002-03**: WHEN PSE fixtures for 2025-03-30, 2025-10-26 and 2026-03-29 are mapped, THE SYSTEM SHALL produce 92, 100 and 92 unique UTC slots at 15-minute spacing.
 - **AC-002-04**: IF PSE returns an empty or incomplete day, THEN THE SYSTEM SHALL emit nothing for that day and retry later.
 - **AC-002-05**: WHEN the same PSE publication is polled twice, THE SYSTEM SHALL emit one event; WHEN the publication time changes, THE SYSTEM SHALL emit a new event.
-- **AC-002-06**: WHEN an Open-Meteo forecast fixture is mapped, THE SYSTEM SHALL produce 192 steps starting at the run time with canonical field names and units, `forecast_model` equal to the requested model.
+- **AC-002-06**: WHEN an Open-Meteo forecast fixture is mapped, THE SYSTEM SHALL produce up to 192 steps starting at the run time (truncated before the first step with a missing value, since the model horizon can end early), with canonical field names and units and `forecast_model` equal to the requested model.
 - **AC-002-07**: WHILE the model run is unchanged, THE SYSTEM SHALL not emit another forecast event for the site.
 - **AC-002-08**: WHEN the A44 fixtures are mapped, THE SYSTEM SHALL forward-fill A03 positions to the period end, select contract type A01, keep PT60M history, de-duplicate identical series and flag conflicting ones.
 - **AC-002-09**: IF a source returns 429 or 5xx, THEN THE SYSTEM SHALL retry with backoff; IF it returns 400/401/403, THEN THE SYSTEM SHALL fail without retry.

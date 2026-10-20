@@ -51,8 +51,10 @@ def measurement_event(
     metering_point_id: str | None = None,
     seed: int | None = None,
     synthetic: bool = True,
+    source_record_ref: str | None = None,
 ) -> MeasurementEvent:
     return MeasurementEvent(
+        source_record_ref=source_record_ref,
         event_id=event_id(
             stream=stream.value,
             subject=location_id,
@@ -102,6 +104,7 @@ def forecast_event(
     run_id: str | None = None,
     seed: int | None = None,
     synthetic: bool = True,
+    source_record_ref: str | None = None,
 ) -> WeatherForecastEvent:
     """``steps`` hold per-step weather values; times and lead times follow from ``issued_at``."""
     built = []
@@ -117,6 +120,7 @@ def forecast_event(
         )
     start = built[0].valid_start
     return WeatherForecastEvent(
+        source_record_ref=source_record_ref,
         event_id=event_id(
             stream=Stream.WEATHER_FORECAST.value,
             subject=location_id,
@@ -155,12 +159,14 @@ def price_event(
     seed: int | None = None,
     synthetic: bool = True,
     currency: Literal["PLN", "EUR"] = "PLN",
+    source_record_ref: str | None = None,
 ) -> PriceEvent:
     slots_t = local_day_slots(delivery_day, resolution.delta)
     if len(prices) != len(slots_t):
         raise ValueError(f"{delivery_day}: {len(slots_t)} prices needed, {len(prices)} given")
     start, end = local_day_bounds(delivery_day)
     return PriceEvent(
+        source_record_ref=source_record_ref,
         event_id=event_id(
             stream=Stream.PRICE.value,
             subject=MARKET_KEYS[market],

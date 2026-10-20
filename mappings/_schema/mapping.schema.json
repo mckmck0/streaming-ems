@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ems:schema:mapping:v1",
+  "title": "EMS source mapping (raw payload -> canonical rows)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mapping", "version", "source", "layout", "records", "fields"],
+  "properties": {
+    "mapping": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9]+)*\\.v[0-9]+$"},
+    "version": {"type": "integer", "minimum": 1},
+    "source": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "description": {"type": "string"},
+    "layout": {"enum": ["rows", "columns"]},
+    "records": {"type": "string", "pattern": "^/.*$"},
+    "null_policy": {"enum": ["skip", "missing"], "default": "skip"},
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "label", "resolution"],
+      "properties": {
+        "field": {"type": "string"},
+        "label": {"enum": ["start", "end", "instant"]},
+        "resolution": {"enum": ["PT1M", "PT15M", "PT1H", "P1D"]}
+      }
+    },
+    "fields": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/field"}
+    }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "type": {"enum": ["float", "int", "str", "datetime", "date"], "default": "str"},
+        "tz": {"enum": ["utc", "local:Europe/Warsaw", "epoch_s", "epoch_ms"]},
+        "unit_in": {"type": "string"},
+        "unit_out": {"type": "string"},
+        "required": {"type": "boolean", "default": true},
+        "transforms": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {"const": "negate"},
+              {"type": "object", "additionalProperties": false, "required": ["scale"], "properties": {"scale": {"type": "number"}}},
+              {"type": "object", "additionalProperties": false, "required": ["enum_map"], "properties": {"enum_map": {"type": "object"}}},
+              {"type": "object", "additionalProperties": false, "required": ["default"], "properties": {"default": {}}},
+              {"type": "object", "additionalProperties": false, "required": ["round"], "properties": {"round": {"type": "integer", "minimum": 0}}}
+            ]
+          }
+        },
+        "sign_split": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "quality_map": {"type": "object", "additionalProperties": {"enum": ["measured", "estimated", "substituted", "missing", "synthetic"]}}
+      }
+    }
+  }
+}

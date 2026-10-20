@@ -1,0 +1,4 @@
+Weather data by Open-Meteo.com (https://open-meteo.com), licensed CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). Recorded 2026-10-20 for tests; the EMS converts it to
+canonical units and intervals. Underlying model: DWD ICON-D2. Citation: Zippenfenig, P. (2023). Open-Meteo.com
+Weather API. Zenodo. https://doi.org/10.5281/ZENODO.7970649

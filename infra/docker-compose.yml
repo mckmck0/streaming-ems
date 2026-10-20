@@ -93,6 +93,7 @@ services:
         required: false
     volumes:
       - ../config:/app/config:ro
+      - ../mappings:/app/mappings:ro
       - ../data:/data
     depends_on:
       kafka-init:

@@ -1,0 +1,3 @@
+PSE S.A. market data from the public Raporty API (https://api.raporty.pse.pl), reports rce-pln and
+csdac-pln, recorded 2026-10-20 for tests (source: Polskie Sieci Elektroenergetyczne S.A.). Reuse terms of the
+API are not published; these few days are kept only as test fixtures.

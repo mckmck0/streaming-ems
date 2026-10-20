@@ -24,6 +24,7 @@ class EmsSettings(BaseSettings):
     topics_profile: TopicsProfile = "live"
     topic_prefix: str = Field(default="", pattern=r"^[A-Za-z0-9._-]*$")
     config_dir: Path = Path("config")
+    mappings_dir: Path = Path("mappings")
     data_dir: Path = Path("data")
     delivery_timeout_ms: int = Field(default=120_000, gt=0)
     open_meteo_api_key: SecretStr | None = None

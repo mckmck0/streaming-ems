@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Acknowledgement_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-1:acknowledgementdocument:7:0">
+  <mRID>ack-fixture</mRID>
+  <createdDateTime>2026-10-20T12:00:00Z</createdDateTime>
+  <Reason>
+    <code>999</code>
+    <text>No matching data found for Data item Energy Prices [12.1.D]</text>
+  </Reason>
+</Acknowledgement_MarketDocument>

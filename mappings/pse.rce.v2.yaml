@@ -1,0 +1,17 @@
+# PSE Raporty API v2, report rce-pln (https://api.raporty.pse.pl/api/rce-pln).
+# Quirks: dtime_utc labels the END of the quarter-hour; local labels (dtime, period) are not parseable on DST
+# days ("02a:15" on fall-back days, changed spring-forward labels between 2025 and 2026), so only UTC fields
+# are used. Prices are PLN/MWh excluding VAT; negatives allowed. One publication time per business day.
+mapping: pse.rce.v2
+version: 1
+source: pse-rce
+layout: rows
+records: /value
+null_policy: skip
+fields:
+  interval_end: {path: dtime_utc, type: datetime, tz: utc}
+  price: {path: rce_pln, type: float, unit_in: PLN/MWh, unit_out: PLN/MWh}
+  business_date: {path: business_date, type: date}
+  published: {path: publication_ts_utc, type: datetime, tz: utc}
+  label: {path: period, type: str, required: false}
+time: {field: interval_end, label: end, resolution: PT15M}
