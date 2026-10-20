@@ -148,6 +148,73 @@ def schemas_export(
         typer.echo(f"wrote {path}")
 
 
+@app.command("tail")
+def tail(
+    topic: Annotated[str, typer.Option(help="Topic name (the topic prefix is added).")],
+    key: Annotated[str | None, typer.Option(help="Only records with this key.")] = None,
+    from_beginning: Annotated[bool, typer.Option(help="Start at the oldest record.")] = False,
+    max_records: Annotated[int, typer.Option("--max", help="Stop after N records.")] = 20,
+    bootstrap: BootstrapOpt = None,
+) -> None:
+    """Pretty-print key, partition, offset, headers and value."""
+    _need_ingest()
+    import json
+
+    from ems.ingest.tools.reader import read_topic
+
+    s = _settings(bootstrap=bootstrap)
+    shown = 0
+    for rec in read_topic(s.kafka_bootstrap, s.topic_prefix + topic, from_beginning=from_beginning):
+        if key is not None and rec.key != key:
+            continue
+        value = json.loads(rec.value) if rec.value else None
+        typer.echo(
+            f"--- {rec.topic}[{rec.partition}]@{rec.offset} key={rec.key} ts={rec.timestamp_ms} "
+            f"headers={rec.headers}"
+        )
+        typer.echo(json.dumps(value, indent=2)[:4000])
+        shown += 1
+        if shown >= max_records:
+            break
+
+
+@app.command("validate")
+def validate(
+    topic: Annotated[str | None, typer.Option(help="Topic name (without prefix).")] = None,
+    all_topics: Annotated[
+        bool, typer.Option("--all", help="Validate every defined topic.")
+    ] = False,
+    from_beginning: Annotated[bool, typer.Option(help="Read from the oldest record.")] = True,
+    profile: ProfileOpt = None,
+    bootstrap: BootstrapOpt = None,
+) -> None:
+    """Check every record against the schema, the routing rule and partition stability."""
+    _need_ingest()
+    from ems.contracts.topics import load_plan
+    from ems.ingest.tools.reader import read_topic
+    from ems.ingest.tools.validate import validate_records
+
+    s = _settings(profile, bootstrap)
+    plan = load_plan(s.config_dir, s.topics_profile, s.topic_prefix)
+    desired = plan.by_name()
+    if all_topics:
+        names = list(desired)
+    elif topic:
+        names = [s.topic_prefix + topic]
+    else:
+        typer.echo("give --topic or --all", err=True)
+        raise typer.Exit(2)
+    clean = True
+    for name in names:
+        partitions = desired[name].partitions if name in desired else 1
+        records = read_topic(s.kafka_bootstrap, name, from_beginning=from_beginning)
+        report = validate_records(name, records, partitions, s.topic_prefix)
+        for line in report.lines():
+            typer.echo(line)
+        clean = clean and report.clean
+    raise typer.Exit(0 if clean else 1)
+
+
 def main() -> None:  # pragma: no cover
     app()
 
