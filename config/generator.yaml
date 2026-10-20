@@ -1,0 +1,19 @@
+# ems-gen behaviour (no secrets, no interpolation). Connection settings come from EMS_* variables.
+seed: 4242
+clock:
+  mode: backfill            # backfill | accelerated | realtime
+  speed: 96.0               # accelerated: simulated seconds per wall second
+  start: "2026-10-20T00:00:00Z"
+  end: null                 # null: run until stopped (realtime/accelerated) or --days
+streams:
+  weather_forecast: {mode: synthetic}
+  weather_actual: {mode: off}
+  production: {mode: synthetic}
+  consumption: {mode: synthetic}
+  price: {mode: synthetic, emit_initial_day: true}
+meters:
+  availability_delay_s: 0   # meter events are emitted at interval end plus this delay
+scale:
+  synthetic_locations: 1    # PL-LOC-000001 .. n; config/sites.yaml overrides by id
+  catalog_seed: 7
+chunk_days: 1               # generation chunk for open-ended runs

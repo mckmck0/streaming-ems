@@ -85,6 +85,16 @@ class SinkStats:
         return 3 if self.fatal or self.failures else 0
 
 
+class Sink(Protocol):
+    """What the runner needs from a sink (KafkaSink, or a fake in tests)."""
+
+    stats: SinkStats
+
+    def publish(self, event: EnvelopeBase) -> bool: ...
+    def poll(self, timeout: float = 0) -> None: ...
+    def close(self, timeout_s: float = 30.0) -> SinkStats: ...
+
+
 class KafkaSink:
     def __init__(
         self,

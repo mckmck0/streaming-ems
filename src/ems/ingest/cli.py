@@ -215,6 +215,73 @@ def validate(
     raise typer.Exit(0 if clean else 1)
 
 
+@app.command("catalog")
+def catalog(
+    n: Annotated[int, typer.Option("--n", help="Number of locations PL-LOC-000001..n.")] = 1000,
+    out: Annotated[Path, typer.Option(help="Parquet file.")] = Path("data/catalog.parquet"),
+    config: Annotated[Path, typer.Option(help="Generator config.")] = Path("config/generator.yaml"),
+) -> None:
+    """Export the generated site catalog (hand-defined sites included) as Parquet."""
+    _need_ingest()
+    import dataclasses
+
+    from ems.ingest.catalog.build import export_catalog
+    from ems.ingest.generator import load_generator_config, load_sites
+
+    s = load_settings()
+    cfg = dataclasses.replace(load_generator_config(config), synthetic_locations=n)
+    sites = load_sites(s.config_dir, cfg)
+    typer.echo(f"wrote {export_catalog(sites, out)} ({len(sites)} sites)")
+
+
+@app.command("run")
+def run(
+    mode: Annotated[str | None, typer.Option(help="backfill | accelerated | realtime")] = None,
+    start: Annotated[str | None, typer.Option(help="UTC start, e.g. 2026-10-20T00:00:00Z")] = None,
+    end: Annotated[str | None, typer.Option(help="UTC end (exclusive)")] = None,
+    days: Annotated[float | None, typer.Option(help="Window length in days from --start")] = None,
+    speed: Annotated[
+        float | None, typer.Option(help="Accelerated: sim seconds per wall second")
+    ] = None,
+    run_id: Annotated[
+        str | None, typer.Option(help="Run scope: prefixes keys, enters event ids")
+    ] = None,
+    config: Annotated[Path, typer.Option(help="Generator config.")] = Path("config/generator.yaml"),
+    bootstrap: BootstrapOpt = None,
+) -> None:
+    """Generate and publish. Exit 0 all delivered, 1 preflight refused, 3 delivery failures."""
+    _need_ingest()
+    import asyncio
+
+    from ems.ingest.generator import load_generator_config
+    from ems.ingest.runner import PreflightError, parse_window
+    from ems.ingest.runner import run as do_run
+
+    s = _settings(bootstrap=bootstrap)
+    cfg = load_generator_config(config)
+    chosen = mode or cfg.mode
+    if chosen not in ("backfill", "accelerated", "realtime"):
+        typer.echo(f"unknown mode {chosen}", err=True)
+        raise typer.Exit(2)
+    try:
+        w_start, w_end = parse_window(start, end, days)
+        if w_start is None and chosen != "realtime":
+            w_start = cfg.start
+        if w_end is None and days is None and end is None:
+            w_end = cfg.end
+        result = asyncio.run(
+            do_run(s, cfg, mode=chosen, start=w_start, end=w_end, run_id=run_id, speed=speed)
+        )
+    except PreflightError as exc:
+        typer.echo(f"preflight refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(f"events {dict(result.counts)}; manifest {result.manifest}")
+    raise typer.Exit(result.exit_code)
+
+
 def main() -> None:  # pragma: no cover
     app()
 

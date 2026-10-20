@@ -1,0 +1,23 @@
+# Hand-defined sites. They replace generated sites with the same location_id; seeds are derived.
+sites:
+  # The live test site (§16 default): household near Poznań, PV + EMS-controlled battery + heat pump, G12.
+  - location_id: PL-LOC-000001
+    site_type: household
+    lat: 52.41
+    lon: 16.93
+    elevation_m: 85
+    voivodeship: "30"
+    city: Poznań
+    street: ul. Testowa 1
+    postcode: "61-001"
+    dso: Enea
+    metering_point_id: "590900200000000018"   # synthetic Enea prefix 9002
+    tariff_group: G12
+    contracted_kw: 14.0
+    fuse_a: 25
+    annual_base_load_kwh: 2500        # excludes the heat pump (modelled separately, ~+4-6 MWh/yr)
+    assets:
+      - {kind: pv, asset_id: pv-1, kwp: 10.0, tilt_deg: 35, azimuth_deg: 180, ac_kw: 9.0}
+      - {kind: heat_pump, asset_id: hp-1, heat_loss_kw_per_k: 0.16, dhw_kwh_per_year: 2500}
+      - {kind: bess, asset_id: bess-1, capacity_kwh: 10.0, p_max_kw: 5.0, eta: 0.95,
+         soc_min_kwh: 1.0, soc_max_kwh: 9.5, control: ems}

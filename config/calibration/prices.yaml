@@ -1,0 +1,26 @@
+# Synthetic RCE-like prices (PSE RCE: RES-act net-billing reference price, PLN/MWh, quarter-hourly
+# since 2025-10-01). Literature/observed defaults: 12-month negative share ~3.9 % (0 % Nov-Dec, 13.5 %
+# April), tail to about -1500, spikes to about 3000, publication D-1 mostly 13:00-14:00 local.
+market: PL_RCE
+currency: PLN
+base_by_month: [560, 520, 470, 440, 420, 440, 470, 470, 480, 500, 540, 560]
+shape:
+  morning_peak: {hour: 7.5, width: 1.5, height: 0.22}
+  evening_peak: {hour: 18.5, width: 2.0, height: 0.45}
+  night_dip: {hour: 3.0, width: 2.5, depth: 0.22}
+weekend_factor: 0.88
+holiday_factor: 0.85
+# PLN/MWh removed per unit of the national PV index (GHI/1000 at the reference point) by month:
+# the PV build-out pushes spring and summer middays below zero, especially on weekends.
+solar_coef_by_month: [150, 260, 500, 700, 640, 600, 540, 520, 470, 300, 160, 120]
+wind_coef: 230               # PLN/MWh at full national wind index
+noise_sd: 40
+noise_tau_h: 6
+spike_probability: 0.0015
+spike_range: [600, 2200]
+floor: -1500
+cap: 3000
+publication:
+  # D-1 local publication time distribution (observed 2025-10..2026-10)
+  bands: [[13.0, 14.0, 0.77], [14.0, 15.0, 0.22], [15.0, 16.25, 0.01]]
+reference_site: {lat: 52.0, lon: 19.0, elevation_m: 150}
