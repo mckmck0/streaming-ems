@@ -22,3 +22,7 @@
 
 ## Phase 5: Polish
 - [x] T013 Docs (13, 12, 06, 09, 11, 00); `make ci`, `make test-integration`
+
+## Phase 6: Convergence
+
+- [x] T014 Add an automated test that the benchmark job writes results with config, versions, hardware and commit per AC-003-08 (missing)
