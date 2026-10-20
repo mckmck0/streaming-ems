@@ -1,0 +1,6 @@
+Wind turbine power curves (E-53/800, E-82/2350, V90/2000, N117/2400, V126/3450), extracted 2026-10-20 from
+windpowerlib v0.2.2 (windpowerlib/oedb/power_curves.csv and turbine_data.csv,
+https://github.com/wind-python/windpowerlib, MIT licence for the code). The data comes from the Open Energy
+Platform "Wind Turbine Library" (supply.wind_turbine_library), licensed ODbL-1.0
+(https://opendatacommons.org/licenses/odbl/1-0/), © Reiner Lemoine Institut; original sources include
+manufacturer data sheets. Units converted to kW; hub heights are one typical value per type.
