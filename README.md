@@ -8,8 +8,8 @@ compared counterfactually while one of them drives the real battery.
 - **Start here:** [docs/context/README.md](docs/context/README.md) (canonical docs, status of every piece).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
   subagents, hooks). Changes go spec-first through the `ems-plan-change` skill and GitHub Spec Kit.
-- **Status:** the Claude Code harness and the canonical docs exist. The environment, the reference-spike
-  reproduction and the code are built spec by spec, starting with backlog spec 001
-  (see [docs/context/00-overview.md](docs/context/00-overview.md)).
+- **Status:** the Claude Code harness and Spec Kit exist; the canonical docs are written with the spec that
+  needs them. The code is built spec by spec, starting with the data pipeline (spec 001), see
+  [docs/context/00-overview.md](docs/context/00-overview.md).
 
 Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).

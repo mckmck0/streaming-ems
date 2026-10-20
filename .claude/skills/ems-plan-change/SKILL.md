@@ -21,8 +21,8 @@ until the user approves**. Never start implementation: only the user runs `/spec
 
 ## 1. Ground
 
-- Invoke `ems-context` and read the docs it lists. For a backlog spec (001–012), take the title, scope
-  and EARS criteria from the backlog in `docs/context/00-overview.md`.
+- Invoke `ems-context` and read the docs it lists. For a backlog item, take the title, scope and order
+  from the backlog in `docs/context/00-overview.md` (numbers are assigned by Spec Kit at specify time).
 - Look for prior art: existing `specs/NNN-*`, ADRs in `docs/adr/`, current code.
 
 ## 2. Checklists

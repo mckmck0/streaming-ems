@@ -12,18 +12,18 @@ before 2026-10-02.
 | File | Covers |
 |---|---|
 | [00-overview.md](00-overview.md) | Purpose, scope, status of every piece, repo map, backlog, decisions so far |
-| [01-architecture.md](01-architecture.md) | Actors, keys, single-writer ownership, message diagram |
-| [02-subsystem-actors.md](02-subsystem-actors.md) | Restate services and handlers, rules R1–R7, registration, Kafka ingress |
-| [03-subsystem-strategies-and-evaluation.md](03-subsystem-strategies-and-evaluation.md) | Policy contract, shadow vs live, Evaluator, Selector |
-| [04-subsystem-forecasting-and-optimization.md](04-subsystem-forecasting-and-optimization.md) | Forecasters, MILP/MPC, oracle, data sources |
-| [05-deploy-and-infra.md](05-deploy-and-infra.md) | uv project and tooling, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions |
-| [06-data-flows.md](06-data-flows.md) | Tick, live loop, replay and sim clock, failure and recovery, timers |
+| [01-architecture.md](01-architecture.md) *(planned)* | Actors, keys, single-writer ownership, message diagram |
+| [02-subsystem-actors.md](02-subsystem-actors.md) *(planned)* | Restate services and handlers, rules R1–R7, registration, Kafka ingress |
+| [03-subsystem-strategies-and-evaluation.md](03-subsystem-strategies-and-evaluation.md) *(planned)* | Policy contract, shadow vs live, Evaluator, Selector |
+| [04-subsystem-forecasting-and-optimization.md](04-subsystem-forecasting-and-optimization.md) *(planned)* | Forecasters, MILP/MPC, oracle, data sources |
+| [05-deploy-and-infra.md](05-deploy-and-infra.md) *(planned)* | uv project and tooling, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions |
+| [06-data-flows.md](06-data-flows.md) *(planned)* | Tick, live loop, replay and sim clock, failure and recovery, timers |
 | [07-design-principles.md](07-design-principles.md) | The 16 invariants; the source of the Spec Kit constitution |
-| [08-contracts.md](08-contracts.md) | Message envelope and schemas, Kafka topics, result schemas, versioning rules |
-| [09-risks-and-tech-debt.md](09-risks-and-tech-debt.md) | Known issues and risks with fix hints |
+| [08-contracts.md](08-contracts.md) *(planned)* | Message envelope and schemas, Kafka topics, result schemas, versioning rules |
+| [09-risks-and-tech-debt.md](09-risks-and-tech-debt.md) *(planned)* | Known issues and risks with fix hints |
 | [10-planning-guide.md](10-planning-guide.md) | How to plan a change: `ems-plan-change`, Spec Kit setup and loop, checklists |
-| [11-experiments.md](11-experiments.md) | Experiment protocol, metrics, statistics, reference-spike results |
-| [12-domain-model.md](12-domain-model.md) | Time base, units, battery model, settlement and net-billing, actions, glossary |
+| [11-experiments.md](11-experiments.md) *(planned)* | Experiment protocol, metrics, statistics, reference-spike results |
+| [12-domain-model.md](12-domain-model.md) *(planned)* | Time base, units, battery model, settlement and net-billing, actions, glossary |
 
 Elsewhere: decision records in [../adr/](../adr/README.md); the frozen seed brief in
 [../bootstrap/PROJECT_CONTEXT.md](../bootstrap/PROJECT_CONTEXT.md), read only to trace where something came

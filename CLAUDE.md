@@ -33,8 +33,8 @@ Surface real contradictions in your answer instead of silently picking a side.
   `/speckit-implement`; afterwards run `/speckit-converge` until it reports converged.
 - Acceptance criteria use EARS ("WHEN …, THE SYSTEM SHALL …"). Every plan that touches actors has an
   **Actor contract** section (template in `ems-actor-contract`).
-- Spec Kit is not initialised yet. If `.specify/` is missing, stop and point to the setup steps in
-  `docs/context/10-planning-guide.md`.
+- Spec Kit v1.1.0 is initialised (setup and upgrade steps: `docs/context/10-planning-guide.md`). Specs are
+  written as we go, one piece at a time; the backlog order is in `docs/context/00-overview.md`.
 
 ## Skills
 

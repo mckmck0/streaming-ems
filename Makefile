@@ -60,7 +60,8 @@ clean:
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-# ── Spec 001: test tiers with combined coverage (markers: unit, property, integration, e2e, fault) ──
+# ── Test tiers with combined coverage (markers: unit, property, integration, e2e, fault). Spec 001 enables ──
+# ── test-unit and test-integration; the dev-environment spec adds e2e, fault and coverage ──
 # coverage 7.14+ combines implicitly when reporting; --keep-combined keeps the per-tier files.
 # LOGS_DIR := logs
 # test-unit:
@@ -81,7 +82,7 @@ clean:
 # pre-commit:
 # 	uv run pre-commit run --all-files
 
-# ── Spec 001: local infrastructure (infra/docker-compose.yml: Restate + Kafka-compatible broker) ──
+# ── Spec 001 (data pipeline) enables up/down for Kafka; the Restate spec adds itself and register ──
 # COMPOSE       := docker compose -f infra/docker-compose.yml
 # RESTATE_ADMIN ?= http://localhost:9070
 # SERVICE_URL   ?= http://host.docker.internal:9080
@@ -95,16 +96,16 @@ clean:
 # 	  -H "content-type: application/json" \
 # 	  -d '{"uri": "$(SERVICE_URL)", "force": $(FORCE)}'
 
-# ── Spec 003: run the Restate SDK services locally ──
+# ── Spec: actor skeleton (run the Restate SDK services locally) ──
 # dev:
 # 	uv run hypercorn ems.actors.app:app --bind 0.0.0.0:9080 --reload
 
-# ── Spec 010: experiments ──
+# ── Spec: experiment harness ──
 # exp:
 # 	@test -n "$(NAME)" || { echo "usage: make exp NAME=<experiment-id>"; exit 1; }
 # 	uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml
 
-# ── Spec 011: kind + Helm (Helm 4). Never target a context other than kind-$(KIND_CLUSTER). ──
+# ── Spec: Helm deployment, kind + Helm 4. Never target a context other than kind-$(KIND_CLUSTER). ──
 # CHART        := helm/ems
 # KIND_CLUSTER ?= ems
 # KUBE_CONTEXT := kind-$(KIND_CLUSTER)

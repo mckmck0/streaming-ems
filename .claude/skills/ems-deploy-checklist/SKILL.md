@@ -7,7 +7,7 @@ description: Pre-flight checklist for infrastructure and tooling work in the EMS
 
 Read `docs/context/05-deploy-and-infra.md` first. It holds the verified versions (with source and date
 checked), the current state of each piece and what is still to be built; most of the environment is
-backlog spec 001, the Helm deployment is spec 011.
+the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the Helm deployment is a later spec.
 
 ## Before changing anything
 
