@@ -5,15 +5,19 @@ duplicates, conflicts.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 import respx
+from pydantic import SecretStr
 
 from ems.contracts.envelope import Market, Resolution, to_json_bytes, validate_strict
+from ems.ingest.kafka.sink import SinkStats
 from ems.ingest.live.entsoe import BASE_URL, EntsoeError, EntsoeSource, build_events, normalise
 from ems.ingest.live.http import Fetcher
 
@@ -97,3 +101,46 @@ def test_token_in_header_and_429_backs_off_ten_minutes() -> None:
     calls = route.call_count
     asyncio.run(src.poll(date(2026, 10, 22), NOW))
     assert route.call_count == calls  # no request inside the ban window
+
+
+@respx.mock
+def test_fr_004_conflicting_days_go_to_the_dlq(tmp_path: Path) -> None:
+    from ems.ingest.generator import load_generator_config
+    from ems.ingest.sources.live_runner import LiveRunner
+    from ems.settings import EmsSettings
+
+    respx.get(url__startswith=BASE_URL).mock(
+        return_value=httpx.Response(200, content=(FIX / "a44_conflict.xml").read_bytes())
+    )
+    respx.get(url__startswith="https://api.raporty.pse.pl/api/").mock(
+        return_value=httpx.Response(200, json={"value": []})
+    )
+
+    class DlqSink:
+        def __init__(self) -> None:
+            self.stats = SinkStats()
+            self.invalid: list[tuple[bytes, str | None, str]] = []
+
+        def publish(self, event: Any) -> bool:
+            return True
+
+        def publish_invalid(self, value: bytes, key: str | None, error: str) -> None:
+            self.invalid.append((value, key, error))
+
+        def poll(self, timeout: float = 0) -> None:
+            return None
+
+        def close(self, timeout_s: float = 30.0) -> SinkStats:
+            return self.stats
+
+    cfg = load_generator_config(REPO / "config" / "generator.live.yaml")
+    cfg = dataclasses.replace(cfg, live={**cfg.live, "entsoe": {"enabled": True}})
+    settings = EmsSettings(
+        config_dir=REPO / "config", data_dir=tmp_path, entsoe_token=SecretStr("tok-1")
+    )
+    sink = DlqSink()
+    runner = LiveRunner(settings, cfg, sink, (), price_live=True, clock=lambda: NOW)
+    asyncio.run(runner.prices_once())
+    assert (
+        sink.invalid and sink.invalid[0][1] == "ENTSOE:PL" and "conflicting" in sink.invalid[0][2]
+    )

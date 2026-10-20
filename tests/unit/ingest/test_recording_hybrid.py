@@ -75,7 +75,7 @@ class Collect:
 
 
 def settings(tmp: Path) -> EmsSettings:
-    return EmsSettings(config_dir=REPO / "config", data_dir=tmp, open_meteo_api_key=SECRET)  # type: ignore[arg-type]
+    return EmsSettings(config_dir=REPO / "config", data_dir=tmp, open_meteo_api_key=SECRET)
 
 
 def test_ac_002_12_routing() -> None:
@@ -145,7 +145,7 @@ def test_ac_002_12_live_site_meters_follow_live_weather(tmp_path: Path) -> None:
     sink = Collect()
     runner = LiveRunner(
         settings(tmp_path), cfg, sink, r.live_sites, price_live=True, clock=lambda: NOW
-    )  # type: ignore[arg-type]
+    )
     asyncio.run(runner.once())
     forecast = runner.state.forecasts["PL-LOC-000001"]
     noon = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)

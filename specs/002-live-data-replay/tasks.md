@@ -37,3 +37,9 @@ Tests first per task pair. Format: `[ID] [P?] [Story] description (ACs)`.
 
 ## Phase 8: Polish
 - [x] T020 Docs (13, 06, 05, 09, README/CLAUDE commands); `make ci`, `make test-integration`, live smoke run
+
+## Phase 9: Convergence
+
+- [x] T021 Publish conflicting ENTSO-E days to the DLQ with an error header per FR-004 (partial)
+- [x] T022 Add a test that every committed fixture folder carries a licence/attribution NOTICE per AC-002-15 (partial)
+- [x] T023 Smoke-test `make gen-live` (hybrid realtime) end to end per plan: CLI wiring, `make gen-live` (partial)

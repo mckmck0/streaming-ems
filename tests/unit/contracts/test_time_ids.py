@@ -68,7 +68,7 @@ def _id(**overrides: object) -> object:
         "major": 1,
     }
     base.update(overrides)
-    return event_id(**base)  # type: ignore[arg-type]
+    return event_id(**base)
 
 
 def test_ac_001_09_event_id_is_deterministic() -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -118,6 +119,12 @@ class LiveRunner:
             else None
         )
 
+    def _dlq(self, value: str, error: str) -> None:
+        publish_invalid = getattr(self.sink, "publish_invalid", None)
+        if publish_invalid is not None:
+            publish_invalid(value.encode(), "ENTSOE:PL", error)
+        self.state.counts["dlq"] += 1
+
     def _publish(self, event: Any) -> None:
         self.sink.publish(event)
         self.state.counts[event.stream.value] += 1
@@ -139,6 +146,16 @@ class LiveRunner:
                     self._publish(ev)
                 for dp in rejected:
                     log.error("entsoe_conflicts", day=dp.day.isoformat(), slots=len(dp.conflicts))
+                    self._dlq(
+                        json.dumps(
+                            {
+                                "source": "entsoe",
+                                "day": dp.day.isoformat(),
+                                "conflicts": dp.conflicts,
+                            }
+                        ),
+                        f"entsoe A44 {dp.day}: conflicting series at {len(dp.conflicts)} slots",
+                    )
         self.state.tomorrow_complete = complete
         return poll_interval(now, complete)
 
