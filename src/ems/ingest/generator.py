@@ -56,8 +56,11 @@ from ems.ingest.catalog.voivodeships import BY_TERYT
 from ems.ingest.localtime import local_hour, local_unix
 from ems.ingest.synthetic.balance import grid_flows
 from ems.ingest.synthetic.bess import BessArrays, dispatch
+from ems.ingest.synthetic.ev import ev_kwh
 from ems.ingest.synthetic.heat_pump import heat_pump_kwh
 from ems.ingest.synthetic.load import base_load_kwh
+from ems.ingest.synthetic.outages import availability
+from ems.ingest.synthetic.plants import biogas_kwh, biomass_kwh, chp_kwh, hydro_kwh
 from ems.ingest.synthetic.prices import day_prices, price_curve, price_params, publication_time
 from ems.ingest.synthetic.pv import PvArrays, pv_energy_kwh
 from ems.ingest.synthetic.weather import (
@@ -69,6 +72,7 @@ from ems.ingest.synthetic.weather import (
     generate_truth,
     load_params,
 )
+from ems.ingest.synthetic.wind import wind_energy_kwh
 
 F64 = NDArray[np.float64]
 Event = MeasurementEvent | WeatherForecastEvent | PriceEvent
@@ -77,6 +81,22 @@ Builder = Callable[[datetime], Event]
 FORECAST_STEPS = 192
 FORECAST_CADENCE_Q = 12  # 3 h in quarter-hours
 STREAM_ORDER = {"price": 0, "weather_forecast": 1, "production": 2, "consumption": 3}
+# Outage defaults (spec 004 assumptions): forced share of days, planned days per year.
+OUTAGES = {
+    "wind": (0.02, 0),
+    "chp": (0.01, 14),
+    "biogas": (0.01, 14),
+    "biomass": (0.01, 14),
+    "hydro": (0.005, 7),
+}
+# Generation assets beyond PV: chunk field, catalog property, contract asset type.
+PLANT_KINDS = (
+    ("wind_kwh", "wind", AssetType.WIND),
+    ("chp_kwh", "chp", AssetType.CHP),
+    ("biogas_kwh", "biogas", AssetType.BIOGAS),
+    ("biomass_kwh", "biomass", AssetType.BIOMASS),
+    ("hydro_kwh", "hydro", AssetType.HYDRO),
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +116,7 @@ class GeneratorConfig:
     site_controlled_bess_share: float = 0.0
     emit_registers: bool = False
     faults: dict[str, Any] = field(default_factory=dict)
+    site_mix: dict[str, float] = field(default_factory=dict)
 
     @property
     def live_locations(self) -> tuple[str, ...]:
@@ -141,6 +162,7 @@ def load_generator_config(path: Path) -> GeneratorConfig:
         emit_registers=bool((raw.get("meters") or {}).get("emit_registers", False)),
         site_chunk=int(scale.get("site_chunk", 2000)),
         site_controlled_bess_share=float(scale.get("site_controlled_bess_share", 0.0)),
+        site_mix={str(k): float(v) for k, v in (scale.get("site_mix") or {}).items()},
         faults=dict(raw.get("faults") or {}),
         synthetic_locations=int(scale.get("synthetic_locations", 1)),
         catalog_seed=int(scale.get("catalog_seed", 7)),
@@ -157,7 +179,12 @@ def load_sites(config_dir: Path, cfg: GeneratorConfig) -> list[Site]:
         global_seed=cfg.seed,
         overrides=overrides,
         site_controlled_bess_share=cfg.site_controlled_bess_share,
+        site_mix=cfg.site_mix or None,
     )
+
+
+def _zeros() -> F64:
+    return np.zeros((0, 0))
 
 
 @dataclass(frozen=True)
@@ -173,6 +200,27 @@ class Chunk:
     bess_discharge_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
     bess_soc_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
     import_register_kwh: F64 = field(default_factory=lambda: np.zeros((0, 0)))
+    wind_kwh: F64 = field(default_factory=_zeros)
+    chp_kwh: F64 = field(default_factory=_zeros)
+    chp_heat_kwh: F64 = field(default_factory=_zeros)
+    biogas_kwh: F64 = field(default_factory=_zeros)
+    biomass_kwh: F64 = field(default_factory=_zeros)
+    hydro_kwh: F64 = field(default_factory=_zeros)
+    ev_kwh: F64 = field(default_factory=_zeros)
+
+    def generation(self, s_idx: int, i: int) -> float:
+        """All site generation in one interval (PV plus plants), kWh."""
+        total = float(self.pv_kwh[s_idx, i])
+        for name, _, _ in PLANT_KINDS:
+            arr = getattr(self, name)
+            if arr.size:
+                total += float(arr[s_idx, i])
+        return total
+
+    def consumption(self, s_idx: int, i: int) -> float:
+        """Uncontrolled site consumption in one interval (base load, heat pump, EV), kWh."""
+        total = float(self.load_kwh[s_idx, i] + self.hp_kwh[s_idx, i])
+        return total + (float(self.ev_kwh[s_idx, i]) if self.ev_kwh.size else 0.0)
 
 
 def _take(obj: Any, idx: slice) -> Any:
@@ -197,6 +245,7 @@ class SyntheticModel:
         self, sites: list[Site], seed: int, config_dir: Path, site_chunk: int = 2000
     ) -> None:
         self.sites = sites
+        self.turbine_curves = config_dir / "turbines" / "power_curves.csv"
         self.seed = seed
         self.site_chunk = max(1, site_chunk)
         self.weather_params = load_params(config_dir / "calibration" / "weather.yaml")
@@ -238,14 +287,36 @@ class SyntheticModel:
             soc_min_kwh=np.array([b.soc_min_kwh if b else 0.0 for b in bess]),
             soc_max_kwh=np.array([b.soc_max_kwh if b else 1.0 for b in bess]),
         )
-        # State carried from one chunk to the next (SoC, cumulative import register).
+        # Other assets (spec 004): absent assets are zero-rated rows.
+        wind = [s.wind for s in sites]
+        self.wind_types: list[str | None] = [w.turbine_type if w else None for w in wind]
+        self.wind_count = np.array([float(w.count) if w else 0.0 for w in wind])
+        self.wind_hub = np.array([w.hub_height_m if w else 100.0 for w in wind])
+        chp = [s.chp for s in sites]
+        self.chp_rated = np.array([c.rated_kw if c else 0.0 for c in chp])
+        self.chp_p2h = np.array([c.power_to_heat if c else 1.0 for c in chp])
+        self.chp_min = np.array([c.min_load if c else 0.5 for c in chp])
+        self.chp_heat_k = np.array([c.heat_kw_per_k if c else 0.0 for c in chp])
+        self.chp_heat_base = np.array([c.heat_base_kw if c else 0.0 for c in chp])
+        self.biogas_rated = np.array([b.rated_kw if (b := s.biogas) else 0.0 for s in sites])
+        bio = [s.biomass for s in sites]
+        self.biomass_rated = np.array([b.rated_kw if b else 0.0 for b in bio])
+        self.biomass_min = np.array([b.min_load if b else 0.5 for b in bio])
+        self.biomass_ramp = np.array([b.ramp_kw_per_step if b else 0.0 for b in bio])
+        self.hydro_rated = np.array([h.rated_kw if (h := s.hydro) else 0.0 for s in sites])
+        ev = [s.ev for s in sites]
+        self.ev_patterns: list[str | None] = [e.pattern if e else None for e in ev]
+        self.ev_p = np.array([e.p_max_kw if e else 1.0 for e in ev])
+        self.ev_need = np.array([e.daily_need_kwh if e else 0.0 for e in ev])
+        # State carried from one chunk to the next (SoC, cumulative import register, biomass level).
         self._carry_t: int | None = None
         self._soc = self.bess.initial_soc()
         self._register = np.zeros(len(sites))
+        self._biomass_level: F64 | None = None
 
     def _subset(
         self, idx: slice, axis: TimeAxis, n: int, issues: list[int], override: Any
-    ) -> tuple[F64, F64, F64, dict[int, ForecastRun], Truth]:
+    ) -> tuple[F64, F64, F64, dict[int, ForecastRun], Truth, dict[str, F64]]:
         arrays = _take(self.arrays, idx)
         truth = generate_truth(arrays, axis, self.seed, self.weather_params)
         if override is not None:
@@ -268,7 +339,70 @@ class SyntheticModel:
             )
             for issue in issues
         }
-        return pv, load, hp, runs, truth
+        return pv, load, hp, runs, truth, self._other_assets(idx, arrays, axis, n, truth)
+
+    def _avail(self, keys: NDArray[np.uint64], t: NDArray[np.int64], kind: str) -> F64:
+        forced, planned = OUTAGES[kind]
+        return availability(self.seed, keys, t, kind, forced, planned)
+
+    def _other_assets(
+        self, idx: slice, arrays: SiteArrays, axis: TimeAxis, n: int, truth: Truth
+    ) -> dict[str, F64]:
+        """Wind, CHP, biogas, hydro and EV energy for one slice (biomass needs the full price
+        curve and runs over all sites in ``chunk``).
+        """
+        keys, t = arrays.keys, axis.t[:n]
+        out: dict[str, F64] = {}
+        if any(self.wind_types[idx]):
+            out["wind_kwh"] = wind_energy_kwh(
+                self.turbine_curves,
+                self.wind_types[idx],
+                self.wind_count[idx],
+                self.wind_hub[idx],
+                truth.wind10[:, :n],
+                arrays.shear_alpha,
+                truth.temp_c[:, :n],
+                arrays.elevation_m,
+                self._avail(keys, t, "wind"),
+            )
+        local = local_unix(axis.unix_start[:n])
+        if self.chp_rated[idx].any():
+            weekday = ((np.floor(local / 86400.0).astype(np.int64) + 3) % 7) < 5
+            out["chp_kwh"], out["chp_heat_kwh"] = chp_kwh(
+                truth.temp_c[:, :n],
+                weekday,
+                self.chp_rated[idx],
+                self.chp_p2h[idx],
+                self.chp_min[idx],
+                self.chp_heat_k[idx],
+                self.chp_heat_base[idx],
+                self._avail(keys, t, "chp"),
+            )
+        if self.biogas_rated[idx].any():
+            out["biogas_kwh"] = biogas_kwh(
+                self.seed,
+                keys,
+                int(t[0]),
+                n,
+                self.biogas_rated[idx],
+                self._avail(keys, t, "biogas"),
+            )
+        if self.hydro_rated[idx].any():
+            doy = axis.calendar(axis.unix_mid[:n])[0].astype(np.float64)
+            out["hydro_kwh"] = hydro_kwh(
+                self.seed,
+                keys,
+                int(t[0]),
+                n,
+                doy,
+                self.hydro_rated[idx],
+                self._avail(keys, t, "hydro"),
+            )
+        if any(self.ev_patterns[idx]):
+            out["ev_kwh"] = ev_kwh(
+                self.seed, keys, local, self.ev_p[idx], self.ev_need[idx], self.ev_patterns[idx]
+            )
+        return out
 
     def chunk(
         self,
@@ -286,14 +420,16 @@ class SyntheticModel:
         axis = TimeAxis.from_range(t0, horizon_end - t0)
         n_loc = len(self.sites)
         pv_parts, load_parts, hp_parts = [], [], []
+        other_parts: list[tuple[int, dict[str, F64]]] = []
         run_parts: dict[int, list[ForecastRun]] = {i: [] for i in forecast_issues}
         if weather_override is not None and n_loc > self.site_chunk:
             raise ValueError("weather overrides need all sites in one slice")
         for lo in range(0, max(n_loc, 1), self.site_chunk):
             idx = slice(lo, min(lo + self.site_chunk, n_loc))
-            pv, load, hp, runs, _truth = self._subset(
+            pv, load, hp, runs, _truth, other = self._subset(
                 idx, axis, n, forecast_issues, weather_override
             )
+            other_parts.append((idx.stop - idx.start, other))
             pv_parts.append(pv)
             load_parts.append(load)
             hp_parts.append(hp)
@@ -302,21 +438,42 @@ class SyntheticModel:
         pv_all = np.concatenate(pv_parts, axis=0)
         load_all = np.concatenate(load_parts, axis=0)
         hp_all = np.concatenate(hp_parts, axis=0)
+        other_all: dict[str, F64] = {}
+        for name in ("wind_kwh", "chp_kwh", "chp_heat_kwh", "biogas_kwh", "hydro_kwh", "ev_kwh"):
+            if any(name in o for _, o in other_parts):
+                other_all[name] = np.concatenate(
+                    [o.get(name, np.zeros((rows, n))) for rows, o in other_parts], axis=0
+                )
         charge = np.zeros_like(pv_all)
         discharge = np.zeros_like(pv_all)
         soc = np.zeros_like(pv_all)
         if self._carry_t != t0:  # not a continuation: start batteries and registers fresh
             self._soc = self.bess.initial_soc()
             self._register = np.zeros(n_loc)
+            self._biomass_level = None
+        day_index = (local_unix(axis.unix_start[:n]) // 86400).astype(np.int64)
+        if self.biomass_rated.any():
+            keys = self.arrays.keys
+            other_all["biomass_kwh"], self._biomass_level = biomass_kwh(
+                self.price_curve(t0, n),
+                self.biomass_rated,
+                self.biomass_min,
+                self.biomass_ramp,
+                self._avail(keys, axis.t[:n], "biomass"),
+                self._biomass_level,
+            )
+        gen_all = pv_all + sum(
+            (other_all[k] for k, _, _ in PLANT_KINDS if k in other_all), np.zeros_like(pv_all)
+        )
+        cons_all = load_all + hp_all + other_all.get("ev_kwh", np.zeros_like(pv_all))
         if self.bess.present.any():
             prices = self.price_curve(t0, n)
             hour_local = local_hour(axis.unix_mid[:n])
-            day_index = (local_unix(axis.unix_start[:n]) // 86400).astype(np.int64)
             charge, discharge, soc = dispatch(
-                self.bess, load_all + hp_all - pv_all, prices, hour_local, day_index, self._soc
+                self.bess, cons_all - gen_all, prices, hour_local, day_index, self._soc
             )
             self._soc = soc[:, -1].copy()
-        imports = np.clip(load_all + hp_all + charge - pv_all - discharge, 0.0, None)
+        imports = np.clip(cons_all + charge - gen_all - discharge, 0.0, None)
         register = self._register.reshape(-1, 1) + np.cumsum(imports, axis=1)
         self._register = register[:, -1].copy()
         self._carry_t = t0 + n
@@ -332,6 +489,7 @@ class SyntheticModel:
             bess_discharge_kwh=discharge,
             bess_soc_kwh=soc,
             import_register_kwh=register,
+            **other_all,
         )
 
     def price_curve(self, t0: int, n: int) -> F64:
@@ -363,9 +521,38 @@ def _meter_builders(
                     float(chunk.pv_kwh[s_idx, i]),
                 )
             )
+        for name, prop, asset_type in PLANT_KINDS:
+            asset = getattr(site, prop)
+            arr = getattr(chunk, name)
+            if asset is not None and arr.size:
+                gens.append(
+                    energy(asset.asset_id, asset_type, Direction.GENERATION, float(arr[s_idx, i]))
+                )
+        if site.chp is not None and chunk.chp_heat_kwh.size:
+            gens.append(
+                Measurement(
+                    asset_id=site.chp.asset_id,
+                    asset_type=AssetType.CHP,
+                    quantity=Quantity.HEAT_ENERGY,
+                    direction=Direction.GENERATION,
+                    aggregation=Aggregation.INTERVAL_SUM,
+                    value=float(chunk.chp_heat_kwh[s_idx, i]),
+                    unit="kWh",
+                    quality=Quality.SYNTHETIC,
+                )
+            )
         loads = [
             energy("load", AssetType.LOAD, Direction.CONSUMPTION, float(chunk.load_kwh[s_idx, i]))
         ]
+        if site.ev is not None and chunk.ev_kwh.size:
+            loads.append(
+                energy(
+                    site.ev.asset_id,
+                    AssetType.EV_CHARGER,
+                    Direction.CONSUMPTION,
+                    float(chunk.ev_kwh[s_idx, i]),
+                )
+            )
         if site.heat_pump is not None:
             loads.append(
                 energy(
@@ -397,8 +584,8 @@ def _meter_builders(
         else:
             charge = discharge = 0.0
         if not site.ems_managed:
-            gen_total = float(chunk.pv_kwh[s_idx, i])
-            load_total = float(chunk.load_kwh[s_idx, i] + chunk.hp_kwh[s_idx, i])
+            gen_total = chunk.generation(s_idx, i)
+            load_total = chunk.consumption(s_idx, i)
             imp, exp = grid_flows(
                 np.array([load_total]),
                 np.array([gen_total]),

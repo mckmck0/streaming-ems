@@ -19,6 +19,8 @@ scale:
   catalog_seed: 7
   site_chunk: 2000          # sites per generation slice (memory bound)
   site_controlled_bess_share: 0.0   # share of generated batteries controlled by the site (background)
+  site_mix: {}              # empty: households only. e.g. {household: 0.6, commercial: 0.1, industrial: 0.05,
+                            #   wind_farm: 0.08, solar_farm: 0.07, biogas_plant: 0.05, hydro_plant: 0.05}
 faults:                     # deterministic per seed; enable with `ems-gen run --faults`
   enabled: false
   missing_rate: 0.002
