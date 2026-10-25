@@ -33,3 +33,6 @@ CLAUDE.local.md
 
 # Raw experiment and benchmark results (reported numbers are copied into docs with their path)
 /experiments/results/
+
+# local dir
+/local/*
