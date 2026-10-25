@@ -5,16 +5,181 @@ Polish/EU market, 15-minute intervals) built on durable stateful actors (Restate
 SDK). The same live stream feeds many battery strategies, each on its own virtual battery, so they can be
 compared counterfactually while one of them drives the real battery.
 
-- **Start here:** [docs/context/README.md](docs/context/README.md) (canonical docs, status of every piece).
+## Contents
+
+- [About](#about)
+- [Setup](#setup)
+  - [Prerequisites](#prerequisites)
+  - [Install](#install)
+  - [Environment variables](#environment-variables)
+  - [Start Kafka](#start-kafka)
+  - [Generate data](#generate-data)
+  - [Check the setup](#check-the-setup)
+  - [Start the engine (TBD)](#start-the-engine-tbd)
+  - [Stop and reset](#stop-and-reset)
+  - [Troubleshooting](#troubleshooting)
+- [Data](#data)
+  - [What the data is](#what-the-data-is)
+  - [Topics at a glance](#topics-at-a-glance)
+  - [Record format](#record-format)
+  - [Envelope](#envelope)
+    - [Fields of every event](#fields-of-every-event)
+    - [Identity](#identity)
+  - [Time: event time, availability time and processing time](#time-event-time-availability-time-and-processing-time)
+    - [The timestamps](#the-timestamps)
+    - [Why event time alone is not enough](#why-event-time-alone-is-not-enough)
+    - [What ingested_at is, and is not](#what-ingested_at-is-and-is-not)
+    - [Using the times](#using-the-times)
+  - [Streams](#streams)
+    - [Measurements (production and consumption)](#measurements-production-and-consumption)
+    - [Weather forecasts](#weather-forecasts)
+    - [Prices](#prices)
+    - [Dead-letter topic](#dead-letter-topic)
+  - [Live sources: raw API responses](#live-sources-raw-api-responses)
+    - [PSE RCE and SDAC prices](#pse-rce-and-sdac-prices)
+    - [Open-Meteo forecast](#open-meteo-forecast)
+    - [ENTSO-E A44 (day-ahead prices)](#entso-e-a44-day-ahead-prices)
+  - [When events are emitted](#when-events-are-emitted)
+  - [Rules for consumers](#rules-for-consumers)
+
+## About
+
+- **Status:** the data pipeline is built (specs 001 to 004): the generators, the Kafka stack and the wire
+  contract. The EMS engine itself (Restate actors, strategies, settlement) is **not built yet**; see
+  [Start the engine (TBD)](#start-the-engine-tbd) and the backlog in
+  [docs/context/00-overview.md](docs/context/00-overview.md).
+- **Canonical docs:** [docs/context/README.md](docs/context/README.md) (index and status of every piece).
+  Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
   subagents, hooks). Changes go spec-first through the `ems-plan-change` skill.
-- **Status:** the Claude Code harness exists; the canonical docs are written with the spec that
-  needs them. The code is built spec by spec, starting with the data pipeline (spec 001), see
-  [docs/context/00-overview.md](docs/context/00-overview.md).
 
-Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
+## Setup
+
+### Prerequisites
+
+| Tool | Why | Notes |
+|---|---|---|
+| [uv](https://docs.astral.sh/uv/) | Python environment and dependencies | uv provides Python 3.13 or newer itself (`requires-python >= 3.13`). The generator image pins uv 0.12.21. |
+| Docker with Compose v2 | Kafka, Kafka UI and the containerised generator | Docker Desktop or Docker Engine. The Kafka container is limited to 1 GB of memory. |
+| GNU Make | The only entry point for commands | The macOS default (3.81) works. |
+| Network access | Only for live sources | Synthetic data needs none. Live runs call PSE and Open-Meteo (and ENTSO-E with a token). |
+
+Host ports used, all bound to `127.0.0.1`: 9092 (Kafka), 8088 (Kafka UI), and 19092 to 19094 for the optional
+3-broker profile.
+
+### Install
+
+```bash
+make install        # uv sync for all dependency groups, plus the pre-commit hooks
+```
+
+### Environment variables
+
+Settings are read from `EMS_*` environment variables ([src/ems/settings.py](src/ems/settings.py)); behaviour lives
+in YAML under [config/](config/). Nothing is required for a local synthetic run, since every default points at
+the local stack. A template with all variables is in [env.example](env.example).
+
+| Variable | Default | Needed for |
+|---|---|---|
+| `EMS_KAFKA_BOOTSTRAP` | `localhost:9092` | A different broker (the compose container sets `kafka:29092` itself). |
+| `EMS_TOPICS_PROFILE` | `live` | Topic profile: `live`, `sim`, `scale` or `cluster`. The `make gen-*` targets choose `sim` themselves. |
+| `EMS_TOPIC_PREFIX` | empty | Prefix for every topic name, to isolate test runs. |
+| `EMS_OPEN_METEO_API_KEY` | unset | Paid Open-Meteo API instead of the free non-commercial tier. |
+| `EMS_ENTSOE_TOKEN` | unset | ENTSO-E prices (also set `live.entsoe.enabled: true` in the config). |
+
+**Where they are read.** `cp env.example .env` creates a gitignored file that only the `ems-gen` **container**
+reads (`make gen`). Commands run on your machine through `uv run` and `make` do not load `.env`, so export the
+variables in your shell instead, for example `export EMS_OPEN_METEO_API_KEY=...`. Never commit secrets.
+
+### Start Kafka
+
+```bash
+make up             # Kafka (KRaft), one-shot topic creation, Kafka UI; waits until healthy
+```
+
+- Kafka listens on `localhost:9092`. The read-only Kafka UI is at <http://127.0.0.1:8088>.
+- The one-shot `kafka-init` job creates the topics from [config/topics.yaml](config/topics.yaml) with the profile
+  in `EMS_TOPICS_PROFILE` (default `live`). `make topics PROFILE=sim` applies another profile later.
+
+### Generate data
+
+The generator is the `ems-gen` command ([src/ems/ingest/](src/ems/ingest/)). With the default config it produces
+one site, the Poznań test household `PL-LOC-000001`.
+
+```bash
+make gen-backfill DAYS=2     # 2 simulated days from START=2026-10-20T00:00:00Z, written as fast as possible
+make validate                # check every record against the contract
+make stats                   # counts per topic and key, gaps, duplicates, late events
+make tail TOPIC=ems.price.v1 # look at the first records of a topic
+```
+
+Other ways to run it:
+
+| Command | What it does |
+|---|---|
+| `make gen` | Synthetic data in real time, in the `ems-gen` container. It keeps running; stop it with `docker compose -f infra/docker-compose.yml stop ems-gen`. |
+| `make gen-fast` | Synthetic data at 96 times real time, starting at `START`; stop with Ctrl+C. |
+| `make gen-live` | Hybrid real time: live PSE prices and Open-Meteo weather for the configured live site, synthetic for the rest. Needs network. |
+| `make record NAME=x` / `make replay NAME=x` | Record the live sources once, then publish that recording (event ids are kept). |
+| `make gen-backfill START=2025-10-25T00:00:00Z DAYS=365` | A year of history for one site takes seconds to generate (about 10 s measured without Kafka). It is synthetic climate, not the real weather of that year. |
+
+More sites, fault injection and run isolation are not exposed through `make`. Use the CLI directly:
+
+```bash
+EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode backfill --start 2026-10-20T00:00:00Z --days 2 \
+    --locations 50 --faults --run-id test1
+```
+
+- `--locations N` generates `PL-LOC-000001` to `N`; the others are generated households (or other site types via
+  `scale.site_mix`) with random assets.
+- `--faults` injects missing, duplicate, late and stuck readings (rates in `faults:` of the config).
+- `--run-id X` prefixes the Kafka keys and enters the event ids. Without it, a second run of the same window
+  republishes identical event ids and the topic holds duplicates.
+
+Every generator parameter, the config files and what they connect to are described in
+[docs/context/13-subsystem-ingest.md](docs/context/13-subsystem-ingest.md); `uv run ems-gen --help` lists all
+commands. What the generated events contain is described in [Data](#data) below.
+
+### Check the setup
+
+```bash
+make ci                # lint, type-check and the unit and property tests; needs no infrastructure
+make test-integration  # tests against the real stack; run `make up` first
+```
+
+### Start the engine (TBD)
+
+**Not available yet.** The EMS engine (Restate server, the Python service with the household, battery and
+strategy actors, the Kafka subscriptions that feed it from the topics above) has not been built. It is next in the
+backlog in [docs/context/00-overview.md](docs/context/00-overview.md): first the Kafka ingestion into Restate,
+then the dev environment, the domain core and the actors. This section will hold the start commands (the
+planned `make` targets for it are listed, commented out, at the bottom of the [Makefile](Makefile)).
+
+Until then, the generated topics are the engine's input. Everything an engine needs to consume them is in
+[Data](#data): the topics, keys, event format and the rules for consumers.
+
+### Stop and reset
+
+```bash
+make down              # stop the Kafka stack, keep the data volume (stop a `make gen` container separately, see above)
+make reset             # also delete the volume and all topic data (asks for confirmation)
+make cluster-down      # stop the optional 3-broker profile
+```
+
+### Troubleshooting
+
+- **"preflight refused" (exit code 1) when running `ems-gen run`.** The topics would reject or expire the
+  record timestamps, for example when backfilling old data on the `live` profile. Use `make gen-backfill` or set
+  `EMS_TOPICS_PROFILE=sim` and run `make topics PROFILE=sim`.
+- **`make test-integration` says Kafka is not reachable.** Run `make up` first.
+- **`make validate` or `make stats` shows duplicates after a re-run.** The same window was published twice without
+  a `--run-id`; see above.
+- **The generator exits with code 3.** Some records were not delivered; the run manifest in
+  `data/runs/<run>/manifest.json` has the counts per error.
 
 ## Data
+
+### What the data is
 
 The data generator (`ems-gen`, [src/ems/ingest/](src/ems/ingest/)) publishes JSON events for Polish sites to
 Kafka: weather forecasts, production and consumption meter readings, and day-ahead prices. The data is either
@@ -53,7 +218,9 @@ has to join them on `(location_id, t)`. Kafka gives no ordering across topics.
 | **Headers** | For tooling only (the JSON value is self-contained): `schema`, `schema_version`, `source_system`, `content-type` (`application/json`) and `synthetic` (`true` or `false`). The dead-letter topic adds `error`. |
 | **Producer** | `acks=all`, idempotent, zstd compression. |
 
-### Envelope: fields of every event
+### Envelope
+
+#### Fields of every event
 
 These top-level fields are identical on all three event types. The type-specific content is in `payload`.
 
@@ -61,7 +228,7 @@ These top-level fields are identical on all three event types. The type-specific
 |---|---|---|
 | `schema` | `ems.measurement` \| `ems.weather_forecast` \| `ems.price` | Which payload this event carries and which parser to use. |
 | `schema_version` | string, `1.x.y` | Contract version. Changes within major version 1 only add fields. |
-| `event_id` | UUID | Deterministic identity (UUIDv5) of the event, see below. The same event always has the same id, so consumers can deduplicate on it. |
+| `event_id` | UUID | Deterministic identity (UUIDv5) of the event, see [Identity](#identity). The same event always has the same id, so consumers can deduplicate on it. |
 | `stream` | `production` \| `consumption` \| `weather_forecast` \| `weather_actual` \| `price` | Which topic the event belongs to. |
 | `source_system` | string | Where the data came from: `synthetic`, `open-meteo`, `pse-rce`, `pse-csdac` or `entsoe`. A replayed recording is prefixed `replay:` (for example `replay:open-meteo`). |
 | `source_record_ref` | string or null | Pointer to the source record, never a secret. For example `open-meteo:icon_d2:<issued_at>`, `rce-pln:<day>:<publication time>`, `entsoe:A44:<day>`. Null for synthetic data. |
@@ -83,12 +250,16 @@ All datetimes are UTC, written as RFC 3339 with a `Z`. Numbers are always finite
 local time only matters for delivery days, which have 92 quarter-hours on 2026-03-29, 100 on 2026-10-25 and 96
 otherwise.
 
-**Identity.** `event_id = uuid5(namespace, "stream|subject|interval_start|issued_at|origin source|run_id|major version")`,
+#### Identity
+
+`event_id = uuid5(namespace, "stream|subject|interval_start|issued_at|origin source|run_id|major version")`,
 where the subject is the location id or the market key and the origin source is `source_system` without the
 `replay:` prefix. A replay therefore keeps its event ids, a new `run_id` produces new ones, and a re-run of the same
 window without a `run_id` republishes identical ids (they show up as duplicates in `make stats`).
 
 ### Time: event time, availability time and processing time
+
+#### The timestamps
 
 There are only two clocks: the **world clock** (event time, the timeline the data is about) and the **system
 clock** (processing time, the wall clock of the machine handling it). On the world clock an event carries three
@@ -104,21 +275,28 @@ meaningless (backfill, replay, simulation).
 | **Availability time** (world clock) | From when could a consumer know it? | **Not a field.** It is derived: meter readings at `interval_end` (plus `meters.availability_delay_s`), forecasts at `issued_at` + 90 minutes, prices at `publication_time`. | The 18:00 run is usable from 19:30. |
 | **Processing time** (system clock) | When did the system handle it? | `ingested_at`: the wall-clock time at which the generator handed the record to Kafka. | `2026-10-20T00:15:05Z` |
 
-**Why event time alone is not enough.** A price for tomorrow 14:00 has an event time tomorrow, but it is known
+#### Why event time alone is not enough
+
+A price for tomorrow 14:00 has an event time tomorrow, but it is known
 today from its publication at 13:41. A strategy running at 15:00 today may use it; at 10:00 today it may not.
 Event time cannot express that, and processing time can't either in a backfill, where every event is produced
 within minutes of the others. Issue time is the deterministic stand-in: it travels with the data, so a replay gives the
 same answer every time. The same holds for a forecast run, which describes the next 48 hours but is only known from
 its run time plus the 90-minute delivery delay.
 
-**What `ingested_at` is, and is not.** It is the processing time of one stage only: the generator, at the moment it
+#### What ingested_at is, and is not
+
+It is the processing time of one stage only: the generator, at the moment it
 produces to Kafka. It is stamped once and the event is never changed afterwards, so the EMS engine does **not** add
 its own processing time to these events. Later stages (ingestion into Restate, a strategy's predictions, the
 decisions) record their own times in their own state and messages. Those are not defined yet; they come with the
 actor specs. It is also not Kafka's broker append time, which the data topics don't use (their record timestamp is
 the event time; only the dead-letter topic uses append time).
 
+#### Using the times
+
 Things to know when you use the times:
+
 - **In live mode** `ingested_at` is close to the availability time: a meter reading is produced right after its
   interval ends, a forecast about 90 minutes after its run, a price when PSE publishes it.
 - **In backfill, accelerated and replay runs `ingested_at` is the real wall clock**, not simulated time. Backfilling
@@ -135,7 +313,13 @@ Things to know when you use the times:
   handles an event and the event's `ingested_at` (or its availability time) gives the pipeline lag. That fits the
   project's rule to report systems metrics beside energy metrics, but no such measurement exists yet.
 
-### Measurements: `ems.production.v1` and `ems.consumption.v1`
+### Streams
+
+Four topics carry the data and one is the dead-letter queue. Each is described below with every payload field.
+
+#### Measurements (production and consumption)
+
+Topics `ems.production.v1` and `ems.consumption.v1`.
 
 One event per site and 15-minute interval. The consumption event is always produced; the production event only for
 sites that have generation. Values are **energy in the interval (kWh), not power**: multiply by 4 to get the
@@ -207,7 +391,9 @@ Example, a trimmed `ems.consumption.v1` record (full examples in [schemas/exampl
 }
 ```
 
-### Weather forecasts: `ems.weather.forecast.v1`
+#### Weather forecasts
+
+Topic `ems.weather.forecast.v1`.
 
 One event per site and model run. Runs are issued every 3 hours (00, 03, ... UTC) and each covers 48 hours as 192
 steps of 15 minutes (a live run can be a little shorter, see the Open-Meteo notes below), so for any future moment
@@ -238,7 +424,9 @@ Each step:
 With the live source, only the radiation is native 15-minute model output. Open-Meteo interpolates temperature, wind
 and cloud cover from hourly values, so do not read them as native 15-minute data.
 
-### Prices: `ems.price.v1`
+#### Prices
+
+Topic `ems.price.v1`.
 
 One event per market and local (Europe/Warsaw) delivery day, published the day before. Prices are in the native
 currency per MWh, **not** per kWh, and negative values are real and allowed.
@@ -263,7 +451,9 @@ The markets:
 If a source republishes a day with changed values, the new event has a new `publication_time` and therefore a new
 `event_id`, on the same key. Consumers should use the latest `issued_at` per market and delivery day.
 
-### Dead-letter topic: `ems.gen.dlq.v1`
+#### Dead-letter topic
+
+Topic `ems.gen.dlq.v1`.
 
 Where the generator parks something it refuses to publish to its real topic. It is normally empty. The key is the
 original key, the value is the original payload, and the `error` header holds the reason (up to 1,000 characters).
@@ -271,7 +461,7 @@ Two things end up here: an event that fails strict validation before sending, an
 about a day whose price series conflict. This topic uses broker append time instead of event time. `make validate` does not
 schema-check it and `make stats` skips it. To read it: `uv run ems-gen tail --topic ems.gen.dlq.v1 --from-beginning`.
 
-### Raw API responses (live sources)
+### Live sources: raw API responses
 
 With live sources enabled (`make gen-live`, `make record`), the generator does not invent the data: adapters call
 four external APIs and turn each raw response into the events described above. The adapters live in
@@ -290,7 +480,7 @@ nothing is copied from the raw response except the values listed here.
 The samples below are trimmed. The PSE and Open-Meteo ones are real responses recorded on 2026-10-20 and kept in
 [tests/fixtures/](tests/fixtures/); the ENTSO-E one is hand-written (see there).
 
-#### PSE `rce-pln` (RCE) and `csdac-pln` (SDAC)
+#### PSE RCE and SDAC prices
 
 Both reports have the same shape and differ only in the price field name. The adapter requests one business day
 at a time:
