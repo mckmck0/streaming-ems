@@ -40,13 +40,13 @@ bytes; host ports on 127.0.0.1; broker heap 512 MB
 **Scale/Scope**: one EMS-managed household plus small unmanaged fixtures for balance tests; design is
 vectorised for later scale (spec 003)
 
-## Constitution Check
+## Principles Check
 
 *GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design: PASS.*
 
 | # | Status | How satisfied in 001 |
 |---|---|---|
-| P1 | ✅ | spec approved; tasks via `/speckit-tasks`; commits cite task ids |
+| P1 | ✅ | spec approved; tasks written; commits cite task ids |
 | P2 | ✅ | No change to `src/ems/domain/`. Generator models in `src/ems/ingest/synthetic` are pure functions of explicit seeds and time arrays (same discipline, not the EMS reference) |
 | P3 | ✅ | No actor facts. New facts are external inputs (weather, measurements, prices) whose single writer is `ems-gen`; the generator never writes battery or grid facts of EMS-managed sites. 01 (ownership table) is not written in 001; the rows are recorded in 13 and carried into 01 when the actor spec writes it |
 | P4, P5, P8 | n/a | No actors or handlers touched |
@@ -155,7 +155,7 @@ specs/001-data-pipeline-core/
 ├── spec.md, plan.md, research.md, data-model.md, quickstart.md
 ├── contracts/ (topics.md, cli.md)
 ├── checklists/requirements.md
-└── tasks.md            # /speckit-tasks
+└── tasks.md
 ```
 
 ### Source Code (repository root)

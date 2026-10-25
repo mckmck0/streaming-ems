@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-20
 
-**Status**: Approved 2026-10-20 (user: run all Spec Kit phases automatically)
+**Status**: Approved 2026-10-20 (user: run all phases automatically)
 
 **Input**: Spec 002 of the approved data-generator plan (Plan 1 M4): a mapping engine for raw source payloads,
 live adapters for Open-Meteo weather forecasts and PSE prices (RCE and the SDAC day-ahead price), ENTSO-E A44

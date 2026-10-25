@@ -35,4 +35,4 @@
   spec, so topic names, keys, the murmur2 routing rule and the envelope fields are requirements, not design.
   Framework and library choices (Kafka client, pydantic, pvlib, demandlib) are kept out of the requirements;
   the platform is named only in Assumptions.
-- One VERIFY item left for `/speckit-clarify`: household annual consumption distribution (GUS primary figure).
+- One VERIFY item left for clarification: household annual consumption distribution (GUS primary figure).

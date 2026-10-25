@@ -23,7 +23,7 @@ Read only the docs the task needs, usually one to three, not the whole folder. E
 | Any plan, review or design decision | `07-design-principles.md` |
 | Message schemas, Kafka topics, result schemas, versioning | `08-contracts.md` |
 | Known issues, pitfalls, risks and their fix hints | `09-risks-and-tech-debt.md` |
-| Planning a change, Spec Kit setup and loop, checklists | `10-planning-guide.md` |
+| Planning a change, the loop, checklists | `10-planning-guide.md` |
 | Experiments, metrics, statistics, spike results | `11-experiments.md` |
 | Battery model, units, time base, settlement, net-billing, actions, glossary | `12-domain-model.md` |
 | Data generators, site catalog, synthetic models, live sources, `ems-gen`, Kafka topics in use | `13-subsystem-ingest.md` |
@@ -33,7 +33,7 @@ Read only the docs the task needs, usually one to three, not the whole folder. E
 
 `CLAUDE.md` and `07-design-principles.md` → the other `docs/context/` files → skills and rules →
 `docs/bootstrap/PROJECT_CONTEXT.md` (frozen seed brief, read only to trace where something came from) →
-auto memory. The Spec Kit constitution is generated from 07 and must match it. Accepted ADRs explain
+auto memory. Accepted ADRs explain
 decisions; `docs/context/` must agree with them.
 
 When docs disagree with each other or with the code, say so, name the files, and propose which one to fix.

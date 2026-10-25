@@ -16,7 +16,6 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Piece | Status |
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
-| Spec Kit v1.1.0 (`.specify/`, `.claude/skills/speckit-*`) | Built; constitution v1.0.0 generated from 07 |
 | Canonical docs | 00, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 01–04 land with the actor and strategy specs |
 | ADRs | 0010–0015 accepted (spec 001); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
@@ -37,7 +36,7 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 
 ```
 CLAUDE.md, .claude/          harness (rules, skills, agents, hooks)
-.specify/, specs/NNN-*/      Spec Kit workspace and feature specs
+specs/NNN-*/                 feature specs (spec.md, plan.md, tasks.md)
 docs/context/                canonical docs (this folder); docs/adr/ decisions; docs/bootstrap/ frozen brief
 src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery), actors/,
                              strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
@@ -49,7 +48,7 @@ tests/                       unit/, property/, integration/, e2e/, fault/
 templates/                   bootstrap templates; frontend/ reserved
 ```
 
-## What to build: backlog (titles and order; numbers are assigned by Spec Kit)
+## What to build: backlog (titles and order; numbers are assigned in order)
 
 | Order | Spec | Scope |
 |---|---|---|

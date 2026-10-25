@@ -2,7 +2,7 @@
 
 **Input**: `specs/001-data-pipeline-core/` (spec, plan, research, data-model, contracts, quickstart)
 
-Tests are required (constitution P1/P6; `.claude/rules/tests.md`): test tasks precede the tasks they test.
+Tests are required (P1/P6; `.claude/rules/tests.md`): test tasks precede the tasks they test.
 Format: `[ID] [P?] [Story] description (ACs)`.
 
 ## Phase 1: Setup

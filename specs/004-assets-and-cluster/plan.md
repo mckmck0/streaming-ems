@@ -8,7 +8,7 @@ New asset kinds in the catalog (`wind`, `chp`, `biogas`, `biomass`, `hydro`, `ev
 `scale.site_mix`, meter builders for the new assets, a `cluster` compose profile (3 combined KRaft nodes) and its
 integration test.
 
-## Constitution Check (PASS)
+## Principles Check (PASS)
 P2 pure models (numpy, seeded via `ems.ingest.rng`); P3 plants are external inputs written by `ems-gen`; P9 only
 existing enum values (`wind`, `chp`, `hydro`, `biogas`, `biomass`, `ev_charger`, `heat_energy`); P12 no new
 dependency (windpowerlib replaced by vendored curves, ODbL notice); others unchanged.

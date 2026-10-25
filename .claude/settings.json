@@ -58,16 +58,9 @@
       "Bash(uv tool install *)",
       "Bash(brew install *)",
       "Bash(brew upgrade *)",
-      "Bash(specify init *)",
-      "Bash(specify self upgrade *)",
       "Edit(/frontend/**)",
       "Edit(/docs/bootstrap/**)",
-      "Edit(/reference/**)",
-      "Edit(/.claude/skills/speckit-*/**)",
-      "Edit(/.specify/scripts/**)",
-      "Edit(/.specify/templates/*.md)",
-      "Edit(/.specify/integrations/**)",
-      "Edit(/.specify/memory/constitution.md)"
+      "Edit(/reference/**)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -81,10 +74,6 @@
   "attribution": {
     "commit": "",
     "sessionUrl": false
-  },
-  "skillOverrides": {
-    "speckit-implement": "user-invocable-only",
-    "speckit-taskstoissues": "off"
   },
   "hooks": {
     "PostToolUse": [

@@ -19,7 +19,7 @@ lxml 6.1.3 (group `ingest`), respx 0.23.1 (dev) · **Storage**: Kafka; recording
 URLs, logs, recordings; free Open-Meteo API ≤ 10 calls per run per site · **Scale**: one live site, any number
 of synthetic sites
 
-## Constitution Check (PASS, re-checked after design)
+## Principles Check (PASS, re-checked after design)
 
 | # | Status | Notes |
 |---|---|---|

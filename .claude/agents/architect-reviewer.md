@@ -1,6 +1,6 @@
 ---
 name: architect-reviewer
-description: Read-only architecture reviewer for the EMS repo. Reviews specs, plans and diffs against the 16 design principles (docs/context/07-design-principles.md), the actor connection rules R1–R7, single-writer ownership and contract versioning (docs/context/08-contracts.md). Use proactively after /speckit-plan and /speckit-tasks, and before merging any change that touches actors, messages, contracts, timers or state ownership.
+description: Read-only architecture reviewer for the EMS repo. Reviews specs, plans and diffs against the 16 design principles (docs/context/07-design-principles.md), the actor connection rules R1–R7, single-writer ownership and contract versioning (docs/context/08-contracts.md). Use proactively after a plan.md or tasks.md is drafted, and before merging any change that touches actors, messages, contracts, timers or state ownership.
 tools: Read, Grep, Glob
 skills:
   - ems-actor-contract

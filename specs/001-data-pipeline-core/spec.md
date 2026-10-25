@@ -285,7 +285,7 @@ Acceptance criteria use EARS form with ids `AC-001-NN`; each functional requirem
 
 - The streaming platform is Apache Kafka (KRaft) run with Docker Compose on the author's Mac; the repo's
   conventions apply (one uv project, `ty`, `infra/docker-compose.yml`, images by tag and digest, settings via
-  environment). Technology choices and pins come from the approved plan and are fixed in `/speckit-plan`.
+  environment). Technology choices and pins come from the approved plan and are fixed in the approved plan.
 - Prices are an RCE-like synthetic curve (the RES-act net-billing reference price, PLN/MWh); conversion to the
   domain's PLN/kWh happens downstream.
 - Base load uses BDEW 2025 standard profiles (H25 for G-tariffs, G25 for C11 and C21): official Polish DSO profiles are

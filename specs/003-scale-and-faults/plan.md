@@ -11,7 +11,7 @@ Chunk sites in `SyntheticModel` (configurable `scale.site_chunk`), add the pure 
 ## Technical Context
 Python 3.13; no new dependencies. Performance: one day for 1k sites < 2 min. Memory: chunks of ≤ 2,000 sites.
 
-## Constitution Check (PASS)
+## Principles Check (PASS)
 | # | Notes |
 |---|---|
 | P2 | battery model in `src/ems/domain/` is pure (numpy only, no I/O, deterministic); unit + property tests |

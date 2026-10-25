@@ -68,7 +68,6 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 | demandlib | 0.2.2 | 2025-04-09 | pypi.org/project/demandlib |
 | holidays | 0.105 | 2026-09-21 | pypi.org/project/holidays |
 | httpx / tenacity / lxml / respx (spec 002) | 0.28.1 / 9.1.4 / 6.1.3 / 0.23.1 | 2024-12-06 / 2026-02-07 / 2026-09-02 / 2026-04-08 | pypi.org |
-| Spec Kit | v1.1.0 | 2026-10-02 | github.com/github/spec-kit/releases |
 | restate-server (later) | 1.7.13 (`restatedev/restate:1.7.13-20261005@sha256:65abc8016d40…`) | 2026-10-01 | github.com/restatedev/restate |
 
 ## What to build

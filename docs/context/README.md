@@ -18,10 +18,10 @@ before 2026-10-02.
 | [04-subsystem-forecasting-and-optimization.md](04-subsystem-forecasting-and-optimization.md) *(planned)* | Forecasters, MILP/MPC, oracle, data sources |
 | [05-deploy-and-infra.md](05-deploy-and-infra.md) | uv project and tooling, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions |
 | [06-data-flows.md](06-data-flows.md) | Tick, live loop, replay and sim clock, failure and recovery, timers |
-| [07-design-principles.md](07-design-principles.md) | The 16 invariants; the source of the Spec Kit constitution |
+| [07-design-principles.md](07-design-principles.md) | The 16 invariants |
 | [08-contracts.md](08-contracts.md) | Message envelope and schemas, Kafka topics, result schemas, versioning rules |
 | [09-risks-and-tech-debt.md](09-risks-and-tech-debt.md) | Known issues and risks with fix hints |
-| [10-planning-guide.md](10-planning-guide.md) | How to plan a change: `ems-plan-change`, Spec Kit setup and loop, checklists |
+| [10-planning-guide.md](10-planning-guide.md) | How to plan a change: `ems-plan-change`, the loop, checklists |
 | [11-experiments.md](11-experiments.md) | Experiment protocol, metrics, statistics, reference-spike results |
 | [12-domain-model.md](12-domain-model.md) | Time base, units, battery model, settlement and net-billing, actions, glossary |
 | [13-subsystem-ingest.md](13-subsystem-ingest.md) | Data generators: site catalog, synthetic models, schedule, `ems-gen` |
@@ -33,8 +33,7 @@ from; thesis notes in `../thesis/`.
 ## Which source wins
 
 `CLAUDE.md` and [07-design-principles.md](07-design-principles.md) → the other files here → skills and
-rules in `.claude/` → the bootstrap brief → auto memory. The Spec Kit constitution
-(`.specify/memory/constitution.md`) is generated from 07 and must match it. Accepted ADRs explain
+rules in `.claude/` → the bootstrap brief → auto memory. Accepted ADRs explain
 decisions, and these docs must agree with them. Real contradictions are raised, not silently resolved.
 
 ## Keeping the docs current
@@ -51,7 +50,6 @@ decisions, and these docs must agree with them. Real contradictions are raised, 
   <https://github.com/restatedev/restate-operator>, licence: <https://github.com/restatedev/restate/blob/main/LICENSE>)
 - Claude Code: <https://code.claude.com/docs/en/claude-directory> and the memory, skills, sub-agents, hooks,
   settings and permissions pages
-- GitHub Spec Kit: <https://github.com/github/spec-kit>
 - uv: <https://docs.astral.sh/uv/>; ruff: <https://docs.astral.sh/ruff/>; ty: <https://github.com/astral-sh/ty>;
   ruff pre-commit: <https://github.com/astral-sh/ruff-pre-commit>
 - Helm: <https://helm.sh/docs/>; kind: <https://kind.sigs.k8s.io/>; Apache Kafka: <https://kafka.apache.org/documentation/>

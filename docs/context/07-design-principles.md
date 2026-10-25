@@ -1,9 +1,7 @@
-# 07 · Design principles (the constitution source)
+# 07 · Design principles
 
 These 16 invariants govern every spec, plan, task and review. `CLAUDE.md` and this file sit together at the
-top of the precedence order (see [README.md](README.md)). The Spec Kit constitution
-(`.specify/memory/constitution.md`) is generated from this file with `/speckit-constitution` and must match it;
-change a principle here first, then regenerate the constitution.
+top of the precedence order (see [README.md](README.md)).
 
 ## Current consensus
 
@@ -12,7 +10,7 @@ it is checked; the per-plan questions are in `.claude/skills/ems-plan-change/che
 
 | # | Principle | Rule | How it is checked |
 |---|---|---|---|
-| P1 | **Spec first** | No feature code without an approved spec, plan and task list in `specs/NNN-feature/`; every change traces to a task. Typo, comment, formatting and behaviour-neutral doc fixes are exempt | `/speckit-analyze`; review: each commit cites a task id |
+| P1 | **Spec first** | No feature code without an approved spec, plan and task list in `specs/NNN-feature/`; every change traces to a task. Typo, comment, formatting and behaviour-neutral doc fixes are exempt | Review: each commit cites a task id |
 | P2 | **Pure domain, thin actors** | `src/ems/domain/` is deterministic and has no I/O, clock, randomness source or runtime import. Actors parse, delegate to the domain, write only their own state, and send messages | Post-edit hook (Restate imports); unit and property tests; review |
 | P3 | **Single writer per fact** | Every fact has exactly one writing actor (ownership table in `01-architecture.md`); others keep tagged views | Review against the ownership table |
 | P4 | **No blocking cycles** | Exclusive handlers are reached only by one-way messages. Request-response targets shared (read-only) handlers only, and shared handlers call only shared handlers (R1, R2). This handler-level wording clarifies the brief's "every edge that can be part of a cycle" | Call graph in the plan's Actor contract section |
@@ -34,11 +32,11 @@ in `02-subsystem-actors.md`.
 
 ## What to build
 
-- The constitution, generated from this table with `/speckit-constitution` (done once, then on every change here).
+- Nothing further.
 
 ## Prerequisites
 
-- Spec Kit initialised (v1.1.0, see `10-planning-guide.md`).
+- None.
 
 ## Open questions
 
