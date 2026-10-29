@@ -26,7 +26,7 @@
 | L1 | Open-Meteo ICON-D2 RUC (hourly runs) and the 2026-11-30 native-grid cutover can change run cadence and domain edges | Accepted: `issued_at` comes from meta.json; re-probe coverage and re-record fixtures after the cutover |
 | L2 | Free Open-Meteo API is non-commercial only | Accepted (public research); set `EMS_OPEN_METEO_API_KEY` for any commercial context |
 | L3 | PSE API reuse terms are unpublished; same-day re-publications were observed | Accepted: only a few fixtures committed; revisions become new events |
-| L4 | ENTSO-E A44 has no publication time; `issued_at` = first sight of a content version (stored in recordings) | Accepted: replay keeps ids; live restarts may re-emit once |
+| L4 | ENTSO-E A44 has no publication time; `issued_at` = first sight of a content version (stored in recordings). Confirmed on live responses 2026-10-29: `createdDateTime` equals the request time, so ENTSO-E prices look available only from the first fetch | Accepted: replay keeps ids; live restarts may re-emit once; PSE prices carry the real publication time |
 | L5 | Hybrid live-site meters use forecast steps as "truth" weather (no observations) | Accepted: documented; observation sources are a later option |
 | H1 | `Bash(make *)` is allow-listed, so `make reset` (`down -v`) bypasses the `ask` rule | Mitigated: target asks for confirmation; user may add `Bash(make reset*)` to `ask` |
 

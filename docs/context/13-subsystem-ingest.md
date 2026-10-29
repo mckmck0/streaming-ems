@@ -84,7 +84,15 @@ uncontrolled assets, and prices. These rows move into `01-architecture.md` when 
 - **ENTSO-E A44** (`live/entsoe.py`; off until `EMS_ENTSOE_TOKEN` and `live.entsoe.enabled`): hardened lxml
   parsing by local name, contract type A01, A03 forward-fill to the period end, native resolution (PT60M before
   2025-10-01), identical duplicate series collapse, conflicting ones are logged and not emitted, token in the
-  `SECURITY_TOKEN` header, 10-minute back-off on 429.
+  `SECURITY_TOKEN` header, 10-minute back-off on 429. Run against the real API on 2026-10-29
+  (<https://web-api.tp.entsoe.eu/api>, document type A44, zone `10YPL-AREA-----S`): token and header accepted;
+  2025-09-30 returned `PT1H` × 24 slots in EUR, 2025-10-26 returned `PT15M` × 100 slots, and the current and next
+  delivery day returned `PT15M` × 96 slots (tomorrow was already published in the early afternoon). A recording of
+  these responses (`make record`, raw XML in `data/recordings/<name>/raw/entsoe/`, never commit it) resolved the
+  VERIFY items: schema version 7:3, a single `TimeSeries` with the same elements and order as the hand-written
+  fixtures, `curveType` A03 with all 96 positions present (so the forward-fill path is exercised by fixtures
+  only), `createdDateTime` equal to the request time (no publication time, as risk L4 assumed). The EUR prices
+  match PSE's `csdac-pln` slot for slot with a constant PLN/EUR ratio (≈ 4.4 on 2026-10-29 and 2026-10-30).
 - **HTTP** (`live/http.py`): retries with jitter on 429/5xx/timeouts only; secrets scrubbed from URLs, errors
   and recordings.
 - **Router and hybrid** (`sources/router.py`, `sources/live_runner.py`, `runner.run_hybrid`): per-stream modes

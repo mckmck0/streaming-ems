@@ -91,6 +91,13 @@ the local stack. A template with all variables is in [env.example](env.example).
 reads (`make gen`). Commands run on your machine through `uv run` and `make` do not load `.env`, so export the
 variables in your shell instead, for example `export EMS_OPEN_METEO_API_KEY=...`. Never commit secrets.
 
+**Using ENTSO-E.** It needs both the token and the flag: export `EMS_ENTSOE_TOKEN` and set
+`live.entsoe.enabled: true` in the config you run (`config/generator.live.yaml` for `make gen-live`). If the flag
+is on but the token is not exported, ENTSO-E is skipped without any message. Check that
+`data/recordings/<name>/raw/entsoe/` exists after `make record`, or that records with key `ENTSOE:PL` appear on
+`ems.price.v1`. The adapter's status and what the live API has to confirm are in
+[ENTSO-E A44](#entso-e-a44-day-ahead-prices).
+
 ### Start Kafka
 
 ```bash
@@ -585,9 +592,16 @@ sample above gives 183 steps (ending 2026-10-22T15:45Z).
 
 #### ENTSO-E A44 (day-ahead prices)
 
-The ENTSO-E adapter is built and tested on fixtures but has **not been run against the real API**, because it needs a
-token and is off by default. The sample below is hand-written to follow ENTSO-E's implementation guide (the
-prices are invented): ENTSO-E day-ahead prices are not open data, so no real response is committed.
+The ENTSO-E adapter is off by default and needs a token. It is tested on fixtures and, since 2026-10-29, has also
+been run against the real API with a token: the `SECURITY_TOKEN` header was accepted, a day before 2025-10-01
+(2025-09-30) came back hourly (`PT1H`, 24 slots, `EUR`), and the fall-back day 2025-10-26 came back quarter-hourly
+(`PT15M`, 100 slots). The current day and the next day (already published) also came back as `PT15M` with 96
+slots, in EUR. A recording of the real responses (2026-10-29) shows the same structure as the sample below:
+schema version 7:3, one `TimeSeries` per document with the same elements, `curveType` A03 and, for these
+quarter-hourly days, all 96 positions present. The prices are the same series PSE publishes as SDAC: every slot
+matches, with a constant PLN-per-EUR ratio (about 4.4) across the day. The sample below is hand-written to follow
+ENTSO-E's implementation guide (the prices are invented): ENTSO-E day-ahead prices are not open data, so no real
+response is committed.
 
 ```
 GET https://web-api.tp.entsoe.eu/api?documentType=A44&in_Domain=10YPL-AREA-----S&out_Domain=10YPL-AREA-----S
@@ -641,8 +655,10 @@ Rules the adapter applies:
 - **Duplicates.** ENTSO-E sometimes repeats a series; identical copies collapse. If copies disagree, the day is not
   published as an event and goes to the dead-letter topic instead.
 - **`issued_at`.** ENTSO-E gives no publication time for the prices (`createdDateTime` is when the document was
-  built), so `issued_at` is the first time the adapter saw this exact content, kept in recordings so a replay gets
-  the same ids. A restart of a live run may therefore re-emit a day once.
+  built; the real responses show it equals the request time), so `issued_at` is the first time the adapter saw this
+  exact content, kept in recordings so a replay gets the same ids. A restart of a live run may therefore re-emit a
+  day once, and a consumer applying the availability rule sees ENTSO-E prices only from that first fetch, not from
+  their real publication. PSE prices carry the real publication time.
 
 Result: `source_system` `entsoe`, `source_record_ref` `entsoe:A44:2026-10-21`, market `ENTSOE_A44_PL`, currency
 `EUR`, unit `EUR/MWh`. Converting to PLN is the consumer's job.
