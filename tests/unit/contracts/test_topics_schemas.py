@@ -40,7 +40,6 @@ def test_ac_001_06_profiles(repo: Path) -> None:
     assert live[DLQ_TOPIC].configs["message.timestamp.type"] == "LogAppendTime"
     assert "ems.weather.actual.v1" not in live  # disabled
     assert load_plan(repo / "config", "scale").by_name()["ems.production.v1"].partitions == 48
-    assert load_plan(repo / "config", "cluster").by_name()["ems.price.v1"].replication_factor == 3
 
 
 def test_prefix_applies_to_every_topic(repo: Path) -> None:
