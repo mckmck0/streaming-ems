@@ -15,8 +15,8 @@
 | G2 | Realtime/accelerated runs generate in day chunks; truth is regenerated per chunk (burn-in makes seams negligible) | Accepted |
 | G3 | Faker locale data changes between versions | Mitigated: exact pin 40.40.0, golden catalog test |
 | G4 | Voivodeship bounding boxes are approximate | Accepted for sampling; VERIFY with GUGiK PRG if needed |
-| G5 | windpowerlib is unmaintained (last release 2024-02-20; 1-D density correction) | Fixed (spec 004): vendored curves, numpy power curve and density correction |
-| G7 | Synthetic 10 m wind is weak inland: old turbine types reach 10–18 % capacity factor outside the north | Accepted: wind farms are drawn mostly in the north (wind weights); recalibrate `wind_scale_ms` if inland farms matter |
+| G5 | windpowerlib is unmaintained (last release 2024-02-20; 1-D density correction) | Obsolete (spec 005): wind farms and the vendored curves were removed |
+| G7 | Synthetic 10 m wind is weak inland: old turbine types reach 10–18 % capacity factor outside the north | Obsolete (spec 005): no wind farms; the 10 m wind only feeds PV cell temperature and the price model |
 | G8 | Households now get EVs (20 %), so 003-era catalogs emit one more measurement per such site | Accepted: separate hash, no other draw changes; benchmark rerun 2026-10-20 |
 | K8 | With combined KRaft nodes, two of three down loses the quorum and writes time out instead of NOT_ENOUGH_REPLICAS | Fixed: `cluster` profile uses a dedicated controller |
 | G6 | Forecast volume at scale: 10k sites ≈ 6.2 GB/day of JSON (benchmark 2026-10-20), ~70 % forecasts | Accepted; a weather-cell key (shared forecasts) can be added additively if Plan 2 needs it |

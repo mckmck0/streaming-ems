@@ -5,8 +5,11 @@
 ### Versioning rules
 
 - Every message and Kafka record carries `schema_version`; within a major version changes are additive only.
-- Renaming or removing a field means a new major version and a new topic, an ADR, coordinated updates of all
-  producers and consumers, and refreshed golden examples.
+- Renaming or removing a field or an enum value means a new major version and a new topic, an ADR, coordinated
+  updates of all producers and consumers, and refreshed golden examples. Additions bump the minor version.
+- v1.0.0 was amended in place once, by spec 005, before any consumer existed (ADR 0016): the plant asset types
+  and their quantities were removed. It is frozen since: `schemas/baseline/1.0.0/` holds the frozen schemas and a
+  contract test fails on any removal against them.
 - Producers validate strictly (unknown fields rejected); consumers ignore unknown fields. Exported schemas
   (`schemas/*.v1.json`, JSON Schema 2020-12) are open and checked FULL-compatible
   (`ems.contracts.schema_export.incompatibilities`); golden examples live in `schemas/examples/`.
@@ -28,6 +31,9 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   value ≥ 0, unit, quality), weather forecast (one event per location and run; 192 PT15M steps; radiation is the
   preceding-interval mean labelled at `valid_end`, temperature/wind/cloud are instants at `valid_end`), price
   (one event per market and local delivery day; 92/96/100 slots; native currency per MWh; negatives allowed).
+- **Measurement values** (spec 005): `asset_type` is `pv`, `bess`, `heat_pump`, `ev_charger`, `load` or
+  `grid_connection`; `quantity` is `active_energy`, `soc` (both emitted), `active_power` or `reactive_energy`
+  (reserved).
 - **EMS-managed batteries** (ADR 0014): sites whose battery the EMS controls emit no `bess` and no
   `grid_connection` measurements.
 

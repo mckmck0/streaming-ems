@@ -5,7 +5,7 @@
 `ems-gen` (`src/ems/ingest/`) streams contract events (`08-contracts.md`) for Polish sites to Kafka. External
 data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
 live sources, record/replay and hybrid mode (spec 002), scale, background batteries and faults (spec
-003), other assets, site types and a 3-broker profile (spec 004).
+003), EV chargers, site types and a 3-broker profile (spec 004), narrowed to PV prosumer sites (spec 005).
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,7 @@ flowchart LR
 | `contracts/` | envelope and payload models, ids, time, topic plans and routing, schema export (importable by actors) |
 | `ingest/catalog/` | site models, voivodeship table, deterministic catalog, `config/sites.yaml` overrides |
 | `ingest/rng.py` | counter-based randomness keyed by (seed, location, variable, step) |
-| `ingest/synthetic/` | `solar` (pvlib SPA numpy + Ineichen), `weather` (truth and forecasts), `pv`, `load` (BDEW H25/G25), `heat_pump`, `balance`, `prices` |
+| `ingest/synthetic/` | `solar` (pvlib SPA numpy + Ineichen), `weather` (truth and forecasts), `pv`, `load` (BDEW H25/G25), `heat_pump`, `ev`, `bess`, `balance`, `prices` |
 | `ingest/generator.py` | chunks, event builders, emission schedule |
 | `ingest/runner.py` | preflight, pacing per clock mode, run manifest |
 | `ingest/kafka/` | client config, admin (ensure), sink, preflight |
@@ -138,32 +138,27 @@ test fixtures.
   Rerun 2026-10-20 after spec 004 (households with EVs; `benchmark-20261020T204019Z`): 1,000 sites 174,562
   events in 15.0 s, 627 MB; 10,000 sites 1.74 M in 210 s, 6.3 GB; produce 171,202 in 33 s (5.2k/s), 0 failures.
 
-### Other assets and site types (spec 004)
+### Site types and assets (specs 004, 005; frozen, ADR 0016)
 
-- **Site types** (`catalog/build.py`): `scale.site_mix` gives shares of `household`, `commercial`,
-  `industrial`, `wind_farm`, `solar_farm`, `biogas_plant`, `hydro_plant`; empty means households only. The
-  type comes from its own hash of (catalog seed, location), and household EVs (20 %, overnight 3.7–11 kW) from
-  another, so households keep all earlier draws. Plant sites are background sites (never EMS-managed); their
-  region follows the voivodeship wind/PV weights (hydro: the southern voivodeships). Commercial sites get C11
-  or C21 (the 40 kW / 63 A rule), PV and daytime 22 kW chargers; industrial sites a CHP (C21).
-- **Wind** (`synthetic/wind.py`): vendored curves `config/turbines/power_curves.csv` (5 types from
-  windpowerlib's data, ODbL, NOTICE), `np.interp` with zero below cut-in and above cut-out, IEC density
-  correction `v·(ρ/1.225)^(1/3)` with ρ from pvlib `alt2pres` and the hub temperature, power-law shear from
-  10 m (`wind.shear_alpha.wind_farm` 0.14). Catalog hub heights are Polish-typical (105–137 m), not the CSV's.
-  A Pomeranian farm over 2025 gives capacity factors 19–30 % by type, mean ≈ 25 % (2025 PL onshore ≈ 24–25 %).
-- **CHP**: heat-led (`heat_kw_per_k · max(0, 15 − T) + heat_base_kw`, 85 % on weekends), electric = heat ×
-  power-to-heat, off below `min_load`, capped at rating; emits `heat_energy` beside `active_energy`.
-- **Biogas**: ≈ 93 % level with slow AR noise, capacity factor 80–95 % after outages.
-- **Biomass**: follows the price (min load at ≤ 100 PLN/MWh, rated at ≥ 700), ramp-limited per interval; the
-  level carries across chunks (a function of each interval's price, so chunking never changes a value).
-- **Hydro** (run-of-river): seasonal flow (spring peak mid-April, low late August) × lognormal AR noise.
-- **Outages** (`synthetic/outages.py`): whole days, keyed per (seed, site, kind, day): forced 2 % of days for
-  wind, 0.5–1 % for plants, plus one planned block a year (14 days thermal, 7 days hydro).
+The generator models PV prosumer sites only; PV is the only generation source. Spec 005 removed wind farms,
+industrial sites with CHP, biogas and biomass plants, run-of-river hydro, the turbine curves and the outage model,
+and froze the range: a new site type or asset kind needs its own spec and ADR.
+
+| Site type (`scale.site_mix`) | Assets | Tariff | Region weight |
+|---|---|---|---|
+| `household` (the only type when `site_mix` is empty) | PV 70 % (2.5–20 kWp), heat pump 30 %, EV 20 % (overnight, 3.7–11 kW), battery 30 % (`ems` or `site`) | G11 / G12 | population |
+| `commercial` | PV 60 % (20–150 kWp), EV 50 % (daytime, 22 kW); G25 base load 15–150 MWh/yr | C11 or C21 (the 40 kW / 63 A rule) | population |
+| `solar_farm` | PV 1–20 MWp (tilt 25°, DC/AC 1.25); small auxiliary load | C21 | PV weight (south) |
+
+- The type comes from its own hash of (catalog seed, location) and household EVs from another, so households keep
+  all earlier draws. Commercial sites and solar farms are background sites (never EMS-managed).
+- An unknown name in `scale.site_mix` (for example `wind_farm`) fails at config load and in `build_catalog`; an
+  unknown asset `kind` or site type in `config/sites.yaml` fails at catalog load.
 - **EV** (`synthetic/ev.py`): one session per site and local day (overnight 18:30 → 07:00, daytime 08:30 →
   16:30, normal jitter), charging at the charger limit from arrival until the lognormal need is met or the car
   leaves.
-- Production events carry `wind`, `chp` (energy and heat), `biogas`, `biomass`, `hydro`; consumption events
-  `ev_charger`. Grid flows of unmanaged sites include every asset. A mixed 1,000-site day builds in ≈ 13 s.
+- Production events carry `pv` (and `bess` discharge at site-controlled batteries); consumption events `load`,
+  `heat_pump`, `ev_charger`, `bess` charge and SoC, and grid flows at unmanaged sites.
 
 ### 3-broker profile (spec 004)
 
@@ -175,10 +170,12 @@ lose the quorum, so the ISR never shrinks and writes only time out.
 
 ### How to add an asset model
 
-Add parameters to `catalog/sites.py` (new `kind`), a vectorised function in `synthetic/` returning
-`[n_loc, n_steps]` kWh from the truth arrays, a builder line in `generator._meter_builders` (production or
-consumption by direction; generation kinds go in `PLANT_KINDS` so grid flows include them), and property
-tests for bounds and balance.
+The range is frozen (ADR 0016), so this needs a spec and an ADR. Add the `asset_type` value to the contract first
+(additive, minor version bump, refresh `schemas/` but not `schemas/baseline/`), then parameters in
+`catalog/sites.py` (new `kind`), a vectorised function in `synthetic/` returning `[n_loc, n_steps]` kWh from the
+truth arrays, the array in `Chunk.generation()` or `Chunk.consumption()` so grid flows include it, a builder line
+in `generator._meter_builders` (production or consumption by direction), and property tests for bounds and
+balance.
 
 ## What to build
 

@@ -11,17 +11,18 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-10-20)
+### Status of every piece (2026-11-08)
 
 | Piece | Status |
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
 | Canonical docs | 00, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 01–04 land with the actor and strategy specs |
-| ADRs | 0010–0015 accepted (spec 001); 0001–0009 are candidates from the brief, not yet written |
+| ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
 | Scale, background batteries, faults, stats, benchmark (spec 003) | Built |
-| Other assets and site types, 3-broker profile (spec 004) | Built |
+| Other assets and site types, 3-broker profile (spec 004) | Built; plants removed by spec 005 |
+| Generator narrowed to PV prosumers, contract v1 frozen (spec 005) | Built |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
@@ -31,6 +32,8 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 - The Python project is named `ems` (was `masters-thesis`).
 - 2026-10-20: data comes first. The data-generator work ("Plan 1") is delivered as specs 001–004 and specs are
   written as we go, one piece at a time. Its decisions are ADRs 0010–0015.
+- 2026-11-08: the generator models PV prosumers only (household, commercial, solar farm) and wire contract v1 is
+  frozen after a one-time in-place amendment (spec 005, ADR 0016).
 
 ### Repo map (current and planned)
 
@@ -40,7 +43,7 @@ specs/NNN-*/                 feature specs (spec.md, plan.md, tasks.md)
 docs/context/                canonical docs (this folder); docs/adr/ decisions; docs/bootstrap/ frozen brief
 src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery), actors/,
                              strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
-config/, mappings/, schemas/ generator config, live-source mappings, exported JSON Schemas (specs 001–004)
+config/, mappings/, schemas/ generator config, live-source mappings, exported JSON Schemas (specs 001–005)
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka now, Restate later), Dockerfiles
 helm/ems/                    umbrella chart (later)
@@ -56,6 +59,7 @@ templates/                   bootstrap templates; frontend/ reserved
 | 2 | **002 Live data, record and replay** | Mapping engine; Open-Meteo, PSE RCE and day-ahead (csdac) adapters, ENTSO-E A44 behind a flag; record/replay; hybrid mode; calibration job |
 | 3 | **003 Scale and faults** | Vectorised multi-location generation, unmanaged background sites with BESS, fault injection, stats, benchmark |
 | 4 | **004 Other assets** | Wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker Kafka profile |
+| 5 | **005 Narrow generator assets** | Remove wind, CHP, biogas, biomass, hydro and the industrial and plant site types; trim and freeze contract v1 |
 | next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
 | next | Dev environment and spike reproduction | Restate in compose, test tiers, spike experiments A–C (brief §11, former 001) |
 | next | Domain core | Battery model, settlement with RCE/RCEm options, actions, `Policy`, offline reference |
