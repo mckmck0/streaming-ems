@@ -98,6 +98,8 @@ def incompatibilities(
             issues.append(f"{path}.{name}: removed")
         else:
             issues += incompatibilities(sub, new_props[name], f"{path}.{name}", old_root, new_root)
+    if isinstance(old.get("items"), dict) and isinstance(new.get("items"), dict):
+        issues += incompatibilities(old["items"], new["items"], f"{path}[]", old_root, new_root)
     if new.get("additionalProperties") is False:
         issues.append(f"{path}: closed schema (readers of later versions would reject additions)")
     return issues

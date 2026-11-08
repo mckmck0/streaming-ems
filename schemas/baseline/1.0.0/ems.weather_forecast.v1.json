@@ -1,0 +1,278 @@
+{
+  "$defs": {
+    "ForecastPayload": {
+      "properties": {
+        "forecast_model": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Forecast Model",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ForecastStep"
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "forecast_model",
+        "steps"
+      ],
+      "title": "ForecastPayload",
+      "type": "object"
+    },
+    "ForecastStep": {
+      "properties": {
+        "cloud_cover_pct": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Cloud Cover Pct",
+          "type": "integer"
+        },
+        "dhi_wm2": {
+          "minimum": 0,
+          "title": "Dhi Wm2",
+          "type": "number"
+        },
+        "dni_wm2": {
+          "minimum": 0,
+          "title": "Dni Wm2",
+          "type": "number"
+        },
+        "ghi_wm2": {
+          "minimum": 0,
+          "title": "Ghi Wm2",
+          "type": "number"
+        },
+        "lead_time": {
+          "pattern": "^PT(\\d+H)?(\\d+M)?(\\d+S)?$",
+          "title": "Lead Time",
+          "type": "string"
+        },
+        "radiation_label": {
+          "const": "preceding_mean",
+          "default": "preceding_mean",
+          "title": "Radiation Label",
+          "type": "string"
+        },
+        "temp_air_c": {
+          "title": "Temp Air C",
+          "type": "number"
+        },
+        "valid_end": {
+          "format": "date-time",
+          "title": "Valid End",
+          "type": "string"
+        },
+        "valid_start": {
+          "format": "date-time",
+          "title": "Valid Start",
+          "type": "string"
+        },
+        "wind_dir_deg": {
+          "maximum": 359,
+          "minimum": 0,
+          "title": "Wind Dir Deg",
+          "type": "integer"
+        },
+        "wind_speed_ms": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "propertyNames": {
+            "enum": [
+              "10",
+              "100",
+              "120"
+            ]
+          },
+          "title": "Wind Speed Ms",
+          "type": "object"
+        }
+      },
+      "required": [
+        "valid_start",
+        "valid_end",
+        "lead_time",
+        "ghi_wm2",
+        "dni_wm2",
+        "dhi_wm2",
+        "temp_air_c",
+        "cloud_cover_pct",
+        "wind_speed_ms",
+        "wind_dir_deg"
+      ],
+      "title": "ForecastStep",
+      "type": "object"
+    },
+    "Resolution": {
+      "enum": [
+        "PT1M",
+        "PT15M",
+        "PT1H",
+        "P1D"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    }
+  },
+  "$id": "urn:ems:schema:ems.weather_forecast:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "algorithm_id": {
+      "default": null,
+      "title": "Algorithm Id",
+      "type": "null"
+    },
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_time_kind": {
+      "const": "forecast",
+      "default": "forecast",
+      "title": "Event Time Kind",
+      "type": "string"
+    },
+    "ingested_at": {
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    },
+    "interval_end": {
+      "format": "date-time",
+      "title": "Interval End",
+      "type": "string"
+    },
+    "interval_start": {
+      "format": "date-time",
+      "title": "Interval Start",
+      "type": "string"
+    },
+    "issued_at": {
+      "format": "date-time",
+      "title": "Issued At",
+      "type": "string"
+    },
+    "location_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Location Id"
+    },
+    "metering_point_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metering Point Id"
+    },
+    "payload": {
+      "$ref": "#/$defs/ForecastPayload"
+    },
+    "resolution": {
+      "$ref": "#/$defs/Resolution"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "schema": {
+      "const": "ems.weather_forecast",
+      "default": "ems.weather_forecast",
+      "title": "Schema",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "pattern": "^1\\.\\d+\\.\\d+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    },
+    "source_record_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Record Ref"
+    },
+    "source_system": {
+      "pattern": "^(replay:)?[a-z0-9-]+$",
+      "title": "Source System",
+      "type": "string"
+    },
+    "stream": {
+      "enum": [
+        "weather_forecast",
+        "weather_actual"
+      ],
+      "title": "Stream",
+      "type": "string"
+    },
+    "synthetic": {
+      "title": "Synthetic",
+      "type": "boolean"
+    },
+    "t": {
+      "title": "T",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "stream",
+    "source_system",
+    "interval_start",
+    "interval_end",
+    "resolution",
+    "t",
+    "issued_at",
+    "ingested_at",
+    "synthetic",
+    "payload"
+  ],
+  "title": "WeatherForecastEvent",
+  "type": "object"
+}

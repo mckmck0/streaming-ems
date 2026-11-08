@@ -90,12 +90,7 @@ class EventTimeKind(StrEnum):
 
 class AssetType(StrEnum):
     PV = "pv"
-    WIND = "wind"
     BESS = "bess"
-    CHP = "chp"
-    HYDRO = "hydro"
-    BIOGAS = "biogas"
-    BIOMASS = "biomass"
     HEAT_PUMP = "heat_pump"
     EV_CHARGER = "ev_charger"
     LOAD = "load"
@@ -107,8 +102,6 @@ class Quantity(StrEnum):
     ACTIVE_POWER = "active_power"
     REACTIVE_ENERGY = "reactive_energy"
     SOC = "soc"
-    HEAT_ENERGY = "heat_energy"
-    FUEL_GAS_VOLUME = "fuel_gas_volume"
 
 
 class Direction(StrEnum):

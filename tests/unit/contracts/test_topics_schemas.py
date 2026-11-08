@@ -116,3 +116,27 @@ def test_exported_schemas_validate_golden_examples() -> None:
 def test_ac_001_17_records_stay_below_900_kb() -> None:
     for event in golden_examples().values():
         assert len(to_json_bytes(event)) < 900_000
+
+
+def test_ac_005_08_removals_inside_arrays_are_detected() -> None:
+    schema = schema_export.build_schemas()["ems.measurement.v1.json"]
+    enum_removed = copy.deepcopy(schema)
+    enum_removed["$defs"]["AssetType"]["enum"].remove("pv")
+    assert schema_export.incompatibilities(schema, enum_removed)
+    prop_removed = copy.deepcopy(schema)
+    del prop_removed["$defs"]["Measurement"]["properties"]["obis"]
+    assert schema_export.incompatibilities(schema, prop_removed)
+    forecast = schema_export.build_schemas()["ems.weather_forecast.v1.json"]
+    step_removed = copy.deepcopy(forecast)
+    del step_removed["$defs"]["ForecastStep"]["properties"]["ghi_wm2"]
+    assert schema_export.incompatibilities(forecast, step_removed)
+
+
+def test_ac_005_08_contract_frozen_against_baseline(repo: Path) -> None:
+    """Spec 005 froze v1.0.0: the models may only add to the baseline schemas (ADR 0016)."""
+    baseline = repo / "schemas" / "baseline" / "1.0.0"
+    current = schema_export.build_schemas()
+    assert sorted(p.name for p in baseline.glob("*.json")) == sorted(current)
+    for name, schema in current.items():
+        old = json.loads((baseline / name).read_text())
+        assert schema_export.incompatibilities(old, schema) == [], name

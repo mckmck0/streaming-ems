@@ -2,7 +2,7 @@
 
 Bounding boxes are approximate (rounded to 0.1 degree) and only steer sampling; VERIFY against the GUGiK
 PRG boundary register (free for any use) before using them for anything spatially precise. Weights are
-rough shares for sampling households (population), PV and wind siting (south PV-heavy, coast wind-heavy).
+rough shares for sampling households (population) and solar-farm siting (south PV-heavy).
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ class Voivodeship:
     postcode_prefixes: tuple[int, int]
     household_weight: float
     pv_weight: float
-    wind_weight: float
     wind_scale_ms: float  # Weibull scale of the 10 m wind
 
 
@@ -38,7 +37,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (50, 59),
         7.6,
         1.1,
-        0.6,
         3.1,
     ),
     Voivodeship(
@@ -52,7 +50,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (85, 89),
         5.4,
         1.0,
-        1.2,
         3.6,
     ),
     Voivodeship(
@@ -66,7 +63,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (20, 24),
         5.4,
         1.2,
-        0.7,
         3.2,
     ),
     Voivodeship(
@@ -80,7 +76,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (65, 68),
         2.6,
         1.0,
-        0.9,
         3.4,
     ),
     Voivodeship(
@@ -94,7 +89,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (90, 99),
         6.4,
         1.1,
-        1.0,
         3.3,
     ),
     Voivodeship(
@@ -108,7 +102,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (30, 34),
         8.9,
         1.3,
-        0.3,
         2.7,
     ),
     Voivodeship(
@@ -122,7 +115,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (0, 9),
         14.3,
         1.1,
-        0.8,
         3.3,
     ),
     Voivodeship(
@@ -136,7 +128,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (45, 49),
         2.5,
         1.2,
-        0.7,
         3.1,
     ),
     Voivodeship(
@@ -150,7 +141,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (35, 39),
         5.5,
         1.3,
-        0.4,
         2.8,
     ),
     Voivodeship(
@@ -163,7 +153,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         ("Białystok", "Suwałki", "Łomża"),
         (15, 19),
         3.1,
-        1.0,
         1.0,
         3.4,
     ),
@@ -178,7 +167,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (80, 84),
         6.1,
         0.9,
-        1.8,
         4.2,
     ),
     Voivodeship(
@@ -192,7 +180,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (40, 44),
         11.6,
         1.2,
-        0.4,
         2.9,
     ),
     Voivodeship(
@@ -206,7 +193,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (25, 29),
         3.1,
         1.2,
-        0.5,
         3.0,
     ),
     Voivodeship(
@@ -220,7 +206,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (10, 14),
         3.6,
         0.9,
-        1.3,
         3.7,
     ),
     Voivodeship(
@@ -234,7 +219,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (60, 64),
         9.1,
         1.1,
-        1.3,
         3.5,
     ),
     Voivodeship(
@@ -248,7 +232,6 @@ VOIVODESHIPS: tuple[Voivodeship, ...] = (
         (70, 78),
         4.4,
         0.9,
-        1.9,
         4.1,
     ),
 )

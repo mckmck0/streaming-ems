@@ -1,0 +1,262 @@
+{
+  "$defs": {
+    "Market": {
+      "enum": [
+        "PL_RCE",
+        "PL_SDAC",
+        "ENTSOE_A44_PL",
+        "PL_DAM_TGE"
+      ],
+      "title": "Market",
+      "type": "string"
+    },
+    "PricePayload": {
+      "properties": {
+        "bidding_zone": {
+          "const": "PL",
+          "default": "PL",
+          "title": "Bidding Zone",
+          "type": "string"
+        },
+        "currency": {
+          "enum": [
+            "PLN",
+            "EUR"
+          ],
+          "title": "Currency",
+          "type": "string"
+        },
+        "delivery_day": {
+          "format": "date",
+          "title": "Delivery Day",
+          "type": "string"
+        },
+        "market": {
+          "$ref": "#/$defs/Market"
+        },
+        "publication_time": {
+          "format": "date-time",
+          "title": "Publication Time",
+          "type": "string"
+        },
+        "resolution": {
+          "$ref": "#/$defs/Resolution"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/PriceSlot"
+          },
+          "minItems": 1,
+          "title": "Slots",
+          "type": "array"
+        },
+        "unit": {
+          "enum": [
+            "PLN/MWh",
+            "EUR/MWh"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "market",
+        "currency",
+        "unit",
+        "delivery_day",
+        "publication_time",
+        "resolution",
+        "slots"
+      ],
+      "title": "PricePayload",
+      "type": "object"
+    },
+    "PriceSlot": {
+      "properties": {
+        "interval_end": {
+          "format": "date-time",
+          "title": "Interval End",
+          "type": "string"
+        },
+        "interval_start": {
+          "format": "date-time",
+          "title": "Interval Start",
+          "type": "string"
+        },
+        "price": {
+          "title": "Price",
+          "type": "number"
+        }
+      },
+      "required": [
+        "interval_start",
+        "interval_end",
+        "price"
+      ],
+      "title": "PriceSlot",
+      "type": "object"
+    },
+    "Resolution": {
+      "enum": [
+        "PT1M",
+        "PT15M",
+        "PT1H",
+        "P1D"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    }
+  },
+  "$id": "urn:ems:schema:ems.price:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "algorithm_id": {
+      "default": null,
+      "title": "Algorithm Id",
+      "type": "null"
+    },
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_time_kind": {
+      "const": "interval",
+      "default": "interval",
+      "title": "Event Time Kind",
+      "type": "string"
+    },
+    "ingested_at": {
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    },
+    "interval_end": {
+      "format": "date-time",
+      "title": "Interval End",
+      "type": "string"
+    },
+    "interval_start": {
+      "format": "date-time",
+      "title": "Interval Start",
+      "type": "string"
+    },
+    "issued_at": {
+      "format": "date-time",
+      "title": "Issued At",
+      "type": "string"
+    },
+    "location_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Location Id"
+    },
+    "metering_point_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metering Point Id"
+    },
+    "payload": {
+      "$ref": "#/$defs/PricePayload"
+    },
+    "resolution": {
+      "$ref": "#/$defs/Resolution"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "schema": {
+      "const": "ems.price",
+      "default": "ems.price",
+      "title": "Schema",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "pattern": "^1\\.\\d+\\.\\d+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    },
+    "source_record_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Record Ref"
+    },
+    "source_system": {
+      "pattern": "^(replay:)?[a-z0-9-]+$",
+      "title": "Source System",
+      "type": "string"
+    },
+    "stream": {
+      "const": "price",
+      "default": "price",
+      "title": "Stream",
+      "type": "string"
+    },
+    "synthetic": {
+      "title": "Synthetic",
+      "type": "boolean"
+    },
+    "t": {
+      "title": "T",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "source_system",
+    "interval_start",
+    "interval_end",
+    "resolution",
+    "t",
+    "issued_at",
+    "ingested_at",
+    "synthetic",
+    "payload"
+  ],
+  "title": "PriceEvent",
+  "type": "object"
+}
