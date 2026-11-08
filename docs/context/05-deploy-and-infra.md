@@ -43,7 +43,8 @@ Kafka settings and why (sources: apache/kafka 4.3.1 `docker/` sources and exampl
 - Static `KAFKA_CONTROLLER_QUORUM_VOTERS`; `controller.quorum.bootstrap.servers` breaks the image's auto-format.
 - `CLUSTER_ID` (no prefix) is fixed in compose (not a secret); changing it needs `make reset`.
 - Healthcheck uses `/opt/kafka/bin/kafka-broker-api-versions.sh` (not on PATH) with a 128 MB heap.
-- Heap 512 MB, container memory limit 1 GB (Docker Desktop VM: 7.75 GiB shared with Restate and kind later).
+- Heap 512 MB, container memory limit 1 GB (Docker Desktop VM: 7.75 GiB shared with Restate, and with kind only if the
+  optional Helm spec runs).
 - `auto.create.topics.enable=false`; clients also set `allow.auto.create.topics=false`.
 - kafka-ui depends on kafka-init `service_completed_successfully`, which also makes `docker compose up --wait`
   wait for the one-shot job. kafka-ui v1.5.0 shows the 4.3 broker version as "Unknown" (cosmetic); fallback

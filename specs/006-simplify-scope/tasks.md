@@ -14,7 +14,8 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Tests come first.
 ## Phase 2: Implementation
 
 - [x] T03 [US1] `infra/docker-compose.yml`: delete `kafka-ctl`, `kafka-1..3`; `Makefile`: delete `cluster-up`,
-  `cluster-down` and their help, `cluster` in the `topics` help, relabel the commented Helm block optional
+  `cluster-down` and their help, `cluster` in the `topics` help, relabel the commented Helm block optional;
+  `is_local_bootstrap` in `ingest/kafka/admin.py` no longer accepts `kafka-*` hosts (test in `test_admin.py`)
   (AC-006-01).
 - [x] T04 [US1] `config/topics.yaml`: delete profile `cluster`; `src/ems/settings.py`: drop `cluster` from
   `TopicsProfile` (AC-006-02, -03).

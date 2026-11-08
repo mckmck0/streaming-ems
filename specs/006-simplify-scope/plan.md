@@ -36,7 +36,9 @@ from Restate state; no result topic in v1.
   relabel the commented Helm block as an optional spec.
 - `config/topics.yaml`: delete profile `cluster`.
 - `src/ems/settings.py`: `TopicsProfile = Literal["live", "sim", "scale"]`.
-- `src/ems/ingest/kafka/admin.py`: unchanged; its RF > broker-count guard is generic and keeps its unit test.
+- `src/ems/ingest/kafka/admin.py`: the RF > broker-count guard is generic and stays. `is_local_bootstrap` (the
+  `topics delete` safety check) drops its `kafka-*` prefix rule: no compose host has that name any more, and the
+  rule would accept a remote host such as `kafka-prod.corp`.
 
 ## Risks (`09-risks-and-tech-debt.md`)
 

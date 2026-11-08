@@ -27,7 +27,8 @@ the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the H
 - [ ] Kubernetes: `kubectl config current-context` must be `kind-ems`. This machine's default context is
       a corporate cluster; never run `helm install|upgrade` or `kubectl apply|delete` against it
       (`make deploy-local` prompts for approval for this reason).
-- [ ] Docker Desktop has enough memory for what you start (its VM has 8 GB; Restate, Kafka and kind share it).
+- [ ] Docker Desktop has enough memory for what you start (its VM has 8 GB; Restate and Kafka share it,
+      and kind too if the optional Helm spec runs).
 
 ## Compose (`infra/docker-compose.yml`)
 

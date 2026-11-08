@@ -28,7 +28,8 @@ In scope:
   skill, and history notes in specs 001 and 004.
 
 Out of scope (stays):
-- The `kafka` service and its configuration; the `live`, `sim` and `scale` topic profiles.
+- The `kafka` service and its configuration; the `live`, `sim` and `scale` topic profiles. (The `topics delete`
+  guard stops treating any `kafka-*` host as local, since no such compose host remains: T03.)
 - `replication_factor: 1` and `min.insync.replicas: "1"` defaults in `config/topics.yaml` (Kafka needs an RF at
   topic creation) and the generic guard in `src/ems/ingest/kafka/admin.py` that refuses an RF above the broker count.
 - ADR 0010 (not rewritten); the commented Helm targets in the Makefile (relabelled optional, not removed);
@@ -54,8 +55,8 @@ The backlog shows which pieces are mandatory and which are optional, and how res
 
 ### Edge Cases
 - A shell that still exports `EMS_TOPICS_PROFILE=cluster` fails fast with the allowed values.
-- Containers left by an earlier `make cluster-up` become compose orphans; `docker compose ... rm` them once
-  (they have no volumes).
+- Containers left by an earlier `make cluster-up` become compose orphans; remove them once with
+  `docker compose -f infra/docker-compose.yml up -d --remove-orphans` (they have no volumes).
 
 ## Requirements *(mandatory)*
 
@@ -85,7 +86,7 @@ The backlog shows which pieces are mandatory and which are optional, and how res
 - **Risks** (`09`): K8 becomes obsolete; new K9 (single broker, no failover) is accepted.
 
 ## Success Criteria
-- **SC-001**: `make ci` is green; outside the spec history (001, 004, 006) and the AC-006-03 test, nothing mentions
+- **SC-001**: `make ci` is green; outside `specs/` and the AC-006-03 test, nothing mentions
   `cluster-up`, `cluster-down`, `kafka-ctl`, `kafka-1..3`, ports 19092–19094 or a `cluster` profile.
 - **SC-002** (review): `docs/context/00-overview.md` splits the backlog into mandatory and optional with the gate
   stated; Helm and the LLM strategy appear only as optional; 05, 08 and 11 say results are exported from Restate

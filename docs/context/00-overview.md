@@ -68,7 +68,7 @@ templates/                   bootstrap templates; frontend/ reserved
 | 1 | **001 Data pipeline core** | Kafka 4.3 KRaft in `infra/docker-compose.yml`, idempotent topic ensure, wire contracts v1 (`src/ems/contracts`), producer, DLQ, tail/validate, synthetic weather/PV/base load/heat pump/prices for one EMS-managed household, backfill to Kafka |
 | 2 | **002 Live data, record and replay** | Mapping engine; Open-Meteo, PSE RCE and day-ahead (csdac) adapters, ENTSO-E A44 behind a flag; record/replay; hybrid mode; calibration job |
 | 3 | **003 Scale and faults** | Vectorised multi-location generation, unmanaged background sites with BESS, fault injection, stats, benchmark |
-| 4 | **004 Other assets** | Wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker Kafka profile |
+| 4 | **004 Other assets** | Wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker Kafka profile (removed by 006) |
 | 5 | **005 Narrow generator assets** | Remove wind, CHP, biogas, biomass, hydro and the industrial and plant site types; trim and freeze contract v1 |
 | 6 | **006 Simplify scope** | Remove the 3-broker profile (one broker everywhere); Helm and LLM strategy optional; results from Restate state |
 | next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
