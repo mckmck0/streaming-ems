@@ -43,6 +43,7 @@ Surface real contradictions in your answer instead of silently picking a side.
 | `ems-deploy-checklist` | Before compose, kind, Helm, CI, pre-commit, Makefile, version-pin or release work |
 | `ems-actor-contract` | Any change to handlers, message schemas, timers or state ownership (R1–R7, contracts) |
 | `ems-experiment` | User-invoked only (`/ems-experiment`): create, run or report an experiment |
+| `ems-pr` | Every task of a spec is checked (a Stop hook asks for it), or the user asks for a PR: gates, commits, push, PR |
 
 Path-scoped rules in `.claude/rules/` load when you touch matching files: `domain.md` (`src/ems/domain/`),
 `actors.md` (`src/ems/actors/`), `ingest.md` (`src/ems/ingest/`, `src/ems/contracts/`, `config/`), `tests.md`,
@@ -123,11 +124,13 @@ in `src/ems/domain/`. It does not see edits made through Bash, hence `make forma
 - No `Co-Authored-By` or other attribution trailers (also turned off via `attribution` in
   `.claude/settings.json`).
 - When a task's code is written, end the reply with a proposed commit message, one per logical change,
-  each with the files it covers. Do not run `git commit` unless asked.
+  each with the files it covers. Do not run `git commit` unless asked, or as part of `ems-pr` once every
+  task of a spec is checked (the user asked for that automation on 2026-11-08).
 
 ## PR description contract
 
-Every PR description states:
+One PR per spec, opened by the `ems-pr` skill from `.github/pull_request_template.md`; title in
+Conventional Commits form. Every PR description states:
 - the `docs/context/*.md` files relied on;
 - the design principles it touches (by number);
 - known issues in scope (`docs/context/09-risks-and-tech-debt.md`), each fixed or "accepted for now";
