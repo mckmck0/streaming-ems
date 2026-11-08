@@ -87,6 +87,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/spec-pr-check.sh",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
