@@ -115,13 +115,15 @@ in `src/ems/domain/`. It does not see edits made through Bash, hence `make forma
 
 ## Commits
 
-- Keep commit messages short: one imperative subject line (≤ 72 characters), plus a body of a few lines
-  only when the why is not obvious.
+- Conventional Commits: `type(scope): imperative subject` (≤ 72 characters), plus a body of a few lines
+  only when the why is not obvious. Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `spec`.
+  Scope is the area (`ingest`, `contracts`, `config`, `infra`, `docs`, `harness`) or the spec number for
+  `spec` (`spec(005): …`).
+- When there is a spec task, end the subject with its id: `feat(ingest): drop wind farms (005/T04)`.
 - No `Co-Authored-By` or other attribution trailers (also turned off via `attribution` in
   `.claude/settings.json`).
 - When a task's code is written, end the reply with a proposed commit message, one per logical change,
-  each with the files it covers. Prefix with the spec and task id when there is one (`001/T03: …`).
-  Do not run `git commit` unless asked.
+  each with the files it covers. Do not run `git commit` unless asked.
 
 ## PR description contract
 
