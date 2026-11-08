@@ -73,6 +73,8 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 
 - Initial actor contracts (tick, step result, ranking, selection, command, SoC ack, energy flows, result Parquet,
   run summary, strategy registry entry) with the actor-skeleton spec.
+- Results leave Restate through an export CLI that reads Virtual Object state after a run and writes the result
+  Parquet and run summary (spec 006 decision). There is no Kafka result (egress) topic in v1.
 
 ## Prerequisites
 

@@ -18,7 +18,8 @@
 | G5 | windpowerlib is unmaintained (last release 2024-02-20; 1-D density correction) | Obsolete (spec 005): wind farms and the vendored curves were removed |
 | G7 | Synthetic 10 m wind is weak inland: old turbine types reach 10–18 % capacity factor outside the north | Obsolete (spec 005): no wind farms; the 10 m wind only feeds PV cell temperature and the price model |
 | G8 | Households now get EVs (20 %), so 003-era catalogs emit one more measurement per such site | Accepted: separate hash, no other draw changes; benchmark rerun 2026-10-20 |
-| K8 | With combined KRaft nodes, two of three down loses the quorum and writes time out instead of NOT_ENOUGH_REPLICAS | Fixed: `cluster` profile uses a dedicated controller |
+| K8 | With combined KRaft nodes, two of three down loses the quorum and writes time out instead of NOT_ENOUGH_REPLICAS | Obsolete (spec 006): the 3-broker profile was removed |
+| K9 | One broker, RF 1: a broker outage pauses producers and consumers until it restarts; data survives restarts on the named volume (restart test in `tests/integration/test_stack.py`) | Accepted (spec 006): broker replication and failover are out of thesis scope |
 | G6 | Forecast volume at scale: 10k sites ≈ 6.2 GB/day of JSON (benchmark 2026-10-20), ~70 % forecasts | Accepted; a weather-cell key (shared forecasts) can be added additively if Plan 2 needs it |
 | S1 | Event building and strict validation (~8–12k events/s) bound throughput, not the models | Accepted; validation can be sampled for very large runs |
 | S2 | Battery and register state continue across chunks, but chunk borders still carry the AR burn-in residual (G1) | Accepted |

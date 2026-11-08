@@ -18,7 +18,7 @@ Single source: `config/topics.yaml`, loaded by `ems.contracts.topics` (shared wi
 | `live` (default) | `message.timestamp.type=CreateTime`, `message.timestamp.after.max.ms=3600000`, `message.timestamp.before.max.ms` = `retention.ms` |
 | `sim` | `retention.ms=-1`, `message.timestamp.after.max.ms=9223372036854775807`, before.max unlimited |
 | `scale` | partitions 48 / 3, `retention.bytes` cap per partition |
-| `cluster` | RF 3, `min.insync.replicas=2` (used in spec 004) |
+| ~~`cluster`~~ | Removed by spec 006 (was RF 3, `min.insync.replicas=2`, spec 004) |
 
 Defaults: RF 1, `cleanup.policy=delete`, `compression.type=producer`, `min.insync.replicas=1`.
 

@@ -17,6 +17,9 @@
 
 ### Compose (`infra/docker-compose.yml`, spec 001)
 
+One Kafka broker, RF 1, in every environment (spec 006): broker replication and failover are out of thesis
+scope (risk K9), so there is no multi-broker profile; the fault experiments target Restate and the SDK service.
+
 | Service | Image (tag + digest, verified 2026-10-20) | Notes |
 |---|---|---|
 | `kafka` | `apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837` (released 2026-06-25) | JVM image; single KRaft broker+controller; host `127.0.0.1:9092` |
@@ -50,14 +53,13 @@ Kafka settings and why (sources: apache/kafka 4.3.1 `docker/` sources and exampl
 ### Topic profiles (`config/topics.yaml`)
 
 `live` (CreateTime, `message.timestamp.after.max.ms` 1 h, `before.max.ms` = retention), `sim` (retention −1,
-any timestamp), `scale` (48/3 partitions, `retention.bytes` cap), `cluster` (RF 3, min ISR 2; compose profile `cluster`: one
-KRaft controller and three brokers, `make cluster-up`). Reason: Kafka 4.0
+any timestamp), `scale` (48/3 partitions, `retention.bytes` cap); all RF 1. Reason: Kafka 4.0
 changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-timestamped data within minutes;
 `ems-gen run` preflight refuses incompatible combinations.
 
 ### Ports reserved on the host (all bound to 127.0.0.1)
 
-9092 Kafka, 8088 Kafka UI, 19092–19094 the `cluster` profile's brokers (spec 004); reserved for later: 8080 Restate ingress, 9070 admin, 5122 node, 9080/9081 SDK.
+9092 Kafka, 8088 Kafka UI; reserved for later: 8080 Restate ingress, 9070 admin, 5122 node, 9080/9081 SDK.
 
 ### Versions verified 2026-10-20
 
@@ -73,7 +75,8 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 ## What to build
 
 - Dev-environment spec: Restate in the same compose project, `make register`, e2e/fault tiers and coverage.
-- Helm deployment spec (later): umbrella chart on kind.
+- Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Scale
+  experiments run on Docker Compose.
 
 ## Prerequisites
 
@@ -81,5 +84,5 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 
 ## Open questions
 
-- OPEN: Kafka on Kubernetes (Strimzi vs Redpanda) for the Helm spec.
+- OPEN, only if the optional Helm spec is started: single-node Kafka on Kubernetes (Strimzi vs Redpanda).
 - VERIFY at the next bump: Kafka 4.3.2/4.4.0 once 14 days old (4.4.0 also fixes zstd in `apache/kafka-native`).

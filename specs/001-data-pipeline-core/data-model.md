@@ -106,7 +106,7 @@ pump (adds ~5–6 MWh/yr), base load 2,500 kWh/yr excluding the heat pump.
 
 ## Topic definition (`config/topics.yaml`)
 
-`defaults` (RF, configs), `profiles` (`live`, `sim`, `scale`, `cluster`: partitions per class + config overrides),
+`defaults` (RF, configs), `profiles` (`live`, `sim`, `scale`: partitions per class + config overrides; `cluster` removed by spec 006),
 `topics` (name, class `location`\|`global`, key rule, enabled, configs). Config keys validated against an
 allow-list; values coerced to strings. See [contracts/topics.md](contracts/topics.md).
 

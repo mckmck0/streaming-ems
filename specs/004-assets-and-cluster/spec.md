@@ -4,7 +4,10 @@
 
 **Partly superseded by spec 005 (2026-11-08, ADR 0016)**: wind, CHP, biogas, biomass, hydro and the industrial,
 wind-farm, biogas-plant and hydro-plant site types were removed; AC-004-01…06 are retired and AC-004-08 is
-replaced by AC-005-04. EV charging (AC-004-07) and the cluster profile (AC-004-09) stay.
+replaced by AC-005-04. EV charging (AC-004-07) stays.
+
+**Cluster profile retired by spec 006 (2026-11-08)**: Kafka runs as one broker everywhere; the `cluster` compose
+and topic profiles, `make cluster-up` / `cluster-down` and the AC-004-09 test were removed.
 
 **Input**: Spec 004 of the approved data-generator plan (Plan 1 M3) plus the 3-broker profile: wind (vendored
 power curves), CHP, biogas, biomass, run-of-river hydro, EV chargers, site types for farms and plants, and a

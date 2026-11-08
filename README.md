@@ -66,8 +66,7 @@ compared counterfactually while one of them drives the real battery.
 | GNU Make | The only entry point for commands | The macOS default (3.81) works. |
 | Network access | Only for live sources | Synthetic data needs none. Live runs call PSE and Open-Meteo (and ENTSO-E with a token). |
 
-Host ports used, all bound to `127.0.0.1`: 9092 (Kafka), 8088 (Kafka UI), and 19092 to 19094 for the optional
-3-broker profile.
+Host ports used, all bound to `127.0.0.1`: 9092 (Kafka) and 8088 (Kafka UI). Kafka runs as one broker.
 
 ### Install
 
@@ -84,7 +83,7 @@ the local stack. A template with all variables is in [env.example](env.example).
 | Variable | Default | Needed for |
 |---|---|---|
 | `EMS_KAFKA_BOOTSTRAP` | `localhost:9092` | A different broker (the compose container sets `kafka:29092` itself). |
-| `EMS_TOPICS_PROFILE` | `live` | Topic profile: `live`, `sim`, `scale` or `cluster`. The `make gen-*` targets choose `sim` themselves. |
+| `EMS_TOPICS_PROFILE` | `live` | Topic profile: `live`, `sim` or `scale`. The `make gen-*` targets choose `sim` themselves. |
 | `EMS_TOPIC_PREFIX` | empty | Prefix for every topic name, to isolate test runs. |
 | `EMS_OPEN_METEO_API_KEY` | unset | Paid Open-Meteo API instead of the free non-commercial tier. |
 | `EMS_ENTSOE_TOKEN` | unset | ENTSO-E prices (also set `live.entsoe.enabled: true` in the config). |
@@ -172,7 +171,6 @@ Until then, the generated topics are the engine's input. Everything an engine ne
 ```bash
 make down              # stop the Kafka stack, keep the data volume (stop a `make gen` container separately, see above)
 make reset             # also delete the volume and all topic data (asks for confirmation)
-make cluster-down      # stop the optional 3-broker profile
 ```
 
 ### Troubleshooting
