@@ -13,11 +13,7 @@ from ems.contracts.ids import LOCATION_PATTERN, is_valid_gsrn
 class SiteType(StrEnum):
     HOUSEHOLD = "household"
     COMMERCIAL = "commercial"
-    INDUSTRIAL = "industrial"
-    WIND_FARM = "wind_farm"
     SOLAR_FARM = "solar_farm"
-    BIOGAS_PLANT = "biogas_plant"
-    HYDRO_PLANT = "hydro_plant"
 
 
 class TariffGroup(StrEnum):
@@ -86,40 +82,6 @@ class BessAsset(_Asset):
         return self
 
 
-class WindAsset(_Asset):
-    kind: Literal["wind"] = "wind"
-    turbine_type: str  # a type in config/turbines/power_curves.csv
-    count: int = Field(ge=1)
-    hub_height_m: float = Field(gt=10)
-    rated_kw: float = Field(gt=0)  # per turbine
-
-
-class ChpAsset(_Asset):
-    kind: Literal["chp"] = "chp"
-    rated_kw: float = Field(gt=0)  # electric
-    power_to_heat: float = Field(default=0.8, gt=0)  # electric / thermal
-    min_load: float = Field(default=0.4, gt=0, lt=1)
-    heat_kw_per_k: float = Field(gt=0)  # thermal demand of the served heat network
-    heat_base_kw: float = Field(ge=0)  # hot water / process heat
-
-
-class BiogasAsset(_Asset):
-    kind: Literal["biogas"] = "biogas"
-    rated_kw: float = Field(gt=0)
-
-
-class BiomassAsset(_Asset):
-    kind: Literal["biomass"] = "biomass"
-    rated_kw: float = Field(gt=0)
-    min_load: float = Field(default=0.3, gt=0, lt=1)
-    ramp_kw_per_step: float = Field(gt=0)
-
-
-class HydroAsset(_Asset):
-    kind: Literal["hydro"] = "hydro"
-    rated_kw: float = Field(gt=0)
-
-
 class EvChargerAsset(_Asset):
     kind: Literal["ev_charger"] = "ev_charger"
     p_max_kw: float = Field(gt=0)
@@ -128,28 +90,10 @@ class EvChargerAsset(_Asset):
 
 
 Asset = Annotated[
-    PvAsset
-    | HeatPumpAsset
-    | BessAsset
-    | WindAsset
-    | ChpAsset
-    | BiogasAsset
-    | BiomassAsset
-    | HydroAsset
-    | EvChargerAsset,
+    PvAsset | HeatPumpAsset | BessAsset | EvChargerAsset,
     Field(discriminator="kind"),
 ]
-AssetModel = (
-    PvAsset
-    | HeatPumpAsset
-    | BessAsset
-    | WindAsset
-    | ChpAsset
-    | BiogasAsset
-    | BiomassAsset
-    | HydroAsset
-    | EvChargerAsset
-)
+AssetModel = PvAsset | HeatPumpAsset | BessAsset | EvChargerAsset
 
 
 class Site(BaseModel):
@@ -202,26 +146,6 @@ class Site(BaseModel):
 
     def typed(self, cls: type[_Asset]) -> Any:
         return next((a for a in self.assets if isinstance(a, cls)), None)
-
-    @property
-    def wind(self) -> WindAsset | None:
-        return self.typed(WindAsset)
-
-    @property
-    def chp(self) -> ChpAsset | None:
-        return self.typed(ChpAsset)
-
-    @property
-    def biogas(self) -> BiogasAsset | None:
-        return self.typed(BiogasAsset)
-
-    @property
-    def biomass(self) -> BiomassAsset | None:
-        return self.typed(BiomassAsset)
-
-    @property
-    def hydro(self) -> HydroAsset | None:
-        return self.typed(HydroAsset)
 
     @property
     def ev(self) -> EvChargerAsset | None:

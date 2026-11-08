@@ -30,8 +30,7 @@ wind:
   national_share: 0.8           # correlation of the Gaussian copula with the national process
   national_tau_h: 30
   local_tau_h: 3
-  shear_alpha: {household: 0.22, commercial: 0.22, industrial: 0.20, wind_farm: 0.14, solar_farm: 0.18,
-                biogas_plant: 0.20, hydro_plant: 0.22}
+  shear_alpha: {household: 0.22, commercial: 0.22, solar_farm: 0.18}   # per site type: 100/120 m wind
   daytime_boost: 0.15
   prevailing_dir_deg: 250
   dir_sd_deg: 60

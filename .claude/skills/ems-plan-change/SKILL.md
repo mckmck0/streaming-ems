@@ -58,5 +58,6 @@ every task traces to a criterion. Stop for approval.
 ## 7. After implementation
 
 Check the code against the spec, plan and tasks and list anything unbuilt, then `make format` and `make ci`
-(or the tiers that exist so far). Update `docs/context/` and ADRs, and write the PR description using the
-contract in `CLAUDE.md`.
+(or the tiers that exist so far). Update `docs/context/` and ADRs. Once every task is checked, run the
+`ems-pr` skill: it commits, pushes and opens the PR with the description contract in `CLAUDE.md` (a Stop hook
+asks for it if this step is missed).

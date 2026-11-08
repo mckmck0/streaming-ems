@@ -2,6 +2,10 @@
 
 **Feature Branch**: `004-assets-and-cluster` · **Created**: 2026-10-20 · **Status**: Approved 2026-10-20 (auto-run)
 
+**Partly superseded by spec 005 (2026-11-08, ADR 0016)**: wind, CHP, biogas, biomass, hydro and the industrial,
+wind-farm, biogas-plant and hydro-plant site types were removed; AC-004-01…06 are retired and AC-004-08 is
+replaced by AC-005-04. EV charging (AC-004-07) and the cluster profile (AC-004-09) stay.
+
 **Input**: Spec 004 of the approved data-generator plan (Plan 1 M3) plus the 3-broker profile: wind (vendored
 power curves), CHP, biogas, biomass, run-of-river hydro, EV chargers, site types for farms and plants, and a
 `cluster` compose profile to test replication factor 3 and `min.insync.replicas=2`.

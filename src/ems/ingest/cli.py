@@ -269,7 +269,11 @@ def run(
     from ems.ingest.runner import run as do_run
 
     s = _settings(bootstrap=bootstrap)
-    cfg = load_generator_config(config)
+    try:
+        cfg = load_generator_config(config)
+    except ValueError as exc:  # e.g. a site type the generator does not model
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
     if faults:
         cfg = dataclasses.replace(cfg, faults={**cfg.faults, "enabled": True})
     if locations is not None:

@@ -47,11 +47,11 @@ recorded envelope unchanged except `source_system = replay:<orig>` and `ingested
 | Field | Values |
 |---|---|
 | `asset_id` | str id |
-| `asset_type` | `pv` `wind` `bess` `chp` `hydro` `biogas` `biomass` `heat_pump` `ev_charger` `load` `grid_connection` |
-| `quantity` | `active_energy` `active_power` `reactive_energy` `soc` `heat_energy` `fuel_gas_volume` |
+| `asset_type` | `pv` `bess` `heat_pump` `ev_charger` `load` `grid_connection` (amended by spec 005: `wind` `chp` `hydro` `biogas` `biomass` removed) |
+| `quantity` | `active_energy` `active_power` `reactive_energy` `soc` (amended by spec 005: `heat_energy` `fuel_gas_volume` removed) |
 | `direction` | `generation` `consumption` `import` `export` `charge` `discharge` (value ≥ 0; sign by direction) |
 | `aggregation` | `interval_sum` `interval_mean` `instant` `register` |
-| `value`, `unit` | finite ≥ 0; canonical units kWh, kW, kvarh, kWh (soc), m³ |
+| `value`, `unit` | finite ≥ 0; canonical units kWh, kW, kvarh, kWh (soc) (m³ went with `fuel_gas_volume`, spec 005) |
 | `phase`, `obis` | `total` default; obis str \| null |
 | `quality`, `quality_raw` | `measured` `estimated` `substituted` `missing` `synthetic`; raw str \| null |
 | `version` | int ≥ 1 |

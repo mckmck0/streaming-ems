@@ -13,12 +13,7 @@
     "AssetType": {
       "enum": [
         "pv",
-        "wind",
         "bess",
-        "chp",
-        "hydro",
-        "biogas",
-        "biomass",
         "heat_pump",
         "ev_charger",
         "load",
@@ -153,9 +148,7 @@
         "active_energy",
         "active_power",
         "reactive_energy",
-        "soc",
-        "heat_energy",
-        "fuel_gas_volume"
+        "soc"
       ],
       "title": "Quantity",
       "type": "string"

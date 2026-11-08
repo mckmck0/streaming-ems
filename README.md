@@ -20,6 +20,7 @@ compared counterfactually while one of them drives the real battery.
   - [Troubleshooting](#troubleshooting)
 - [Data](#data)
   - [What the data is](#what-the-data-is)
+  - [Sites and assets](#sites-and-assets)
   - [Topics at a glance](#topics-at-a-glance)
   - [Record format](#record-format)
   - [Envelope](#envelope)
@@ -51,7 +52,8 @@ compared counterfactually while one of them drives the real battery.
 - **Canonical docs:** [docs/context/README.md](docs/context/README.md) (index and status of every piece).
   Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
-  subagents, hooks). Changes go spec-first through the `ems-plan-change` skill.
+  subagents, hooks). Changes go spec-first through the `ems-plan-change` skill, and each finished spec ends in a
+  pull request opened by the `ems-pr` skill.
 
 ## Setup
 
@@ -137,8 +139,8 @@ EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode backfill --start 2026-10-20T00:
     --locations 50 --faults --run-id test1
 ```
 
-- `--locations N` generates `PL-LOC-000001` to `N`; the others are generated households (or other site types via
-  `scale.site_mix`) with random assets.
+- `--locations N` generates `PL-LOC-000001` to `N`; the others are generated households with random assets, or a
+  mix of households, commercial sites and solar farms set by `scale.site_mix` (see [Sites and assets](#sites-and-assets)).
 - `--faults` injects missing, duplicate, late and stuck readings (rates in `faults:` of the config).
 - `--run-id X` prefixes the Kafka keys and enters the event ids. Without it, a second run of the same window
   republishes identical event ids and the topic holds duplicates.
@@ -183,6 +185,10 @@ make cluster-down      # stop the optional 3-broker profile
   a `--run-id`; see above.
 - **The generator exits with code 3.** Some records were not delivered; the run manifest in
   `data/runs/<run>/manifest.json` has the counts per error.
+- **The generator exits with code 2 and "unknown site type(s)".** `scale.site_mix` names a site type that was
+  removed (`industrial`, `wind_farm`, `biogas_plant`, `hydro_plant`); see [Sites and assets](#sites-and-assets).
+- **`make validate` rejects `asset_type` `wind`, `chp`, `biogas`, `biomass` or `hydro`.** The topics still hold events
+  from a mixed run made before these types were removed; `make reset` clears them.
 
 ## Data
 
@@ -199,6 +205,28 @@ Everything the EMS knows about the outside world arrives through these topics.
 - Design and rules: [docs/context/08-contracts.md](docs/context/08-contracts.md); generator internals and
   every config parameter: [docs/context/13-subsystem-ingest.md](docs/context/13-subsystem-ingest.md).
 - Topic definitions: [config/topics.yaml](config/topics.yaml). Create them with `make topics`.
+
+### Sites and assets
+
+The generator models PV prosumers only: **PV is the only generation source**. Wind farms, CHP, biogas, biomass and
+hydro plants were removed (spec 005, [ADR 0016](docs/adr/0016-pv-only-generator-and-v1-freeze.md)), and the range
+is frozen.
+
+| Site type | Assets | Tariff |
+|---|---|---|
+| `household` (the default; the only type when `scale.site_mix` is empty) | PV on 70 % (2.5–20 kWp), heat pump on 30 %, EV charger on 20 % (overnight), battery on 30 % | G11 or G12 |
+| `commercial` | PV on 60 % (20–150 kWp), EV charger on 50 % (daytime, 22 kW) | C11 or C21 |
+| `solar_farm` | ground-mounted PV, 1–20 MWp | C21 |
+
+Every site has a base load. What reaches the topics:
+
+- **Generation:** PV.
+- **Consumption:** base load, heat pump, EV charger.
+- **Batteries and grid:** a battery the EMS controls (as at the test site `PL-LOC-000001`) emits no measurements;
+  a battery the site controls itself emits charge, discharge and state of charge. Every site whose battery the EMS
+  does not control reports grid import and export.
+- **Weather and prices:** the same for every site type. Weather includes wind, which the PV temperature model and
+  the synthetic price use.
 
 ### Topics at a glance
 
@@ -337,12 +365,12 @@ average kW. Every value is zero or positive; the `direction` carries the sign.
 | Field | Type | Meaning |
 |---|---|---|
 | `asset_id` | string | Asset within the site, for example `pv-1`, `hp-1`, `bess-1`, `ev-1`, or the virtual `load` (base load) and `grid` (the grid connection point). |
-| `asset_type` | `pv` \| `wind` \| `bess` \| `chp` \| `hydro` \| `biogas` \| `biomass` \| `heat_pump` \| `ev_charger` \| `load` \| `grid_connection` | What kind of asset. |
-| `quantity` | `active_energy` \| `active_power` \| `reactive_energy` \| `soc` \| `heat_energy` \| `fuel_gas_volume` | What is measured. The generator emits `active_energy`, `soc` and `heat_energy`. |
+| `asset_type` | `pv` \| `bess` \| `heat_pump` \| `ev_charger` \| `load` \| `grid_connection` | What kind of asset. |
+| `quantity` | `active_energy` \| `active_power` \| `reactive_energy` \| `soc` | What is measured. The generator emits `active_energy` and `soc`; the other two are reserved. |
 | `direction` | `generation` \| `consumption` \| `import` \| `export` \| `charge` \| `discharge` | Which way the energy flows. `generation` and `discharge` belong on the production stream; `consumption`, `charge`, `import` and `export` on the consumption stream. |
 | `aggregation` | `interval_sum` \| `interval_mean` \| `instant` \| `register` | How the value relates to the interval: a sum over it, a mean, a point reading, or a cumulative counter. |
 | `value` | number, at least 0 | The reading. |
-| `unit` | string | `kWh` for everything the generator emits (the contract also allows kW, kvarh and m³). |
+| `unit` | string | `kWh` for everything the generator emits (the contract also allows kW and kvarh). |
 | `phase` | string | `total` unless a single phase is reported. |
 | `obis` | string or null | OBIS code of the physical register. Null for synthetic data. |
 | `quality` | `measured` \| `estimated` \| `substituted` \| `missing` \| `synthetic` | Trust level. Generated data is `synthetic`; fault injection can mark readings `estimated` or `substituted`. |
@@ -354,10 +382,6 @@ What the generator emits, by asset:
 | `asset_id` | `asset_type` | `quantity` | `direction` | `aggregation` | Stream | Present when |
 |---|---|---|---|---|---|---|
 | `pv-1` | `pv` | `active_energy` | `generation` | `interval_sum` | production | the site has PV |
-| `wind-1` | `wind` | `active_energy` | `generation` | `interval_sum` | production | wind farm |
-| `chp-1` | `chp` | `active_energy` | `generation` | `interval_sum` | production | CHP plant (electricity) |
-| `chp-1` | `chp` | `heat_energy` | `generation` | `interval_sum` | production | CHP plant (heat output, kWh) |
-| `biogas-1`, `biomass-1`, `hydro-1` | `biogas`, `biomass`, `hydro` | `active_energy` | `generation` | `interval_sum` | production | that plant type |
 | `bess-1` | `bess` | `active_energy` | `discharge` | `interval_sum` | production | site-controlled battery |
 | `load` | `load` | `active_energy` | `consumption` | `interval_sum` | consumption | always (base load) |
 | `hp-1` | `heat_pump` | `active_energy` | `consumption` | `interval_sum` | consumption | the site has a heat pump |
