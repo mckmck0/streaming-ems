@@ -304,4 +304,4 @@ def is_local_bootstrap(bootstrap: str) -> bool:
     for server in bootstrap.split(","):
         host = server.strip().rsplit(":", 1)[0].strip("[]")
         hosts.append(host)
-    return bool(hosts) and all(h in LOCAL_HOSTS or h.startswith("kafka-") for h in hosts)
+    return bool(hosts) and all(h in LOCAL_HOSTS for h in hosts)
