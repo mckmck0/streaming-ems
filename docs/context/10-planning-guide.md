@@ -15,7 +15,9 @@ checklists and writes the spec files with a human approval gate after every phas
    `architect-reviewer` (and `energy-domain-reviewer` for prices, settlement, battery, time/DST). **Stop.**
 5. `tasks.md`: every task cites criterion ids; test tasks come before the tasks they test. **Stop.**
 6. Implement after approval, then check the code against the spec, `make format`, `make ci`,
-   docs and ADRs, PR description per `CLAUDE.md`.
+   docs and ADRs.
+7. `ems-pr` once every task is checked: commits, pushes and opens the PR (description per `CLAUDE.md`
+   and `.github/pull_request_template.md`). A Stop hook (`.claude/hooks/spec-pr-check.sh`) asks for it.
 
 ### Specs are written as we go
 

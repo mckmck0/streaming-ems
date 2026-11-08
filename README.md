@@ -52,7 +52,8 @@ compared counterfactually while one of them drives the real battery.
 - **Canonical docs:** [docs/context/README.md](docs/context/README.md) (index and status of every piece).
   Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
-  subagents, hooks). Changes go spec-first through the `ems-plan-change` skill.
+  subagents, hooks). Changes go spec-first through the `ems-plan-change` skill, and each finished spec ends in a
+  pull request opened by the `ems-pr` skill.
 
 ## Setup
 
