@@ -15,7 +15,7 @@ a new ADR that supersedes the old one, and `docs/context/` is updated in the sam
 | 0006 | Two clocks | Candidate (brief §2) |
 | 0007 | Licence boundary (Restate BSL) | Candidate (brief §2) |
 | 0008 | One repository with subproject folders | Candidate (brief §2) |
-| 0009 | Docker Compose inner loop, Helm on kind | Candidate (brief §2) |
+| 0009 | Docker Compose inner loop, Helm on kind | Candidate (brief §2); Helm part optional (spec 006) |
 | 0010 | [Apache Kafka 4.3 KRaft broker](0010-kafka-4-kraft-broker.md) | Accepted |
 | 0011 | [External data enters through Kafka](0011-external-data-via-kafka.md) | Accepted |
 | 0012 | [Price topic keyed by market](0012-market-keyed-price-topic.md) | Accepted |

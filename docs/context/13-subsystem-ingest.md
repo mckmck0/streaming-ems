@@ -5,7 +5,8 @@
 `ems-gen` (`src/ems/ingest/`) streams contract events (`08-contracts.md`) for Polish sites to Kafka. External
 data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
 live sources, record/replay and hybrid mode (spec 002), scale, background batteries and faults (spec
-003), EV chargers, site types and a 3-broker profile (spec 004), narrowed to PV prosumer sites (spec 005).
+003), EV chargers and site types (spec 004), narrowed to PV prosumer sites (spec 005). Kafka runs as one broker
+(spec 006 removed spec 004's 3-broker profile).
 
 ```mermaid
 flowchart LR
@@ -159,14 +160,6 @@ and froze the range: a new site type or asset kind needs its own spec and ADR.
   leaves.
 - Production events carry `pv` (and `bess` discharge at site-controlled batteries); consumption events `load`,
   `heat_pump`, `ev_charger`, `bess` charge and SoC, and grid flows at unmanaged sites.
-
-### 3-broker profile (spec 004)
-
-`docker compose --profile cluster` (`make cluster-up` / `cluster-down`): one KRaft controller (`kafka-ctl`)
-and brokers `kafka-1..3` on 127.0.0.1:19092–19094, no volumes; topics via `topics ensure --profile cluster`
-(RF 3, min ISR 2). Integration test: one broker stopped → writes succeed; two stopped → `NOT_ENOUGH_REPLICAS`.
-The controller is separate (the plan said combined nodes) because with combined nodes two stopped nodes also
-lose the quorum, so the ISR never shrinks and writes only time out.
 
 ### How to add an asset model
 

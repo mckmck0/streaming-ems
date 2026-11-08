@@ -97,7 +97,8 @@ def test_second_run_on_ensured_state_is_noop(repo: Path) -> None:
     [
         ("localhost:9092", True),
         ("kafka:29092", True),
-        ("127.0.0.1:9092,kafka-2:29092", True),
+        ("kafka:29092,localhost:9092", True),
+        ("kafka-prod.corp:9092", False),
         ("broker.prod.example.com:9092", False),
         ("localhost:9092,prod:9092", False),
     ],

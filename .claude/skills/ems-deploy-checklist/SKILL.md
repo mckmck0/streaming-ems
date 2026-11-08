@@ -7,7 +7,7 @@ description: Pre-flight checklist for infrastructure and tooling work in the EMS
 
 Read `docs/context/05-deploy-and-infra.md` first. It holds the verified versions (with source and date
 checked), the current state of each piece and what is still to be built; most of the environment is
-the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the Helm deployment is a later spec.
+the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the Helm deployment is an optional spec, started only behind the gate in `00-overview.md` (spec 006).
 
 ## Before changing anything
 
@@ -27,7 +27,8 @@ the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the H
 - [ ] Kubernetes: `kubectl config current-context` must be `kind-ems`. This machine's default context is
       a corporate cluster; never run `helm install|upgrade` or `kubectl apply|delete` against it
       (`make deploy-local` prompts for approval for this reason).
-- [ ] Docker Desktop has enough memory for what you start (its VM has 8 GB; Restate, Kafka and kind share it).
+- [ ] Docker Desktop has enough memory for what you start (its VM has 8 GB; Restate and Kafka share it,
+      and kind too if the optional Helm spec runs).
 
 ## Compose (`infra/docker-compose.yml`)
 

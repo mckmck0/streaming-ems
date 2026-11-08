@@ -10,6 +10,8 @@
 - Statistics: per-household paired comparisons; report distributions, not only means.
 - Raw results live under `experiments/results/` (gitignored, never edited by hand); numbers quoted in docs name
   the result file they come from.
+- Energy and per-step results are read from Restate Virtual Object state after a run and written to Parquet by a
+  batch CLI (P10). No Kafka egress topic is built for results (spec 006).
 
 ### Data-generator benchmark (spec 003)
 
@@ -20,7 +22,7 @@ First run 2026-10-20 (`benchmark-20261020T202144Z`): one simulated day, 1,000 si
 
 ## What to build
 
-- Experiment harness spec (`make exp`, runner, Parquet results, reports).
+- Experiment harness spec (`make exp`, runner, export of Restate state to Parquet, reports).
 
 ## Prerequisites
 
@@ -28,4 +30,10 @@ First run 2026-10-20 (`benchmark-20261020T202144Z`): one simulated day, 1,000 si
 
 ## Open questions
 
-- OPEN: which strategies form the research contribution (brief §13).
+- OPEN: which strategies form the research contribution (brief §13). The LLM-based strategy (CLM-8B) is optional
+  (gate in `00-overview.md`).
+- OPEN (harness spec): how the export reads state (Restate SQL introspection on the admin API vs a shared read
+  handler; VERIFY against the Restate 1.7 docs) and which per-step data stay in object state for export (state
+  size per object: VERIFY).
+- OPEN (harness spec): where the systems metrics come from (Restate metrics or traces, runner timings); object
+  state cannot supply latencies or throughput.

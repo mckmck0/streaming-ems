@@ -31,13 +31,6 @@ profiles:
       retention.bytes: "2147483648"     # 2 GiB per partition
       message.timestamp.after.max.ms: "9223372036854775807"
       message.timestamp.before.max.ms: "9223372036854775807"
-  cluster:
-    replication_factor: 3
-    partitions: {location: 3, global: 1}
-    configs:
-      min.insync.replicas: "2"
-      message.timestamp.after.max.ms: "3600000"
-    before_max_equals_retention: true
 
 topics:
   - name: ems.weather.forecast.v1
