@@ -36,11 +36,19 @@ from ems.ingest.generator import (
 CONFIG = Path(__file__).resolve().parents[3] / "config"
 DAY = datetime(2026, 1, 15, tzinfo=UTC)
 
-# Captured on commit 51560fa (before spec 005) on the author's machine (arm64 macOS), at full float
-# precision: a changed digest means changed output, not rounding.
-HOUSEHOLDS_DIGEST = "7a2b951fc5ca4d9171b6ac2c2b6affc97111898228099b0b553418750cccada6"
+# Captured at full float precision on the author's machine (arm64 macOS): a changed digest means
+# changed output, not rounding. The catalog digest dates from commit 51560fa (before spec 005).
+# The two event digests were refreshed by spec 007 (007/T12), whose model changes alter values on
+# purpose (forecast errors, base load); event ids are unchanged (the id digests below).
+HOUSEHOLDS_DIGEST = "699095f8cfc30e45bb928508d3512940ad6319726d46ba00ae5dc5052e848d9d"
 PLANT_CATALOG_DIGEST = "24207803ef373456078935e2800a35a76e18225aa100251fb3f12a1d64a7bee2"
-PLANT_EVENTS_DIGEST = "1eee73e679373e2fa4b8ba3385e07a9bf146387a0dbed846bc7a9257f086aedb"
+PLANT_EVENTS_DIGEST = "d35a1fe4cca18847d9a2a7d5cdb23ca83e008e860b967ba5e2844fde3372b87b"
+
+# Spec 007 (AC-007-18): event ids only, in emission order, for the same sites and day as the two
+# value digests above. Captured on d3d9f30 (before any spec 007 code); event identity carries no
+# values, so these stay fixed when the value digests are refreshed.
+HOUSEHOLDS_ID_DIGEST = "5ac1508ba5f9f371d4ba2e269be75c8f28ccaebf57d7395d39fde5138da3571d"
+PLANT_ID_DIGEST = "148329e44fc55a86525fa134bbff5fa389ba0956e830b1866a877febaf3737da"
 
 
 def _hash_rows(rows: Iterable[Any]) -> str:
@@ -51,21 +59,30 @@ def _hash_rows(rows: Iterable[Any]) -> str:
     return h.hexdigest()
 
 
-def _event_rows(sites: list[Site], cfg: GeneratorConfig) -> Iterable[dict[str, Any]]:
-    """Every event of one day in emission order, without the wall-clock ``ingested_at``."""
+def _events(sites: list[Site], cfg: GeneratorConfig) -> Iterable[EnvelopeBase]:
+    """Every event of one day in emission order."""
     model = SyntheticModel(sites, 4242, CONFIG)
     for at, _stream, build in emissions(model, cfg, DAY, DAY + timedelta(days=1)):
-        event: EnvelopeBase = build(at)
+        yield build(at)
+
+
+def _event_rows(sites: list[Site], cfg: GeneratorConfig) -> Iterable[dict[str, Any]]:
+    """Every event of one day in emission order, without the wall-clock ``ingested_at``."""
+    for event in _events(sites, cfg):
         row = event.model_dump(mode="json", by_alias=True)
         row.pop("ingested_at")
         yield row
 
 
-def test_ac_005_05_households_only_output_unchanged() -> None:
+def _households() -> list[Site]:
     overrides = load_overrides(CONFIG / "sites.yaml", 4242)
-    sites = build_catalog(
+    return build_catalog(
         20, catalog_seed=7, global_seed=4242, overrides=overrides, site_controlled_bess_share=0.5
     )
+
+
+def test_ac_005_05_households_only_output_unchanged() -> None:
+    sites = _households()
     assert sites[0].location_id == "PL-LOC-000001" and sites[0].ems_managed
     assert all(s.site_type is SiteType.HOUSEHOLD for s in sites)
     # Exercise battery dispatch on PV, EV charging and heat pumps, so the balance paths run.
@@ -94,6 +111,15 @@ def test_ac_005_07_commercial_and_solar_farms_unchanged() -> None:
     assert any(s.ev for s in day_sites) and all(s.pv for s in plants[50:55])
     digest = _hash_rows(_event_rows(day_sites, GeneratorConfig(emit_registers=True)))
     assert digest == PLANT_EVENTS_DIGEST
+
+
+def test_ac_007_18_event_ids_unchanged() -> None:
+    cfg = GeneratorConfig(emit_registers=True)
+    plants = _plants()
+    households = _hash_rows(str(e.event_id) for e in _events(_households(), cfg))
+    plant_ids = _hash_rows(str(e.event_id) for e in _events(plants[:10] + plants[50:55], cfg))
+    assert households == HOUSEHOLDS_ID_DIGEST
+    assert plant_ids == PLANT_ID_DIGEST
 
 
 # ── removed site types, asset kinds and contract values are rejected ─────────────────────────────

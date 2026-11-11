@@ -35,14 +35,36 @@ wind:
   prevailing_dir_deg: 250
   dir_sd_deg: 60
   dir_tau_h: 24
+# Forecast errors (spec 007; sources and checks in specs/007-realistic-generator-data/plan.md §5 and 13).
+# err_x(v, r) = sd_x(L) * (rho * Z_x(v) + sqrt(1 - rho^2) * Y_x(r, v)), L = (k + 1) * 0.25 h:
+# Z is shared by every run for a valid time, Y is per run. sd_x(L) = base + per_h * L.
 forecast:
   cadence_h: 3
   horizon_h: 48
   availability_delay_min: 90    # ICON-D2 runs are available ~1.5 h after initialisation
-  kt_sd_base: 0.05
-  kt_sd_per_sqrt_h: 0.045
-  temp_sd_base_c: 0.4
-  temp_sd_per_h_c: 0.045
-  wind_rel_sd_base: 0.08
-  wind_rel_sd_per_h: 0.004
-  step_correlation: 0.97
+  # kt error in logit units of (kt - 0.03) / 1.07 (bounded, no clipping). Calibrated by simulation so the daylight
+  # total kt error, timing included, follows hourly NWP verification: ~0.20 at 0-6 h -> ~0.23 at 48 h
+  # (Perez et al. 2013 Table 9, Germany day 1-3 rRMSE 40/42/45 %; Lorenz et al. 2008, 37 -> 46 %; NWP error flat
+  # over 0-5 h, Lorenz 2016; ICON-D2 noon RMSE ~175 W/m2, DWD COSMO GM 2019, Aug 2019 pre-operational, VERIFY).
+  kt_sd_base: 0.95
+  kt_sd_per_h: 0.002
+  rho: 0.9                      # VERIFY: no published run-to-run error correlation; ECMWF jumpiness guidance
+  rho_phase: 0.95               # VERIFY: no source; 0.9 put consecutive-run kt correlation at 0.73 (prototype)
+  common_tau_h: 2.0             # HRRR GHI error lag-1 h corr 0.58 (arXiv 2603.04132); COSMO-DE-EPS wind 0.6-0.8
+  step_correlation: 0.88        # per 15 min (tau ~ 2 h), same sources
+  # Timing error of the clear-sky index: delta drawn at knots (issue time: 0, then every phase_knot_h of valid
+  # time), sd = phase_sd_per_sqrt_h * sqrt(L), clipped to [-min(L, max), max], linear between knots.
+  # VERIFY: no published timing sd; proxy ECMWF EPS cyclone position error ~1 deg (day 1) / 1.5 deg (day 2) at
+  # 30-50 km/h along-track -> 1.5-2.6 h / 2.3-3.9 h. Knots must be >= 2 * phase_max_h apart (monotone warp).
+  phase_sd_per_sqrt_h: 0.42
+  phase_max_h: 6
+  phase_knot_h: 12
+  # ICON-D2 T2m RMSE 1.35 K (0-6 h), 1.4-1.75 K (15-27 h) (DWD 2019, Aug 2019, VERIFY winter); ECMWF TM 911
+  # SYNOP error sd 2.0-2.4 K at 60-72 h.
+  temp_sd_base_c: 1.3
+  temp_sd_per_h_c: 0.015
+  # Log-normal wind factor exp(err - sd^2/2): absolute error sd from ICON-D2 1.25 m/s (0-6 h, DWD 2019) rising to
+  # ECMWF TM 911's 1.9-2.4 m/s at 60-72 h (~1.2 + 0.0135 L m/s), over a typical inland 10 m speed of 3.5 m/s
+  # (VERIFY, IMGW), as sqrt(ln(1 + cv^2)).
+  wind_ln_sd_base: 0.34
+  wind_ln_sd_per_h: 0.0035

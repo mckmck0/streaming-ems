@@ -2,8 +2,9 @@
 
 Every series is a pure function of (seed, site, variable, quarter-hour index ``t``): shared national
 processes (weather regimes, synoptic anomalies) give spatial correlation, local processes add site
-detail. Forecasts are the truth plus errors that grow with lead time and are correlated across
-steps. Field semantics mirror Open-Meteo: radiation is the mean over the interval (labelled at its
+detail. Forecasts are the truth plus errors shared by consecutive runs, with a per-run part, a
+timing error on the clear-sky index and a spread that grows with lead (spec 007). Field semantics
+mirror Open-Meteo: radiation is the mean over the interval (labelled at its
 end); temperature, wind and cloud cover are instants at the interval end.
 """
 
@@ -18,7 +19,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from ruamel.yaml import YAML
-from scipy.special import ndtr
+from scipy.special import expit, ndtr
 
 from ems.contracts.time import QUARTER_S
 from ems.ingest import rng
@@ -247,7 +248,113 @@ class ForecastRun:
     wind100: F64
     wind120: F64
     wind_dir: F64
-    kt_error: F64
+    kt_error: F64  # forecast kt - truth kt at the same valid time
+    phase_h: F64  # timing error of the clear-sky index, hours
+
+
+# ── forecast errors (spec 007) ────────────────────────────────────────────────────────────────────
+# err(v, r) = sd(L) * (rho * Z(v) + sqrt(1 - rho^2) * Y(r, v)): Z is shared by every run for a valid
+# time, Y belongs to one run. kt errors act in a bounded logit space, wind errors are log-normal.
+
+KT_MIN = 0.03
+KT_MAX = 1.1
+_KT_EPS = 1e-6
+
+
+def to_x(kt: F64) -> F64:
+    """Bounded logit of the clear-sky index: (KT_MIN, KT_MAX) -> real line."""
+    p = (np.clip(kt, KT_MIN + _KT_EPS, KT_MAX - _KT_EPS) - KT_MIN) / (KT_MAX - KT_MIN)
+    return np.asarray(np.log(p) - np.log1p(-p), dtype=np.float64)
+
+
+def from_x(x: F64) -> F64:
+    """Inverse of ``to_x``; the result lies strictly inside (KT_MIN, KT_MAX)."""
+    return np.asarray(KT_MIN + (KT_MAX - KT_MIN) * expit(x), dtype=np.float64)
+
+
+def lead_hours(steps: int) -> F64:
+    """Lead of each step at its interval end, (k + 1) * 0.25 h."""
+    return np.arange(1, steps + 1, dtype=np.float64) * 0.25
+
+
+def _run_path(
+    seed: int, keys: NDArray[np.uint64], var: str, issue_t: int, steps: int, corr: float
+) -> F64:
+    """Unit-variance AR(1) along the steps of one run, keyed by (run, step)."""
+    base = issue_t * 256
+    eps = rng.normal(seed, keys, var, np.arange(base, base + steps, dtype=np.int64))
+    out = np.empty_like(eps)
+    out[:, 0] = eps[:, 0]
+    for j in range(1, steps):  # along the steps of one run only
+        out[:, j] = corr * out[:, j - 1] + np.sqrt(1 - corr**2) * eps[:, j]
+    return out
+
+
+def forecast_errors(
+    seed: int,
+    keys: NDArray[np.uint64],
+    issue_t: int,
+    var: str,
+    sd: F64,
+    rho: float,
+    tau_common_h: float,
+    step_corr: float,
+) -> F64:
+    """Errors [n_loc, len(sd)] of the run issued at ``issue_t``.
+
+    Z runs over the run's own valid-time window, so a run never depends on the chunk; two runs share
+    Z at a valid time up to the AR burn-in residual (risk G1).
+    """
+    steps = int(sd.size)
+    z = rng.ar1(seed, keys, f"{var}.common", issue_t, steps, rng.phi_for(tau_common_h))
+    y = _run_path(seed, keys, var, issue_t, steps, step_corr)
+    return sd[None, :] * (rho * z + np.sqrt(1.0 - rho**2) * y)
+
+
+def truth_margin_q(params: dict[str, Any]) -> int:
+    """Quarter-hours the truth axis needs after a run's last step (the largest phase shift)."""
+    return int(np.ceil(4.0 * float(params["forecast"]["phase_max_h"])))
+
+
+def phase_shift_h(
+    seed: int, keys: NDArray[np.uint64], issue_t: int, steps: int, fp: dict[str, Any]
+) -> F64:
+    """Timing error [n_loc, steps] in hours of the run issued at ``issue_t``.
+
+    Drawn at knots only: the issue time (0) and every ``phase_knot_h`` of absolute valid time, then
+    interpolated linearly. Knots at least 2 * phase_max_h apart and the lower bound -L keep the warp
+    ``k + 4 * delta`` non-decreasing and >= 0 (the forecast never samples before its issue time).
+    """
+    knot_q = round(4.0 * float(fp["phase_knot_h"]))
+    dmax = float(fp["phase_max_h"])
+    if knot_q < 8.0 * dmax:
+        raise ValueError("phase_knot_h must be at least 2 * phase_max_h")
+    a, rho = float(fp["phase_sd_per_sqrt_h"]), float(fp["rho_phase"])
+    first = (issue_t // knot_q + 1) * knot_q
+    knots = np.arange(first, issue_t + steps + knot_q, knot_q, dtype=np.int64)
+    zc = rng.normal(seed, keys, "fc.phase.common", knots // knot_q)
+    zr = rng.normal(seed, keys, "fc.phase.run", issue_t * 64 + (knots - first) // knot_q)
+    lead = (knots - issue_t) * 0.25
+    raw = a * np.sqrt(lead)[None, :] * (rho * zc + np.sqrt(1.0 - rho**2) * zr)
+    dk = np.clip(raw, -np.minimum(lead, dmax)[None, :], dmax)
+    xs = np.concatenate([[issue_t], knots]).astype(np.float64)
+    ds = np.concatenate([np.zeros((dk.shape[0], 1)), dk], axis=1)
+    v = issue_t + np.arange(steps, dtype=np.float64)
+    seg = np.clip(np.searchsorted(xs, v, side="right") - 1, 0, xs.size - 2)
+    w = (v - xs[seg]) / (xs[seg + 1] - xs[seg])
+    delta = ds[:, seg] * (1.0 - w) + ds[:, seg + 1] * w
+    # guard against float round-off at the slope limit: the warp must never step backwards
+    pos = np.maximum.accumulate(np.arange(steps)[None, :] + 4.0 * delta, axis=1)
+    return np.asarray((pos - np.arange(steps)[None, :]) / 4.0, dtype=np.float64)
+
+
+def _interp_rows(values: F64, pos: F64) -> F64:
+    """Row-wise linear interpolation of ``values`` [n_loc, n] at fractional positions [n_loc, m]."""
+    i = np.clip(np.floor(pos).astype(np.int64), 0, values.shape[1] - 2)
+    f = pos - i
+    lo = np.take_along_axis(values, i, axis=1)
+    hi = np.take_along_axis(values, i + 1, axis=1)
+    return lo + f * (hi - lo)
 
 
 def forecast_run(
@@ -261,36 +368,31 @@ def forecast_run(
     """Forecast issued at quarter index ``issue_t`` for intervals ``issue_t .. issue_t+steps-1``."""
     fp = params["forecast"]
     i0 = int(issue_t - truth.axis.t[0])
-    if i0 < 0 or i0 + steps > truth.axis.n:
+    if i0 < 0 or i0 + steps + truth_margin_q(params) > truth.axis.n:
         raise ValueError("truth window does not cover the forecast horizon")
     sl = slice(i0, i0 + steps)
-    lead_h = np.arange(1, steps + 1, dtype=np.float64) * 0.25
+    lead_h = lead_hours(steps)
+    rho, tau = float(fp["rho"]), float(fp["common_tau_h"])
     corr = float(fp["step_correlation"])
-    # errors keyed by (run, step): a run's error path never depends on other runs or sites
-    base = issue_t * 256
 
-    def path(var: str) -> F64:
-        eps = rng.normal(seed, keys, var, np.arange(base, base + steps, dtype=np.int64))
-        out = np.empty_like(eps)
-        out[:, 0] = eps[:, 0]
-        for j in range(1, steps):  # along the steps of one run only
-            out[:, j] = corr * out[:, j - 1] + np.sqrt(1 - corr**2) * eps[:, j]
-        return out
+    def err(var: str, base: str, per_h: str) -> tuple[F64, F64]:
+        sd = float(fp[base]) + float(fp[per_h]) * lead_h
+        return forecast_errors(seed, keys, issue_t, var, sd, rho, tau, corr), sd
 
-    kt_sd = float(fp["kt_sd_base"]) + float(fp["kt_sd_per_sqrt_h"]) * np.sqrt(lead_h)
-    kt_err = kt_sd[None, :] * path("fc.kt")
+    phase = phase_shift_h(seed, keys, issue_t, steps, fp)
+    kt_shifted = _interp_rows(truth.kt, i0 + np.arange(steps)[None, :] + 4.0 * phase)
+    kt_f = from_x(to_x(kt_shifted) + err("fc.kt", "kt_sd_base", "kt_sd_per_h")[0])
     geom = truth.geometry
     cs = geom.cs_ghi[:, sl]
-    kt_f = np.clip(truth.kt[:, sl] + kt_err, 0.03, 1.1)
-    ghi = np.clip(cs * kt_f, 0.0, 1.1 * cs)
+    ghi = np.where(cs > 0, cs * kt_f, 0.0)
     doy = truth.axis.calendar(truth.axis.unix_mid[sl])[0]
     dni, dhi = decompose(ghi, geom.zenith[:, sl], doy)
-    t_sd = float(fp["temp_sd_base_c"]) + float(fp["temp_sd_per_h_c"]) * lead_h
-    temp = truth.temp_c[:, sl] + t_sd[None, :] * path("fc.temp")
-    w_sd = float(fp["wind_rel_sd_base"]) + float(fp["wind_rel_sd_per_h"]) * lead_h
-    w_factor = np.clip(1 + w_sd[None, :] * path("fc.wind"), 0.2, None)
+    temp = truth.temp_c[:, sl] + err("fc.temp", "temp_sd_base_c", "temp_sd_per_h_c")[0]
+    e_w, w_sd = err("fc.wind", "wind_ln_sd_base", "wind_ln_sd_per_h")
+    w_factor = np.exp(e_w - w_sd[None, :] ** 2 / 2)
     cloud = np.clip(np.round(100.0 * (1.02 - kt_f) / 0.85), 0, 100)
-    wdir = np.mod(truth.wind_dir[:, sl] + 8.0 * np.sqrt(lead_h)[None, :] * path("fc.dir"), 360.0)
+    dir_path = _run_path(seed, keys, "fc.dir", issue_t, steps, corr)
+    wdir = np.mod(truth.wind_dir[:, sl] + 8.0 * np.sqrt(lead_h)[None, :] * dir_path, 360.0)
     return ForecastRun(
         issue_t=issue_t,
         steps=steps,
@@ -304,4 +406,5 @@ def forecast_run(
         wind120=truth.wind120[:, sl] * w_factor,
         wind_dir=wdir,
         kt_error=kt_f - truth.kt[:, sl],
+        phase_h=phase,
     )
