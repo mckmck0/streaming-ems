@@ -6,7 +6,9 @@
 data reaches the EMS only through these topics (ADR 0011). Built: synthetic data for EMS-managed households (spec 001) and
 live sources, record/replay and hybrid mode (spec 002), scale, background batteries and faults (spec
 003), EV chargers and site types (spec 004), narrowed to PV prosumer sites (spec 005). Kafka runs as one broker
-(spec 006 removed spec 004's 3-broker profile).
+(spec 006 removed spec 004's 3-broker profile). Spec 007 made the statistics fit for comparing strategies: run-
+consistent forecast errors with timing errors, persistent base load with appliance peaks, and hybrid truth that
+deviates from the live forecasts.
 
 ```mermaid
 flowchart LR
@@ -27,7 +29,7 @@ flowchart LR
 | `contracts/` | envelope and payload models, ids, time, topic plans and routing, schema export (importable by actors) |
 | `ingest/catalog/` | site models, voivodeship table, deterministic catalog, `config/sites.yaml` overrides |
 | `ingest/rng.py` | counter-based randomness keyed by (seed, location, variable, step) |
-| `ingest/synthetic/` | `solar` (pvlib SPA numpy + Ineichen), `weather` (truth and forecasts), `pv`, `load` (BDEW H25/G25), `heat_pump`, `ev`, `bess`, `balance`, `prices` |
+| `ingest/synthetic/` | `solar` (pvlib SPA numpy + Ineichen), `weather` (truth and forecasts), `truth` (truth-source seam), `pv`, `load` (BDEW H25/G25, noise, impulses), `heat_pump`, `ev`, `bess`, `balance`, `prices` |
 | `ingest/generator.py` | chunks, event builders, emission schedule |
 | `ingest/runner.py` | preflight, pacing per clock mode, run manifest |
 | `ingest/kafka/` | client config, admin (ensure), sink, preflight |
@@ -43,15 +45,40 @@ flowchart LR
   (≤ 1.1 × clear-sky); Erbs split into DNI/DHI. Temperature: seasonal and diurnal harmonics, continentality,
   lapse rate, national synoptic and local anomalies. Wind: Gaussian AR copula (national share 0.8) → Weibull at
   10 m, power-law shear to 100/120 m, direction as a mean-reverting walk.
-- **Forecasts**: runs every 3 h, 192 steps, emitted 90 min after issue; errors correlated across steps, spread
-  growing with lead time; clipped to physical bounds.
+- **Truth source** (`synthetic/truth.py`, spec 007): the one place that decides where a site's truth weather
+  comes from. `SyntheticModel(truth_source=…)` calls a `TruthSource(sites, axis) -> Truth`; PV, heat pump and base
+  load read weather only from that `Truth`. `SyntheticTruth` is the synthetic weather above; `LiveForecastTruth`
+  serves hybrid live sites (below). A historical backfill adds a source (satellite or reanalysis arrays) without
+  touching the asset models.
+- **Forecasts** (spec 007): runs every 3 h, 192 steps, emitted 90 min after issue. For variable x, valid time v and
+  run r with lead L = (k + 1)·0.25 h, `err_x = sd_x(L)·(ρ·Z_x(v) + √(1−ρ²)·Y_x(r, v))`: Z is an AR(1) over valid
+  time shared by every run (τ 2 h), Y an AR(1) along one run's steps, ρ = 0.9, so consecutive runs' errors for one
+  valid time correlate at about ρ² and agree in sign. The clear-sky index error acts in a bounded logit space
+  (`logit((kt − 0.03)/1.07)`, sd 0.95 + 0.002·L), so kt stays inside (0.03, 1.1) without clipping and errors are
+  smaller under clear or overcast skies; temperature is additive (1.3 + 0.015·L K), wind speed a mean-one
+  log-normal factor (0.34 + 0.0035·L, all heights). A timing error moves the clear-sky index only (clear-sky GHI
+  stays, so day and night stay in place): δ is drawn at knots (0 at the issue time, then every 12 h of valid time,
+  sd 0.42·√L h, the same shared-plus-per-run mix with ρ_φ 0.95), clipped to [−min(L, 6 h), 6 h] and interpolated
+  linearly, so the time warp is monotone and never samples before the issue time. The truth axis extends past the
+  last run by the 6 h cap at its end only (causal processes: meters do not change). Checked on 64 days × 3 seeds
+  × 4 seasons: daylight kt error sd about 0.19 at 0–6 h → 0.24–0.27 at 42–48 h (hourly NWP verification: about
+  0.20 → 0.23, timing included), consecutive-run correlation ≥ 0.75. Parameters and sources (VERIFY where no
+  value is published): `config/calibration/weather.yaml`, `specs/007-realistic-generator-data/plan.md` §5.
 - **PV**: pvlib Hay-Davies POA, Faiman cell temperature, PVWatts DC (`effective_irradiance=`) and inverter
   clipping at the AC rating, seasonal soiling/snow derate. One simulated year for the test site: 932 kWh/kWp
   (PVGIS central Poland about 930; measured PL rooftops 869–1076).
 - **Base load**: demandlib 0.2.2 BDEW 2025 H25 (G11/G12) and G25 (C11/C21) on a tz-aware Europe/Warsaw index
-  with Polish holidays, renormalised to an exact annual sum, mean-one lognormal daily and interval noise. Official
-  Polish DSO profiles exist only as yearly PDF annexes in each DSO's IRiESD with no reuse terms, so BDEW is the
-  default (spec 002 may add a loader for user-supplied DSO files).
+  with Polish holidays, renormalised to an exact annual sum. Official Polish DSO profiles exist only as yearly PDF
+  annexes in each DSO's IRiESD with no reuse terms, so BDEW is the default. Spec 007
+  (`config/calibration/load.yaml`): `E = A·(1−s)·shape·D(day)·exp(σ·X − σ²/2) + I`, with D a mean-one lognormal
+  per site and Europe/Warsaw delivery day (92/100-slot days included), X two-timescale noise
+  (`√(1−w)·X_fast + √w·X_slow`, unit AR(1)s; H25: τ_fast 0.66 h, τ_slow 3 h fixed, w 0.44, σ 0.45, daily sd 0.01,
+  fitted on WPuQ 2019; G25 a single AR(1), τ 1.5 h, VERIFY) and I appliance impulses for H25 households: kettle 2.0 kW × 3 min, oven
+  2.1 kW × 27 min, washing-machine heater 2.0 kW × 20 min (CREST, UK HES, EEA, GUS ownership; Polish rates VERIFY),
+  spread over the quarter-hours they overlap (a kettle adds 0.1 kWh to its quarter). Rates are per reference
+  household (2,300 kWh/yr) and scale with the site's energy; starts follow the profile share, so the expected
+  annual energy stays A and s ≈ 0.17. G25 sites get noise but no impulses. Parsing fails fast if s > 0.4 or a
+  start probability exceeds 1. Impulses that start before a window are drawn too, so window splits are exact.
 - **Heat pump**: degree-hour space heating (base 15 °C, heating curve) and hot water over a Carnot-fraction COP;
   the test site uses about 3.7 MWh/yr.
 - **Prices (PL_RCE-like)**: monthly base, daily shape with morning and evening peaks, weekend/holiday factor,
@@ -98,14 +125,44 @@ uncontrolled assets, and prices. These rows move into `01-architecture.md` when 
   and recordings.
 - **Router and hybrid** (`sources/router.py`, `sources/live_runner.py`, `runner.run_hybrid`): per-stream modes
   from the generator config; live weather for `live.locations`, synthetic for the rest, one price source. A live
-  site's synthetic PV and heat pump follow its latest live forecast step for each interval.
-  `config/generator.live.yaml` + `make gen-live` run it.
+  site's synthetic PV and heat pump use `LiveForecastTruth` (spec 007, risk L5): the latest live step minus the
+  synthetic forecast error at that step's lead, in the same spaces as the synthetic forecasts (bounded logit kt,
+  additive temperature, mean-one log-normal wind at every height), with DNI/DHI re-split from the truth GHI. The
+  published forecasts stay exactly as fetched, so a forecast-driven strategy is no longer an oracle. Intervals
+  without a step (no run yet, a truncated run, past the horizon) use the synthetic truth. `live_meters` builds the
+  source from a snapshot of the latest events, so the same event and seed always give the same meters. The truth
+  kt jumps by about 0.12 when a new run arrives (the per-run part changes), and in logit space it regresses mildly
+  toward mid kt. `config/generator.live.yaml` + `make gen-live` run it.
 - **Record and replay** (`sources/recording.py`): `ems-gen record --name N` stores raw responses (redacted),
   events (`events.jsonl`) and a manifest in `data/recordings/N/`; `ems-gen replay --name N` re-publishes them
   with their ids, marked `replay:<source>`.
 - **Calibration** (`ingest/calibration.py`, `jobs/calibrate.py`): price and temperature fits → candidate files in
   `config/calibration/candidates/` (review before adopting). Example: ERA5 2024 at Poznań gives an annual mean of
   11.5 °C (a record-warm year; the default 8.7 °C is the 1991–2020 normal).
+- **Load calibration** (spec 007, `jobs/calibrate.py load PATH… --format csv|wpuq`): fits the H25 noise
+  (τ_fast, slow share w, σ, daily sd; τ_slow fixed at 3 h). Input is per-household quarter-hour base-load energy
+  (heat pump and EV excluded): either a CSV with header `timestamp_utc,household_id,kwh` (`timestamp_utc` = interval
+  start, RFC 3339 UTC `Z`; any source, for example a permitted Polish extract) or the WPuQ 15-minute HDF5 files
+  (read with h5py: `NO_PV/SFH<n>/HOUSEHOLD/table`, `P_TOT` W → kWh × 0.25/1000; stamps verified as UTC interval
+  starts; PV houses and the authors' list of houses missing a month skipped).
+  - One estimator, `household_stats`, measures the **full load** (noise and appliance peaks alike) in data and
+    model: drop holidays (PL, DE-NI) and linearly interpolated runs; r = log(E/(A·shape)) minus the household's own
+    profile (quarter of day × weekday/weekend, not modelled; its sd is reported) and each local day's median; then
+    the within-day ACF at 15 min, 30 min, 1 h, 2 h, the within-day sd and the day-to-day sd.
+  - The noise is fitted jointly with the impulses held at their literature rates (fitting the noise alone and then
+    adding impulses left the full-load ACF about 0.1 below the data at 15–30 min). A fixed point on the statistics
+    removes the estimator's bias: model households with the same timestamps, gaps and energies, iterated until
+    their statistics match the data's.
+  - τ_slow is fixed, not fitted: free, it runs to any bound and overstates day-to-day variability (full-load day sd
+    0.192 at 6 h, 0.165 at 3 h, 0.158 at 2 h vs the data's 0.150).
+  - WPuQ 2019 result (27 houses): full-load ACF 0.603 / 0.345 / 0.184 / 0.094 (data) vs 0.587 / 0.343 / 0.196 /
+    0.082 (model), within-day sd 0.541 vs 0.540, day-to-day sd 0.150 vs 0.165; recorded in `load.yaml`
+    (`calibration_targets`). Impulse rates are not fitted (the WPuQ peak rate counts the German appliance mix: 2.1
+    peaks/day vs the model's 1.7); it is a diagnostic.
+  - Data: WPuQ dataset, Schlemminger et al. 2022, Sci. Data 9:56 (Zenodo 5642902), CC BY 4.0, German single-family
+    houses (2019); Polish applicability VERIFY. Downloaded to `data/external/wpuq/` (gitignored), never committed.
+    pvmonitor.pl (Polish PV, consumption and heat-pump dashboards) has no API, export or reuse terms (checked
+    2026-11-10) and is not used without the operator's written permission.
 
 Attribution: Open-Meteo data is CC BY 4.0 (NOTICE next to fixtures; "Weather data by Open-Meteo.com"); ENTSO-E
 day-ahead prices are not open data, so only hand-written fixtures are committed; PSE data is kept only as a few
@@ -138,6 +195,10 @@ test fixtures.
   Per-event object building and validation dominate, not the models; forecasts are ~70 % of the bytes.
   Rerun 2026-10-20 after spec 004 (households with EVs; `benchmark-20261020T204019Z`): 1,000 sites 174,562
   events in 15.0 s, 627 MB; 10,000 sites 1.74 M in 210 s, 6.3 GB; produce 171,202 in 33 s (5.2k/s), 0 failures.
+  Rerun 2026-11-11 after spec 007 (`benchmark-20261111T005219Z`): same event counts; arrays 0.77 s (1,000 sites)
+  and 4.4 s (10,000 sites; was 3.0 s: the shared and phase forecast errors and the impulse draws); 1,000 sites
+  174,562 events in 14.9 s (11.7k/s), 627 MB; 10,000 sites 1,736,578 in 194 s (8.9k/s), 6.3 GB; produce 171,202 in
+  33 s (5.1k/s), 0 failures. Event building still dominates.
 
 ### Site types and assets (specs 004, 005; frozen, ADR 0016)
 

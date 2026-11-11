@@ -14,11 +14,12 @@ import pytest
 import respx
 
 from ems.contracts.envelope import AssetType, Stream, check_event
-from ems.ingest.generator import load_generator_config, load_sites
+from ems.contracts.time import quarter_index
+from ems.ingest.generator import SyntheticModel, load_generator_config, load_sites
 from ems.ingest.kafka.sink import SinkStats
 from ems.ingest.live.openmeteo import parse_meta
 from ems.ingest.runner import record, replay
-from ems.ingest.sources.live_runner import LiveRunner, live_weather_override, mask_synthetic
+from ems.ingest.sources.live_runner import LiveRunner, mask_synthetic
 from ems.ingest.sources.recording import as_replay, read_events
 from ems.ingest.sources.router import RoutingError, route
 from ems.settings import EmsSettings
@@ -148,22 +149,27 @@ def test_ac_002_12_live_site_meters_follow_live_weather(tmp_path: Path) -> None:
     )
     asyncio.run(runner.once())
     forecast = runner.state.forecasts["PL-LOC-000001"]
+    steps = {s.valid_start: s for s in forecast.payload.steps}
     noon = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
-    runner.live_meters(noon)
-    meters = [e for e in sink.events if e.stream in (Stream.PRODUCTION, Stream.CONSUMPTION)]
-    assert {e.location_id for e in meters} == {"PL-LOC-000001"}
-    pv = next(
-        m.value for e in meters for m in e.payload.measurements if m.asset_type is AssetType.PV
-    )
-    step = next(s for s in forecast.payload.steps if s.valid_start == noon)
-    if step.ghi_wm2 < 1:
-        assert pv == 0
-    else:
-        assert pv > 0
-    # live weather replaced the synthetic truth for the live site only
-    override = live_weather_override(r.live_sites, runner.state.forecasts)
-    assert callable(override)
-    assert all(e.synthetic for e in meters) and all(e.source_system == "synthetic" for e in meters)
+    night = datetime(2026, 10, 21, 0, 0, tzinfo=UTC)
+    synthetic = SyntheticModel(list(r.live_sites), cfg.seed, REPO / "config")
+    pv: dict[datetime, float] = {}
+    for start in (noon, night):
+        before = len(sink.events)
+        runner.live_meters(start)
+        meters = [
+            e for e in sink.events[before:] if e.stream in (Stream.PRODUCTION, Stream.CONSUMPTION)
+        ]
+        assert {e.location_id for e in meters} == {"PL-LOC-000001"}
+        assert all(e.synthetic for e in meters)
+        assert all(e.source_system == "synthetic" for e in meters)
+        pv[start] = next(
+            m.value for e in meters for m in e.payload.measurements if m.asset_type is AssetType.PV
+        )
+    # spec 007: the live step drives the live site's truth through the truth-source seam
+    assert steps[noon].ghi_wm2 >= 1 and pv[noon] > 0
+    assert pv[noon] != float(synthetic.chunk(quarter_index(noon), 1, []).pv_kwh[0, 0])
+    assert steps[night].ghi_wm2 == 0 and pv[night] == 0
     assert date(2026, 10, 21) in {
         e.payload.delivery_day for e in sink.events if e.stream is Stream.PRICE
     }

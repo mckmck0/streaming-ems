@@ -1,0 +1,48 @@
+# Base-load model (spec 007; sources and checks in specs/007-realistic-generator-data/plan.md §3–§5 and 13).
+# E(t) = A * (1 - s) * shape(t) * D(local day) * exp(interval_sd * X(t) - interval_sd^2 / 2) + I(t)
+# shape: BDEW 2025 H25/G25 share of the local year; D: mean-one lognormal per site and Europe/Warsaw delivery
+# day (daily_sd); X = sqrt(1 - w) * X_fast + sqrt(w) * X_slow, unit AR(1) components with time constants tau_h
+# and tau_slow_h, w = slow_share; I: appliance impulses (profiles with impulses: true).
+
+# Rates below are for a reference household with this annual base load (the catalog median); a site's rate
+# scales with its annual energy, so the impulse share s = expected impulse energy / reference is the same for
+# every household (s ~ 401 / 2300 ~ 0.17). Parsing fails fast if s > 0.4 or a start probability exceeds 1.
+reference_annual_kwh: 2300
+
+# Impulse kinds: power while drawing, duration of the high-power phase, starts per reference household and
+# day (ownership included). The probability of a start in a quarter-hour is proportional to the profile share.
+impulses:
+  # CREST appliance model via richardsonpy (Appliances.csv): 2.0 kW, 3 min, 4.2 cycles/day per owner, 97.5 %
+  # ownership; UK HES (Intertek R66141): 65 % of cycles < 0.1 kWh. Polish rate VERIFY.
+  kettle: {p_kw: 2.0, dur_min: 3, rate_per_day: 4.0}
+  # CREST: 2.125 kW, 27 min, 0.60 cycles/day per owner (UK, a gas-hob country: Polish rate VERIFY); electric-oven
+  # ownership ~75 % derived from GUS 2018 (56.9 % gas-electric cookers + electric cookers with an oven; VERIFY).
+  oven: {p_kw: 2.1, dur_min: 27, rate_per_day: 0.45}
+  # Heating phase only: CREST appliance code (richardsonpy appliance.py) 2.056 kW for 21 min; EEA 0.48
+  # cycles/day per machine in 2020, falling (~0.45 in 2026); 92.1 % ownership (GUS 2018, VERIFY).
+  washing_machine: {p_kw: 2.0, dur_min: 20, rate_per_day: 0.41}
+
+# Noise per standard profile.
+# H25: fitted on WPuQ 2019 (27 German single-family houses, household meter without heat pump; Schlemminger et
+# al. 2022, Sci. Data 9:56, CC BY 4.0) with `jobs/calibrate.py load --format wpuq` on 2026-11-10: the noise is fitted
+# jointly with the impulses above held at their literature rates, to the full-load statistics (noise and impulses
+# alike, the same estimator on data and model; see calibration_targets). tau_slow_h is fixed, not fitted: free, the
+# fit runs to any bound it is given, and a longer one overstates day-to-day variability: full-load day-to-day sd
+# 0.192 at 6 h, 0.165 at 3 h, 0.158 at 2 h vs the data's 0.150, with an equally good ACF (the noise-only estimator
+# gave 0.136 vs 0.091 at 6 h, 0.095 at 3 h). Polish applicability VERIFY (German households).
+# G25 keeps the pre-spec-007 magnitudes as a single AR(1) (no commercial data, VERIFY).
+profiles:
+  H25: {tau_h: 0.66, tau_slow_h: 3.0, slow_share: 0.44, interval_sd: 0.45, daily_sd: 0.01, impulses: true}
+  G25: {tau_h: 1.5, interval_sd: 0.20, daily_sd: 0.10, impulses: false}
+
+# WPuQ 2019 full-load statistics the H25 defaults reproduce (AC-007-12): within-day autocorrelation of
+# log(E / (A * shape)) after removing each household's own profile and each local day's median, at 15 min,
+# 30 min, 1 h, 2 h; within-day sd; day-to-day sd of the day medians. Medians over households (annual energy
+# median 3,041 kWh, p10-p90 2,034-3,976). The fitted model gives 0.587 / 0.343 / 0.196 / 0.082, 0.540, 0.165.
+calibration_targets:
+  source: WPuQ 2019 (Zenodo 5642902 v2.0), CC BY 4.0
+  acf_lags_q: [1, 2, 4, 8]
+  acf: [0.603, 0.345, 0.184, 0.094]
+  interval_sd: 0.541
+  day_sd: 0.150
+  annual_kwh_p10_p90: [2034, 3976]

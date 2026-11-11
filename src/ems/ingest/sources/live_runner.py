@@ -2,8 +2,10 @@
 
 Live sources poll in realtime (wall clock, principle 7 allows it outside experiments). For
 live-weather sites the synthetic meters follow the live weather: at each interval end their PV and
-heat-pump energy are computed from the latest live forecast step for that interval (falling back to
-synthetic weather before the first run arrives); base load stays synthetic.
+heat-pump energy are computed from a truth that is the latest live forecast step minus the synthetic
+forecast error at that step's lead (``LiveForecastTruth``, spec 007), so the meters deviate from the
+forecasts strategies see. Before the first run arrives, or past its horizon, the truth is synthetic;
+base load stays synthetic.
 """
 
 from __future__ import annotations
@@ -28,42 +30,13 @@ from ems.ingest.live.entsoe import EntsoeSource
 from ems.ingest.live.http import Fetcher, Recorder
 from ems.ingest.live.openmeteo import OpenMeteoSource
 from ems.ingest.live.pse import REPORTS, PseSource, days_to_poll, poll_interval
-from ems.ingest.synthetic.weather import Truth
+from ems.ingest.rng import location_key
+from ems.ingest.synthetic.truth import LiveForecastTruth, SyntheticTruth
 from ems.settings import EmsSettings
 
 log = structlog.get_logger(__name__)
 Clock = Callable[[], datetime]
 Sleep = Callable[[float], Awaitable[None]]
-
-
-def live_weather_override(
-    sites: tuple[Site, ...], forecasts: dict[str, WeatherForecastEvent]
-) -> Callable[[Truth], Truth]:
-    """Replace the truth weather of live sites by the matching live forecast steps
-    (shortest lead).
-    """
-
-    def apply(truth: Truth) -> Truth:
-        ghi, dni, dhi = truth.ghi.copy(), truth.dni.copy(), truth.dhi.copy()
-        temp, w10 = truth.temp_c.copy(), truth.wind10.copy()
-        for row, site in enumerate(sites):
-            ev = forecasts.get(site.location_id)
-            if ev is None:
-                continue
-            by_start = {s.valid_start: s for s in ev.payload.steps}
-            for j in range(truth.axis.n):
-                step = by_start.get(truth.axis.start_datetime(j))
-                if step is None:
-                    continue
-                cs = truth.geometry.cs_ghi[row, j]
-                ghi[row, j] = min(step.ghi_wm2, 1.1 * cs) if cs > 0 else 0.0
-                dni[row, j] = step.dni_wm2 if cs > 0 else 0.0
-                dhi[row, j] = min(step.dhi_wm2, ghi[row, j])
-                temp[row, j] = step.temp_air_c
-                w10[row, j] = step.wind_speed_ms["10"]
-        return dataclasses.replace(truth, ghi=ghi, dni=dni, dhi=dhi, temp_c=temp, wind10=w10)
-
-    return apply
 
 
 @dataclass
@@ -118,6 +91,9 @@ class LiveRunner:
             if self.live_sites
             else None
         )
+        self.location_by_key = {
+            int(location_key(s.location_id)): s.location_id for s in self.live_sites
+        }
 
     def _dlq(self, value: str, error: str) -> None:
         publish_invalid = getattr(self.sink, "publish_invalid", None)
@@ -172,8 +148,15 @@ class LiveRunner:
         if self.live_model is None:
             return
         t = quarter_index(interval_start)
-        override = live_weather_override(self.live_sites, self.state.forecasts)
-        chunk = self.live_model.chunk(t, 1, [], weather_override=override)
+        model = self.live_model
+        source = LiveForecastTruth(
+            location_by_key=self.location_by_key,
+            forecasts=dict(self.state.forecasts),  # snapshot: the chunk is a function of its inputs
+            fallback=SyntheticTruth(model.seed, model.weather_params),
+            seed=model.seed,
+            params=model.weather_params,
+        )
+        chunk = model.chunk(t, 1, [], truth_source=source)
         for stream, build in _meter_builders(self.live_model, chunk, 0, self.run_id):
             if self.cfg.stream_on(stream):
                 self._publish(build(self.clock()))

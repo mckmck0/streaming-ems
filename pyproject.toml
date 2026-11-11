@@ -36,6 +36,7 @@ ingest = [
     "confluent-kafka>=2.15.1,<2.16",
     "demandlib==0.2.2",
     "faker==40.40.0",
+    "h5py>=3.16",
     "holidays>=0.105",
     "httpx>=0.28.1",
     "jsonschema>=4.26",

@@ -11,7 +11,7 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-11-08)
+### Status of every piece (2026-11-10)
 
 | Piece | Status |
 |---|---|
@@ -24,6 +24,7 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Other assets and site types, 3-broker profile (spec 004) | Built; plants removed by spec 005, 3-broker profile by spec 006 |
 | Generator narrowed to PV prosumers, contract v1 frozen (spec 005) | Built |
 | Simplified scope: one Kafka broker, optional Helm and LLM strategy, results from Restate state (spec 006) | Built |
+| Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
@@ -42,6 +43,16 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     Docker Compose.
   - The first experiment harness exports results from Restate Virtual Object state to Parquet; no Kafka result
     (egress) topic.
+- 2026-11-10 (spec 007): realistic generator statistics, no contract change.
+  - Hybrid live-site truth is the latest live step minus the synthetic forecast error, behind a truth-source seam
+    (`synthetic/truth.py`); satellite radiation comes with the historical-backfill spec.
+  - Temperature and wind share the clear-sky index's error structure (shared by valid time plus per run), without
+    the timing error; kt errors act in a bounded logit space.
+  - Base-load noise has two time scales (fast plus slow AR(1), τ_slow fixed at 3 h), fitted jointly with the
+    appliance impulses to the full-load statistics of WPuQ 2019 (German households, CC BY 4.0; Polish
+    applicability VERIFY) through a neutral CSV layout. Impulse rates stay at literature values. pvmonitor.pl is
+    not used without the operator's written permission.
+  - The historical backfill on real data (finding 4) is its own spec.
 
 ### Repo map (current and planned)
 
@@ -71,10 +82,12 @@ templates/                   bootstrap templates; frontend/ reserved
 | 4 | **004 Other assets** | Wind, CHP, biogas, biomass, hydro, EV, farm and plant site types; 3-broker Kafka profile (removed by 006) |
 | 5 | **005 Narrow generator assets** | Remove wind, CHP, biogas, biomass, hydro and the industrial and plant site types; trim and freeze contract v1 |
 | 6 | **006 Simplify scope** | Remove the 3-broker profile (one broker everywhere); Helm and LLM strategy optional; results from Restate state |
+| 7 | **007 Realistic generator data** | Forecast errors shared by consecutive runs with timing errors; two-timescale log noise and appliance impulses in base load, daily factor on the local day, WPuQ fit; hybrid truth deviates from live forecasts (L5) |
 | next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
 | next | Dev environment and spike reproduction | Restate in compose, test tiers, spike experiments A–C (brief §11, former 001) |
 | next | Domain core | Battery model, settlement with RCE/RCEm options, actions, `Policy`, offline reference |
 | next | Actor skeleton; sim clock and replay driver | Brief §11 |
+| later | Historical backfill on real data | One real window (proposed 2026-04-02 … 2026-06-30, spring with negative RCE): PSE RCE by business date; archived ICON-D2/DMI runs from the Open-Meteo Single Runs API (full runs by initialisation time from 2026-04-02, 15-minutely; VERIFY access and licence); truth GHI/DNI/DHI from the Satellite Radiation API (DWD MTG, 10 min, archive since Feb 2026) and temperature/wind from ERA5, as truth sources behind the spec 007 seam; household meters stay synthetic. Handoff facts: `specs/007-realistic-generator-data/spec.md` |
 | later | Forecasting, MPC and oracle, adaptive Selector, experiment harness (results exported from Restate state) | Brief §11 |
 
 ### Optional

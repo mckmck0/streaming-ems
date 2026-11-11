@@ -58,17 +58,18 @@ from ems.ingest.synthetic.balance import grid_flows
 from ems.ingest.synthetic.bess import BessArrays, dispatch
 from ems.ingest.synthetic.ev import ev_kwh
 from ems.ingest.synthetic.heat_pump import heat_pump_kwh
-from ems.ingest.synthetic.load import base_load_kwh
+from ems.ingest.synthetic.load import base_load_kwh, load_load_params
 from ems.ingest.synthetic.prices import day_prices, price_curve, price_params, publication_time
 from ems.ingest.synthetic.pv import PvArrays, pv_energy_kwh
+from ems.ingest.synthetic.truth import SyntheticTruth, TruthSource
 from ems.ingest.synthetic.weather import (
     ForecastRun,
     SiteArrays,
     TimeAxis,
     Truth,
     forecast_run,
-    generate_truth,
     load_params,
+    truth_margin_q,
 )
 
 F64 = NDArray[np.float64]
@@ -214,13 +215,21 @@ def _concat_runs(parts: list[ForecastRun]) -> ForecastRun:
 
 class SyntheticModel:
     def __init__(
-        self, sites: list[Site], seed: int, config_dir: Path, site_chunk: int = 2000
+        self,
+        sites: list[Site],
+        seed: int,
+        config_dir: Path,
+        site_chunk: int = 2000,
+        truth_source: TruthSource | None = None,
     ) -> None:
         self.sites = sites
         self.seed = seed
         self.site_chunk = max(1, site_chunk)
         self.weather_params = load_params(config_dir / "calibration" / "weather.yaml")
         self.price_params = price_params(config_dir / "calibration" / "prices.yaml")
+        self.load_params = load_load_params(config_dir / "calibration" / "load.yaml")
+        # The one place that decides where a site's truth weather comes from (spec 007).
+        self.truth_source: TruthSource = truth_source or SyntheticTruth(seed, self.weather_params)
         alpha = self.weather_params["wind"]["shear_alpha"]
         self.arrays = SiteArrays(
             keys=np.array([rng.location_key(s.location_id) for s in sites], dtype=np.uint64),
@@ -268,15 +277,15 @@ class SyntheticModel:
         self._register = np.zeros(len(sites))
 
     def _subset(
-        self, idx: slice, axis: TimeAxis, n: int, issues: list[int], override: Any
+        self, idx: slice, axis: TimeAxis, n: int, issues: list[int], source: TruthSource
     ) -> tuple[F64, F64, F64, dict[int, ForecastRun], Truth, dict[str, F64]]:
         arrays = _take(self.arrays, idx)
-        truth = generate_truth(arrays, axis, self.seed, self.weather_params)
-        if override is not None:
-            truth = override(truth)
+        truth = source(arrays, axis)
         pv = pv_energy_kwh(truth, _take(self.pv, idx))[:, :n]
         t = axis.t[:n]
-        load = base_load_kwh(self.seed, arrays.keys, self.profiles[idx], self.annual_kwh[idx], t)
+        load = base_load_kwh(
+            self.seed, arrays.keys, self.profiles[idx], self.annual_kwh[idx], t, self.load_params
+        )
         hour_local = local_hour(axis.unix_mid[:n])
         hp = heat_pump_kwh(
             truth.temp_c[:, :n],
@@ -315,26 +324,26 @@ class SyntheticModel:
         t0: int,
         n: int,
         forecast_issues: list[int],
-        weather_override: Callable[[Truth], Truth] | None = None,
+        truth_source: TruthSource | None = None,
     ) -> Chunk:
         """Energy for meter intervals ``t0 .. t0+n-1`` and the forecast runs issued in that span.
 
         Sites are processed in slices of ``site_chunk`` to bound memory; every per-site computation
-        is row-wise, so slicing never changes a value.
+        is row-wise, so slicing never changes a value. ``truth_source`` overrides the model's source
+        for this call. The truth axis extends past the last run by the largest phase shift, at its
+        end only: AR noise and the regime chain are causal, so earlier values do not change.
         """
-        horizon_end = max([t0 + n, *[t + FORECAST_STEPS for t in forecast_issues]])
+        margin = truth_margin_q(self.weather_params)
+        horizon_end = max([t0 + n, *[t + FORECAST_STEPS + margin for t in forecast_issues]])
         axis = TimeAxis.from_range(t0, horizon_end - t0)
         n_loc = len(self.sites)
+        source = truth_source or self.truth_source
         pv_parts, load_parts, hp_parts = [], [], []
         other_parts: list[tuple[int, dict[str, F64]]] = []
         run_parts: dict[int, list[ForecastRun]] = {i: [] for i in forecast_issues}
-        if weather_override is not None and n_loc > self.site_chunk:
-            raise ValueError("weather overrides need all sites in one slice")
         for lo in range(0, max(n_loc, 1), self.site_chunk):
             idx = slice(lo, min(lo + self.site_chunk, n_loc))
-            pv, load, hp, runs, _truth, other = self._subset(
-                idx, axis, n, forecast_issues, weather_override
-            )
+            pv, load, hp, runs, _truth, other = self._subset(idx, axis, n, forecast_issues, source)
             other_parts.append((idx.stop - idx.start, other))
             pv_parts.append(pv)
             load_parts.append(load)

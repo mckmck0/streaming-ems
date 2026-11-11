@@ -17,8 +17,9 @@
 
 `make bench` → `experiments/results/benchmark-<UTC>/results.json` (window, config, versions, hardware, commit).
 First run 2026-10-20 (`benchmark-20261020T202144Z`): one simulated day, 1,000 sites 14 s for 174,562 events,
-10,000 sites 199 s for 1.74 M events; Kafka producer 4.9k events/s for 1,000 sites. Details in
-`13-subsystem-ingest.md`.
+10,000 sites 199 s for 1.74 M events; Kafka producer 4.9k events/s for 1,000 sites. Rerun 2026-11-11 after spec 007
+(`benchmark-20261111T005219Z`): the same event counts, array generation 4.4 s for 10,000 sites (was 3.0 s), event
+building 8.9k/s, producer 5.1k events/s. Details in `13-subsystem-ingest.md`.
 
 ## What to build
 

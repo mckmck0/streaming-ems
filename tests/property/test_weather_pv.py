@@ -78,7 +78,8 @@ def test_ac_001_21_forecast_error_grows_with_lead_time() -> None:
     )
     early = errors[:, :8].std()
     late = errors[:, -8:].std()
-    assert late > 1.5 * early
+    # 1.5 -> 1.1 (spec 007 plan §5): published NWP irradiance errors grow only weakly with lead.
+    assert late > 1.1 * early
 
 
 def test_ac_001_26_truth_for_a_site_is_independent_of_the_batch() -> None:
