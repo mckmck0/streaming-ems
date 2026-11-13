@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Self
 
@@ -19,6 +20,7 @@ class SiteType(StrEnum):
 class TariffGroup(StrEnum):
     G11 = "G11"
     G12 = "G12"
+    G12W = "G12w"  # weekend tariff; the generator never assigns it, hand-defined sites may
     C11 = "C11"
     C21 = "C21"
 
@@ -27,6 +29,7 @@ class TariffGroup(StrEnum):
 PROFILE_FOR_TARIFF = {
     TariffGroup.G11: "H25",
     TariffGroup.G12: "H25",
+    TariffGroup.G12W: "H25",
     TariffGroup.C11: "G25",
     TariffGroup.C21: "G25",
 }
@@ -41,6 +44,16 @@ def tariff_for(
     if contracted_kw <= 40 and fuse_a <= 63:
         return TariffGroup.C11
     return TariffGroup.C21
+
+
+class NetBilling(BaseModel):
+    """Net-billing cohort of an EMS-managed site (spec 009): first feed-in and an optional switch to
+    RCE from a month (``YYYY-MM``). The domain (``ems.domain.netbilling.Cohort``) checks the rules.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    first_feed_in: date
+    rce_from: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
 class _Asset(BaseModel):
@@ -116,6 +129,7 @@ class Site(BaseModel):
     annual_base_load_kwh: float = Field(gt=0)  # excludes heat pump and EV
     assets: list[Asset] = Field(default_factory=list)
     seed: int = Field(ge=0)
+    net_billing: NetBilling | None = None  # config, not wire contract (spec 009)
 
     @model_validator(mode="after")
     def _check(self) -> Self:

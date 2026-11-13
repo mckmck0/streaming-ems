@@ -33,8 +33,9 @@ def _bump(hour: F64, centre: float, width: float) -> F64:
     return np.exp(-(((hour - centre) / width) ** 2))
 
 
-def price_curve(t0: int, n: int, seed: int, prices: dict[str, Any], weather: dict[str, Any]) -> F64:
-    """PLN/MWh for quarter-hours ``t0 .. t0+n-1`` (1-D)."""
+def _reference_truth(
+    t0: int, n: int, seed: int, prices: dict[str, Any], weather: dict[str, Any]
+) -> tuple[TimeAxis, Any]:
     ref = prices["reference_site"]
     site = SiteArrays(
         keys=np.array([REFERENCE_KEY], dtype=np.uint64),
@@ -45,8 +46,27 @@ def price_curve(t0: int, n: int, seed: int, prices: dict[str, Any], weather: dic
         wind_scale_ms=np.array([3.4]),
     )
     axis = TimeAxis.from_range(t0, n)
-    truth = generate_truth(site, axis, seed, weather)
-    pv_index = truth.geometry.cs_ghi[0] * truth.national_kt / 1000.0
+    return axis, generate_truth(site, axis, seed, weather)
+
+
+def _pv_index(truth: Any) -> F64:
+    return truth.geometry.cs_ghi[0] * truth.national_kt / 1000.0
+
+
+def national_pv_index(
+    t0: int, n: int, seed: int, prices: dict[str, Any], weather: dict[str, Any]
+) -> F64:
+    """The synthetic national PV index that shapes the RCE curve; spec 009 weights the RCEm proxy
+    with it (a stand-in for the country's prosumer feed-in).
+    """
+    _axis, truth = _reference_truth(t0, n, seed, prices, weather)
+    return _pv_index(truth)
+
+
+def price_curve(t0: int, n: int, seed: int, prices: dict[str, Any], weather: dict[str, Any]) -> F64:
+    """PLN/MWh for quarter-hours ``t0 .. t0+n-1`` (1-D)."""
+    axis, truth = _reference_truth(t0, n, seed, prices, weather)
+    pv_index = _pv_index(truth)
     wind_index = np.clip((truth.national_wind100 / 11.0) ** 3, 0.0, 1.0)
 
     hours = np.empty(n)

@@ -4,6 +4,8 @@ ones.
 
 from __future__ import annotations
 
+import json
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,12 +18,17 @@ from ems.ingest.catalog.sites import (
     BessAsset,
     EvChargerAsset,
     HeatPumpAsset,
+    NetBilling,
     PvAsset,
     Site,
     SiteType,
     tariff_for,
 )
 from ems.ingest.catalog.voivodeships import DSO_OPERATOR_PREFIX, VOIVODESHIPS, Voivodeship
+
+# Spec 009: every generated household is an RCE prosumer (first feed-in 2024-07-01). A constant,
+# not a draw, so no existing catalog value changes; one line to vary if an experiment needs it.
+DEFAULT_NET_BILLING = NetBilling(first_feed_in=date(2024, 7, 1), rce_from=None)
 
 
 def location_id(index: int) -> str:
@@ -211,6 +218,7 @@ def generate_household(
         annual_base_load_kwh=round(float(np.clip(rng.lognormal(np.log(2300), 0.35), 900, 7000))),
         assets=assets,
         seed=location_seed(global_seed, loc),
+        net_billing=DEFAULT_NET_BILLING,
     )
 
 
@@ -274,8 +282,11 @@ def catalog_frame(sites: list[Site]) -> Any:
 
     rows = []
     for s in sites:
-        row = s.model_dump(exclude={"assets"})
+        row = s.model_dump(exclude={"assets", "net_billing"})
         row["assets"] = [a.model_dump() for a in s.assets]
+        row["net_billing"] = (
+            json.dumps(s.net_billing.model_dump(mode="json")) if s.net_billing else None
+        )
         row["ems_managed"] = s.ems_managed
         rows.append(row)
     return pd.DataFrame(rows)
@@ -284,6 +295,6 @@ def catalog_frame(sites: list[Site]) -> Any:
 def export_catalog(sites: list[Site], out: Path) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     frame = catalog_frame(sites)
-    frame["assets"] = frame["assets"].map(lambda a: __import__("json").dumps(a))
+    frame["assets"] = frame["assets"].map(json.dumps)
     frame.to_parquet(out, index=False)
     return out

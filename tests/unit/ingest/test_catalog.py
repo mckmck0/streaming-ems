@@ -54,3 +54,44 @@ def test_catalog_export(tmp_path: Path) -> None:
     out = export_catalog(build_catalog(5, catalog_seed=7, global_seed=4242), tmp_path / "c.parquet")
     frame = pd.read_parquet(out)
     assert len(frame) == 5 and set(frame["location_id"]) == {f"PL-LOC-{i:06d}" for i in range(1, 6)}
+
+
+# ── spec 009: net-billing cohort and G12w (AC-009-09) ────────────────────────────────────────────
+
+
+def test_ac_009_09_generated_households_get_the_default_cohort() -> None:
+    from datetime import date
+
+    from ems.ingest.catalog.build import DEFAULT_NET_BILLING, generate_plant
+    from ems.ingest.catalog.sites import NetBilling
+
+    assert NetBilling(first_feed_in=date(2024, 7, 1), rce_from=None) == DEFAULT_NET_BILLING
+    sites = build_catalog(60, catalog_seed=7, global_seed=4242, site_controlled_bess_share=0.5)
+    assert all(s.net_billing == DEFAULT_NET_BILLING for s in sites)
+    plant = generate_plant(1, SiteType.SOLAR_FARM, catalog_seed=7, global_seed=4242)
+    assert plant.net_billing is None
+
+
+def test_ac_009_09_test_site_cohort_and_g12w(repo: Path) -> None:
+    from datetime import date
+
+    from pydantic import ValidationError
+
+    from ems.ingest.catalog.sites import NetBilling
+
+    site = load_overrides(repo / "config" / "sites.yaml", 4242)["PL-LOC-000001"]
+    assert site.net_billing == NetBilling(first_feed_in=date(2024, 9, 1), rce_from=None)
+    g12w = site.model_copy(update={"tariff_group": TariffGroup("G12w")})
+    assert g12w.tariff_group is TariffGroup.G12W and g12w.profile == "H25"
+    assert NetBilling(first_feed_in=date(2023, 5, 1), rce_from="2026-03").rce_from == "2026-03"
+    with pytest.raises(ValidationError):
+        NetBilling(first_feed_in=date(2023, 5, 1), rce_from="2026-3")
+
+
+def test_ac_009_09_catalog_export_keeps_the_cohort(tmp_path: Path) -> None:
+    import json
+
+    sites = build_catalog(5, catalog_seed=7, global_seed=4242)
+    frame = pd.read_parquet(export_catalog(sites, tmp_path / "catalog.parquet"))
+    cohort = json.loads(frame["net_billing"].iloc[0])
+    assert cohort == {"first_feed_in": "2024-07-01", "rce_from": None}

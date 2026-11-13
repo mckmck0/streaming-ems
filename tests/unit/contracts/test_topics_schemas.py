@@ -139,3 +139,16 @@ def test_ac_005_08_contract_frozen_against_baseline(repo: Path) -> None:
     for name, schema in current.items():
         old = json.loads((baseline / name).read_text())
         assert schema_export.incompatibilities(old, schema) == [], name
+
+
+def test_ac_009_22_tariff_and_catalog_config_stay_out_of_the_contract() -> None:
+    """Spec 009 adds tariff, RCEm and catalog config, none of it part of wire contract v1."""
+    current = schema_export.build_schemas()
+    assert sorted(current) == [
+        "ems.measurement.v1.json",
+        "ems.price.v1.json",
+        "ems.weather_forecast.v1.json",
+    ]
+    text = json.dumps(current).lower()
+    for word in ("net_billing", "tariff", "rcem", "tranche", "g12w", "first_feed_in"):
+        assert word not in text

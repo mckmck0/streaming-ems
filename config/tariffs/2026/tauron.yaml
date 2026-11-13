@@ -1,0 +1,88 @@
+# Tauron Dystrybucja (DSO) and Tauron Sprzedaż (incumbent seller), groups G11, G12, G12w, 2026 (spec 009).
+# Net values; VAT, excise and the national fees are in national.yaml. Checked 2026-11-13.
+#   Tauron Dystrybucja tariff 2026, decision DRE.WRE.4211.54.8.2025.ASa1 of 2025-12-17 (full text).
+#   2026-09-01 moves prosumers to monthly billing (2.3.1a ends): no rate changes, so no version.
+#   From 2026-10-01 no subscription fee (Dz.U. 2026 poz. 1182 § 56 ust. 3).
+#   Tauron Sprzedaż tariff 2026, decision DRE.WRE.4211.53.10.2025.ASa1 (Biuletyn URE 265 (4795)). It
+#   excludes the Gliwice area; spec 009 applies it to every Tauron site (risk D8).
+dso: Tauron
+operator:
+  name: Tauron Dystrybucja
+  zones:
+    ref: "pkt 2.2.6–2.2.7, p. 12; clock on winter time 2.2.9, p. 13"
+    G11: {default: all}
+    G12:
+      default: day
+      rules:
+        - {zone: night, days: [weekday, saturday, sunday, holiday], hours: [[13, 15], [22, 6]]}
+    G12w:
+      default: peak
+      rules:
+        - {zone: offpeak, days: [saturday, sunday, holiday], hours: [[0, 24]]}
+        - {zone: offpeak, days: [weekday], hours: [[13, 15], [22, 6]]}
+  versions:
+    - id: tauron-dystr-2026-01
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla usług dystrybucji energii elektrycznej TAURON Dystrybucja S.A. na 2026 r. (decyzja DRE.WRE.4211.54.8.2025.ASa1)"
+        url: "https://www.tauron-dystrybucja.pl/-/media/offer-documents/dystrybucja/aktualna-taryfa/taryfa-tauron-dystrybucja-2026_ocr.ashx"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.2464, unit: PLN/kWh, ref: "pkt 7.1, p. 43"}}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 4.56, unit: PLN/month, ref: "pkt 7.4, p. 45, 1-month period"}
+        G12:
+          variable_fee:
+            day: {value: 0.2841, unit: PLN/kWh, ref: "pkt 7.1, p. 43"}
+            night: {value: 0.0558, unit: PLN/kWh, ref: "pkt 7.1, p. 43"}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 4.56, unit: PLN/month, ref: "pkt 7.4, p. 45, 1-month period"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.3298, unit: PLN/kWh, ref: "pkt 7.1, p. 43"}
+            offpeak: {value: 0.0512, unit: PLN/kWh, ref: "pkt 7.1, p. 43"}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 4.56, unit: PLN/month, ref: "pkt 7.4, p. 45, 1-month period"}
+    - id: tauron-dystr-2026-10
+      valid_from: 2026-10-01
+      source:
+        document: "Taryfa TAURON Dystrybucja S.A. na 2026 r. with Dz.U. 2026 poz. 1182 § 56 ust. 3 (no subscription fee from 2026-10-01)"
+        url: "https://api.sejm.gov.pl/eli/acts/DU/2026/1182/text.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.2464, unit: PLN/kWh, ref: "tariff pkt 7.1, p. 43"}}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "tariff pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12:
+          variable_fee:
+            day: {value: 0.2841, unit: PLN/kWh, ref: "tariff pkt 7.1, p. 43"}
+            night: {value: 0.0558, unit: PLN/kWh, ref: "tariff pkt 7.1, p. 43"}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "tariff pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.3298, unit: PLN/kWh, ref: "tariff pkt 7.1, p. 43"}
+            offpeak: {value: 0.0512, unit: PLN/kWh, ref: "tariff pkt 7.1, p. 43"}
+          fixed_fee: {value: 10.86, unit: PLN/month, ref: "tariff pkt 7.1, p. 43, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+seller:
+  name: Tauron Sprzedaż
+  versions:
+    - id: tauron-sprzedaz-2026
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla energii elektrycznej TAURON Sprzedaż sp. z o.o., grupy G, 2026 (decyzja DRE.WRE.4211.53.10.2025.ASa1)"
+        url: "https://bip.ure.gov.pl/download/3/20340/TauronSprzedaz.pdf"
+        checked: 2026-11-13
+      groups:
+        G11: {energy: {all: {value: 0.4970, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 6"}}}
+        G12:
+          energy:
+            day: {value: 0.5430, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 6"}
+            night: {value: 0.4130, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 6"}
+        G12w:
+          energy:
+            peak: {value: 0.6220, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 6"}
+            offpeak: {value: 0.4130, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 6"}
