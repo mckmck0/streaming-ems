@@ -1,0 +1,41 @@
+# Historical backfill on real data (spec 008): `make history`, `ems-gen history fetch|build`.
+# live.locations are the real-data sites: the Poznań test site (ICON-D2) and a generated household in Radom
+# (51.14 N, 21.25 E; PV 13.7 kWp; EMS-managed battery; DMI HARMONIE). Every other site is the synthetic
+# background fleet (`ems-gen replay --background`). Otherwise the values of generator.yaml.
+seed: 4242
+clock:
+  mode: backfill            # backfill | accelerated | realtime
+  speed: 96.0               # accelerated: simulated seconds per wall second
+  start: "2026-10-20T00:00:00Z"
+  end: null                 # null: run until stopped (realtime/accelerated) or --days
+streams:
+  weather_forecast: {mode: synthetic}
+  weather_actual: {mode: off}
+  production: {mode: synthetic}
+  consumption: {mode: synthetic}
+  price: {mode: synthetic, emit_initial_day: true}
+meters:
+  availability_delay_s: 0   # meter events are emitted at interval end plus this delay
+  emit_registers: false     # add a cumulative grid-import register to unmanaged sites (register faults)
+scale:
+  synthetic_locations: 20   # PL-LOC-000001 .. 000020: two real-data sites, an 18-site background fleet
+  catalog_seed: 7
+  site_chunk: 2000          # sites per generation slice (memory bound)
+  site_controlled_bess_share: 0.0   # no background battery dispatches on synthetic prices
+  site_mix: {}              # empty: households only
+faults:                     # deterministic per seed; enable with `ems-gen run --faults`
+  enabled: false
+  missing_rate: 0.002
+  duplicate_rate: 0.001
+  late_rate: 0.005
+  late_max: PT2H
+  stuck_value_rate: 0.0005
+  register_reset_rate: 0.0001
+  estimated_rate: 0.001
+  substituted_rate: 0.0005
+chunk_days: 1               # generation chunk
+live:
+  locations: ["PL-LOC-000001", "PL-LOC-000004"]  # real-data sites (spec 008)
+  open_meteo: {meta_poll_s: 300}
+  pse: {reports: [rce-pln]}
+  entsoe: {enabled: false}

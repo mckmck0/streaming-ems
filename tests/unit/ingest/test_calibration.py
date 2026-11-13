@@ -1,25 +1,44 @@
-"""AC-002-13, AC-007-17: the calibration job fits candidates (with data windows) from history."""
+"""AC-002-13, AC-007-17, AC-008-20: the calibration job fits candidates (with data windows) from
+history.
+"""
 
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+import math
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import pytest
 from numpy.typing import NDArray
 from ruamel.yaml import YAML
 
-from ems.contracts.time import QUARTER_S, local_day_bounds, quarter_index
+from ems.contracts.envelope import WeatherForecastEvent
+from ems.contracts.examples import forecast_event
+from ems.contracts.time import QUARTER_S, from_quarter_index, local_day_bounds, quarter_index
 from ems.ingest import rng
 from ems.ingest.calibration import fit_prices, fit_temperature, write_candidate
+from ems.ingest.generator import FORECAST_STEPS
+from ems.ingest.synthetic.weather import (
+    ForecastRun,
+    SiteArrays,
+    TimeAxis,
+    forecast_run,
+    generate_truth,
+    load_params,
+    truth_margin_q,
+)
 
+F64 = NDArray[np.float64]
 REPO = Path(__file__).resolve().parents[3]
 FIX = REPO / "tests" / "fixtures"
 
-# The spec 007 load-fit API (T11) is imported inside its tests, so AC-002-13 stays collectable.
+# The spec 007 load-fit API (T11) is imported inside its tests, so AC-002-13 stays collectable;
+# so is the spec 008 forecast-error API (T22: TruthSeries, fit_forecast_error).
 
 
 def test_ac_002_13_prices_use_only_quarter_hour_history(tmp_path: Path) -> None:
@@ -238,3 +257,244 @@ def test_ac_007_17_wpuq_hdf5_reads_like_the_csv(tmp_path: Path) -> None:
         check_exact=False,
         rtol=1e-12,
     )
+
+
+# ── AC-008-20: forecast-error candidate (spec 008, T21) ───────────────────────────────────────────
+# Input: synthetic truth plus spec 007's error model (``forecast_run``), a run every 3 h for 60 days
+# at two sites, set up as in tests/property/test_forecast_errors.py. The fit sees only forecast
+# events and truth series, so on this input it must recover weather.yaml's sd_x(L) and rho^2.
+# Lead L = valid_end - issued_at; bin (lo, hi] holds the steps with lo < L <= hi.
+# Margins observed with a reference computation (seeds 1-4 and 11): sd within 4.2 %, rho^2 within
+# 0.024, against the ±10 % and ±0.05 of AC-008-20.
+
+WEATHER_YAML = REPO / "config" / "calibration" / "weather.yaml"
+WEATHER = load_params(WEATHER_YAML)
+FE_SEED = 11
+FE_DAYS = 60
+FE_SITE_IDS = (1, 2)
+FE_CADENCE_Q = 12  # a run every 3 h
+FE_RUNS = FE_DAYS * 96 // FE_CADENCE_Q
+FE_STEPS = FORECAST_STEPS  # 192 quarter-hours, 48 h
+FE_T0 = quarter_index(datetime(2026, 4, 1, tzinfo=UTC))
+FE_BIN_H = 3
+FE_BINS = [(lo, lo + FE_BIN_H) for lo in range(0, 48, FE_BIN_H)]
+FE_LEAD_H = (np.arange(FE_STEPS) + 1) * 0.25  # step k ends (k + 1) quarter-hours after the issue
+# One day of site 2's truth is not observed (NaN): its steps are skipped, which n_temp counts.
+FE_GAP_SITE = 1  # index into FE_SITE_IDS
+FE_GAP = slice(10 * 96, 11 * 96)  # truth axis positions
+FE_INGESTED_AT = datetime(2026, 6, 1, tzinfo=UTC)
+SD_REL_TOL = 0.10
+RHO2_TOL = 0.05
+FE_BIN_KEYS = {
+    "lead_h",
+    "mean_lead_h",
+    "n_kt",
+    "kt_sd",
+    "kt_logit_sd",
+    "n_temp",
+    "temp_sd",
+    "n_wind",
+    "wind_ln_sd",
+    "rho2_kt",
+    "rho2_temp",
+    "rho2_wind",
+    "hourly_kt_sd",
+}
+# (bin key, weather.yaml base, weather.yaml per hour): the sds AC-008-20 checks against sd_x(L).
+FE_SD_CHECKS = (
+    ("temp_sd", "temp_sd_base_c", "temp_sd_per_h_c"),
+    ("wind_ln_sd", "wind_ln_sd_base", "wind_ln_sd_per_h"),
+)
+FE_WEATHER_KEYS = (
+    "kt_sd_base",
+    "kt_sd_per_h",
+    "temp_sd_base_c",
+    "temp_sd_per_h_c",
+    "wind_ln_sd_base",
+    "wind_ln_sd_per_h",
+    "rho",
+)
+
+
+def _fe_lead_bin(lo_h: float, hi_h: float) -> NDArray[np.bool_]:
+    """Steps whose lead lies in (lo_h, hi_h]."""
+    return (lo_h < FE_LEAD_H) & (hi_h >= FE_LEAD_H)
+
+
+def _fe_location(site_id: int) -> str:
+    return f"PL-LOC-{site_id:06d}"
+
+
+def _fe_sites() -> SiteArrays:
+    """The site columns of tests/property/test_forecast_errors.py (values depend on the id)."""
+    n = len(FE_SITE_IDS)
+    return SiteArrays(
+        keys=np.array([rng.location_key(_fe_location(i)) for i in FE_SITE_IDS], dtype=np.uint64),
+        lat=np.array([49.5 + (i * 0.37) % 5 for i in FE_SITE_IDS]),
+        lon=np.array([14.5 + (i * 0.71) % 9.5 for i in FE_SITE_IDS]),
+        elevation_m=np.full(n, 120.0),
+        shear_alpha=np.full(n, 0.2),
+        wind_scale_ms=np.full(n, 3.4),
+    )
+
+
+def _fe_steps(run: ForecastRun, j: int) -> list[dict[str, Any]]:
+    """Step values of site ``j``, rounded as ``ems.ingest.generator._forecast_builders`` does."""
+    return [
+        {
+            "ghi_wm2": round(float(run.ghi[j, k]), 1),
+            "dni_wm2": round(float(run.dni[j, k]), 1),
+            "dhi_wm2": round(float(run.dhi[j, k]), 1),
+            "temp_air_c": round(float(run.temp_c[j, k]), 1),
+            "cloud_cover_pct": int(run.cloud_pct[j, k]),
+            "wind_speed_ms": {
+                "10": round(float(run.wind10[j, k]), 2),
+                "100": round(float(run.wind100[j, k]), 2),
+                "120": round(float(run.wind120[j, k]), 2),
+            },
+            "wind_dir_deg": int(run.wind_dir[j, k]) % 360,
+        }
+        for k in range(run.steps)
+    ]
+
+
+@dataclass(frozen=True)
+class ForecastErrorInput:
+    events: list[WeatherForecastEvent]
+    t0: int  # quarter index of the first truth value
+    truth: dict[str, dict[str, F64]]  # location_id -> TruthSeries fields (ghi, cs_ghi, ...)
+    n_temp: dict[int, int]  # bin lower edge -> steps with an observed temperature (both sites)
+
+
+@pytest.fixture(scope="module")
+def forecast_error_input() -> ForecastErrorInput:
+    """480 runs x 2 sites of synthetic forecasts and the truth they were drawn from (~2 s)."""
+    site = _fe_sites()
+    n_axis = (FE_RUNS - 1) * FE_CADENCE_Q + FE_STEPS + truth_margin_q(WEATHER)
+    truth = generate_truth(site, TimeAxis.from_range(FE_T0, n_axis), FE_SEED, WEATHER)
+    events: list[WeatherForecastEvent] = []
+    for r in range(FE_RUNS):
+        issue = FE_T0 + r * FE_CADENCE_Q
+        run = forecast_run(truth, issue, FE_STEPS, FE_SEED, site.keys, WEATHER)
+        for j, site_id in enumerate(FE_SITE_IDS):
+            events.append(
+                forecast_event(
+                    location_id=_fe_location(site_id),
+                    issued_at=from_quarter_index(issue),
+                    steps=_fe_steps(run, j),
+                    ingested_at=FE_INGESTED_AT,
+                    forecast_model="synthetic",
+                )
+            )
+    series: dict[str, dict[str, F64]] = {}
+    for j, site_id in enumerate(FE_SITE_IDS):
+        fields = {
+            "ghi": truth.ghi[j].copy(),
+            "cs_ghi": truth.geometry.cs_ghi[j].copy(),
+            "temp_c": truth.temp_c[j].copy(),
+            "wind10": truth.wind10[j].copy(),
+        }
+        if j == FE_GAP_SITE:
+            for name in ("ghi", "temp_c", "wind10"):  # clear-sky is computed, never missing
+                fields[name][FE_GAP] = np.nan
+        series[_fe_location(site_id)] = fields
+    # Expected temperature pairs per bin: every (run, step) whose valid quarter has a truth value.
+    valid_pos = np.arange(FE_RUNS)[:, None] * FE_CADENCE_Q + np.arange(FE_STEPS)[None, :]
+    observed = np.stack([np.isfinite(f["temp_c"])[valid_pos] for f in series.values()])
+    n_temp = {lo: int(observed[:, :, _fe_lead_bin(lo, hi)].sum()) for lo, hi in FE_BINS}
+    return ForecastErrorInput(events=events, t0=int(truth.axis.t[0]), truth=series, n_temp=n_temp)
+
+
+def _truth_series(inp: ForecastErrorInput) -> dict[str, Any]:
+    from ems.ingest.calibration import TruthSeries
+
+    return {loc: TruthSeries(t0=inp.t0, **fields) for loc, fields in inp.truth.items()}
+
+
+def _finite_or_none(value: Any) -> bool:
+    return value is None or (isinstance(value, float | int) and math.isfinite(value))
+
+
+def test_ac_008_20_fit_recovers_the_spec_007_forecast_error_model(
+    forecast_error_input: ForecastErrorInput,
+) -> None:
+    """AC-008-20: per 3-hour lead bin, temperature and wind sd within ±10 % of weather.yaml's
+    sd_x(mean_lead_h) and the consecutive-run correlation within ±0.05 of rho^2 (bins from 3 h
+    on; the 45-48 h bin has no older run at 48-51 h). Steps with NaN truth are skipped.
+    """
+    from ems.ingest.calibration import fit_forecast_error
+
+    inp = forecast_error_input
+    result = fit_forecast_error(inp.events, _truth_series(inp), WEATHER)
+    assert result["kind"] == "forecast-error"
+    assert set(result["models"]) == {"synthetic"}
+    model = result["models"]["synthetic"]
+    bins = model["bins"]
+    assert [list(b["lead_h"]) for b in bins] == [[lo, hi] for lo, hi in FE_BINS]
+
+    fp = WEATHER["forecast"]
+    rho2 = float(fp["rho"]) ** 2
+    bad: list[str] = []
+    for (lo, hi), b in zip(FE_BINS, bins, strict=True):
+        assert set(b) >= FE_BIN_KEYS, (lo, sorted(FE_BIN_KEYS - set(b)))
+        assert all(_finite_or_none(b[k]) for k in FE_BIN_KEYS - {"lead_h"}), (lo, b)
+        lead = b["mean_lead_h"]
+        assert lo < lead <= hi, (lo, lead)
+        # Every step pairs with the truth at quarter_index(valid_start) unless that truth is NaN.
+        assert b["n_temp"] == inp.n_temp[lo], (lo, b["n_temp"], inp.n_temp[lo])
+        assert 0 < b["n_wind"] <= b["n_temp"] and 0 < b["n_kt"] < b["n_temp"], (lo, b)
+        # Daylight kt: the logit slope is >= 4 / 1.07 everywhere, so the logit sd is the larger.
+        assert 0 < b["kt_sd"] < b["kt_logit_sd"], (lo, b["kt_sd"], b["kt_logit_sd"])
+        assert b["hourly_kt_sd"] is not None and b["hourly_kt_sd"] > 0, (lo, b["hourly_kt_sd"])
+        for key, base, per_h in FE_SD_CHECKS:
+            expected = float(fp[base]) + float(fp[per_h]) * lead
+            if abs(b[key] / expected - 1) > SD_REL_TOL:
+                bad.append(f"{lo}-{hi} h {key}={b[key]:.4f}, sd(L={lead:.3f})={expected:.4f}")
+        for var in ("kt", "temp", "wind"):
+            value = b[f"rho2_{var}"]
+            if hi + FE_BIN_H > 48:  # the older run would need a lead beyond 48 h
+                assert value is None, (lo, var, value)
+                continue
+            assert value is not None, (lo, var)
+            if var != "kt" and lo >= 3 and abs(value - rho2) > RHO2_TOL:
+                bad.append(f"{lo}-{hi} h rho2_{var}={value:.4f}, rho^2={rho2:.4f}")
+    assert not bad, bad
+
+    fit = model["fit"]
+    for name in ("kt_logit", "temp", "wind_ln"):
+        assert {"base", "per_h"} <= set(fit[name]), (name, fit[name])
+        assert all(math.isfinite(fit[name][k]) for k in ("base", "per_h")), (name, fit[name])
+    assert fit["temp"]["per_h"] > 0, fit["temp"]
+
+
+def test_ac_008_20_candidate_carries_assumptions_and_caveats_and_leaves_weather_yaml(
+    forecast_error_input: ForecastErrorInput, tmp_path: Path
+) -> None:
+    """AC-008-20: the candidate holds weather.yaml's assumed values and the caveats (satellite and
+    ERA5 truth error, DMI's interpolated 15-minute radiation, sds are upper bounds), is written as
+    candidates/forecast-error.yaml, and weather.yaml stays byte-identical.
+    """
+    from ems.ingest.calibration import fit_forecast_error
+
+    before = WEATHER_YAML.read_bytes()
+    inp = forecast_error_input
+    result = fit_forecast_error(inp.events, _truth_series(inp), WEATHER)
+
+    fp = WEATHER["forecast"]
+    assumed = result["weather_yaml"]
+    assert {k: assumed.get(k) for k in FE_WEATHER_KEYS} == {k: fp[k] for k in FE_WEATHER_KEYS}
+    caveats = result["caveats"]
+    assert isinstance(caveats, list) and caveats and all(isinstance(c, str) for c in caveats)
+    text = " ".join(caveats)
+    assert "satellite" in text.lower(), caveats
+    assert "ERA5" in text and "DMI" in text, caveats
+    assert "upper bound" in text.lower(), caveats
+
+    path = write_candidate(result, tmp_path, "test")
+    assert path == tmp_path / "forecast-error.yaml"
+    doc = YAML(typ="safe").load(path.read_text())
+    assert doc["kind"] == "forecast-error" and doc["source"] == "test"
+    assert doc["weather_yaml"] == json.loads(json.dumps(assumed, default=str))
+    assert doc["caveats"] == caveats
+    assert len(doc["models"]["synthetic"]["bins"]) == len(FE_BINS)
+    assert WEATHER_YAML.read_bytes() == before

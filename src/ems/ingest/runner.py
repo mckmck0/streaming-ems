@@ -26,6 +26,7 @@ from ems.ingest.generator import (
     GeneratorConfig,
     SyntheticModel,
     emissions,
+    load_generator_config,
     load_sites,
     record_time_bounds,
 )
@@ -147,14 +148,10 @@ def write_manifest(
     return file
 
 
-def preflight(
-    settings: EmsSettings,
-    model: SyntheticModel,
-    cfg: GeneratorConfig,
-    start: datetime,
-    end: datetime | None,
-    now: datetime,
-) -> None:
+def preflight_topics(settings: EmsSettings, lo: datetime, hi: datetime, now: datetime) -> None:
+    """Refuse unless every target topic exists and accepts and keeps records timed ``lo`` …
+    ``hi`` (K1). Used by ``run`` and ``replay``.
+    """
     from ems.ingest.kafka.admin import KafkaTopicAdmin
 
     plan = load_plan(settings.config_dir, settings.topics_profile, settings.topic_prefix)
@@ -167,10 +164,21 @@ def preflight(
     missing = sorted(set(names) - set(actual))
     if missing:
         raise PreflightError(f"topics missing: {missing}; run `ems-gen topics ensure` first")
-    lo, hi = record_time_bounds(model, cfg, start, end or now)
     found = problems({n: a.configs for n, a in actual.items()}, min_ts=lo, max_ts=hi, now=now)
     if found:
         raise PreflightError("; ".join(found))
+
+
+def preflight(
+    settings: EmsSettings,
+    model: SyntheticModel,
+    cfg: GeneratorConfig,
+    start: datetime,
+    end: datetime | None,
+    now: datetime,
+) -> None:
+    lo, hi = record_time_bounds(model, cfg, start, end or now)
+    preflight_topics(settings, lo, hi, now)
 
 
 async def paced_publish(
@@ -466,6 +474,64 @@ async def record(
     return root
 
 
+class ReplayRefused(ValueError):
+    """The recording must not be replayed as asked. CLI exit 2."""
+
+
+@dataclass(frozen=True)
+class _History:
+    """What a history recording (spec 008) contributes to a replay."""
+
+    cfg: GeneratorConfig
+    info: dict[str, Any]
+    start: datetime
+    end: datetime
+    meter_delay: timedelta
+
+
+def _history(
+    settings: EmsSettings, root: Path, *, speed: float | None, background: bool
+) -> _History | None:
+    """Checks of a history recording; ``None`` for a spec 002 recording."""
+    import hashlib
+
+    from ems.ingest.history.build import input_digests, raw_set_digest, read_build_info, window
+
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    if manifest.get("kind") != "ems-gen-history":
+        if background:
+            raise ReplayRefused("--background needs a history recording (ems-gen history build)")
+        return None
+    if speed:
+        raise ReplayRefused(
+            "--speed paces by ingested_at, which is a fetch time in a history recording; replay "
+            "it without --speed (the consumer orders by availability)"
+        )
+    try:
+        info = read_build_info(root)
+    except ValueError as exc:
+        raise ReplayRefused(str(exc)) from exc
+    events_sha = hashlib.sha256((root / "events.jsonl").read_bytes()).hexdigest()
+    if events_sha != info["events_sha256"]:
+        raise ReplayRefused(f"{root.name}/events.jsonl no longer matches build.json; rebuild it")
+    if raw_set_digest(root) != info["raw_set_digest"]:
+        raise ReplayRefused(f"{root.name}: the raw data changed after the build; rebuild it")
+    if background:
+        now = input_digests(settings, root)
+        changed = sorted(k for k, v in now.items() if info["digests"].get(k) != v)
+        if changed:
+            raise ReplayRefused(
+                f"--background generates the fleet now, but {', '.join(changed)} changed since "
+                "the build; rebuild under a new --run-id"
+            )
+    cfg = dataclasses.replace(
+        load_generator_config(root / "generator.yaml"), seed=int(info["seed"])
+    )
+    start, end = window(manifest)
+    return _History(cfg, info, start, end, timedelta(seconds=cfg.meter_delay_s))
+
+
 async def replay(
     settings: EmsSettings,
     name: str,
@@ -474,11 +540,41 @@ async def replay(
     speed: float | None = None,
     clock: Clock = wall_clock,
     sink: Sink | None = None,
+    check_topics: bool = True,
+    background: bool = False,
 ) -> RunResult:
-    """Publish a recording: events keep their ids; ``source_system`` becomes ``replay:<orig>``."""
+    """Publish a recording: events keep their ids; ``source_system`` becomes ``replay:<orig>``.
+
+    The topic preflight runs first (K1). A history recording (spec 008) must still match its
+    ``build.json``; with ``background`` every other catalog site is generated synthetically over
+    its window, merged in emission order, with synthetic prices off.
+    """
+    import heapq
+
+    from ems.ingest.kafka.sink import record_timestamp
+    from ems.ingest.sources.live_runner import mask_synthetic
     from ems.ingest.sources.recording import as_replay, read_events
 
     root = root or settings.data_dir / "recordings" / name
+    hist = _history(settings, root, speed=speed, background=background)
+    events = list(read_events(root))
+    model: SyntheticModel | None = None
+    synth_cfg: GeneratorConfig | None = None
+    bg_sites = 0
+    if background:
+        assert hist is not None
+        real = set(hist.cfg.live_locations)
+        sites = [s for s in load_sites(settings.config_dir, hist.cfg) if s.location_id not in real]
+        bg_sites = len(sites)
+        synth_cfg = mask_synthetic(hist.cfg, price_live=True)
+        model = SyntheticModel(sites, hist.cfg.seed, settings.config_dir, hist.cfg.site_chunk)
+    if check_topics:
+        stamps = [record_timestamp(e) for e in events]
+        lo, hi = min(stamps, default=clock()), max(stamps, default=clock())
+        if model is not None and synth_cfg is not None and hist is not None:
+            blo, bhi = record_time_bounds(model, synth_cfg, hist.start, hist.end)
+            lo, hi = min(lo, blo), max(hi, bhi)
+        preflight_topics(settings, lo, hi, clock())
     sink = (
         sink
         if sink is not None
@@ -492,15 +588,51 @@ async def replay(
     wall0 = time.monotonic()
     first: datetime | None = None
     try:
-        for event in read_events(root):
-            if speed:
-                first = first or event.ingested_at
-                due = wall0 + (event.ingested_at - first).total_seconds() / speed
-                while (delay := due - time.monotonic()) > 0:
-                    await asyncio.sleep(min(delay, 0.5))
-                    sink.poll(0)
-            sink.publish(as_replay(event, clock()))
-            counts[event.stream.value] += 1
+        if hist is not None:
+            from ems.ingest.history.build import emission_key
+
+            def key(e: Any) -> Any:
+                return emission_key(e, hist.start, hist.meter_delay)
+
+            stream: Any = ((key(e), 0, e) for e in events)
+            if model is not None and synth_cfg is not None:
+                run_id = str(hist.info["run_id"])
+                generated = (
+                    build(clock())
+                    for _at, _s, build in emissions(model, synth_cfg, hist.start, hist.end, run_id)
+                )
+                stream = heapq.merge(stream, ((key(e), 1, e) for e in generated))
+            for _key, origin, event in stream:
+                sink.publish(as_replay(event, clock()) if origin == 0 else event)
+                counts[event.stream.value] += 1
+                if sum(counts.values()) % 1000 == 0:
+                    await asyncio.sleep(0)
+        else:
+            for event in events:
+                if speed:
+                    first = first or event.ingested_at
+                    due = wall0 + (event.ingested_at - first).total_seconds() / speed
+                    while (delay := due - time.monotonic()) > 0:
+                        await asyncio.sleep(min(delay, 0.5))
+                        sink.poll(0)
+                sink.publish(as_replay(event, clock()))
+                counts[event.stream.value] += 1
     finally:
         stats = sink.close()
-    return RunResult(counts=counts, stats=stats, manifest=None, elapsed_s=time.monotonic() - wall0)
+    manifest = None
+    if hist is not None:
+        manifest = write_manifest(
+            settings.data_dir / "runs" / f"replay-{hist.info['run_id']}-{clock():%Y%m%dT%H%M%SZ}",
+            cfg=hist.cfg,
+            settings=settings,
+            mode="replay",
+            start=hist.start,
+            end=hist.end,
+            run_id=str(hist.info["run_id"]),
+            counts=counts,
+            stats=stats,
+            sites=len(hist.cfg.live_locations) + bg_sites,
+        )
+    return RunResult(
+        counts=counts, stats=stats, manifest=manifest, elapsed_s=time.monotonic() - wall0
+    )

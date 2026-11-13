@@ -18,7 +18,7 @@ import structlog
 from ems.contracts.envelope import Market, PriceEvent
 from ems.contracts.examples import price_event
 from ems.contracts.time import WARSAW, local_day_slots
-from ems.ingest.live.http import Fetcher
+from ems.ingest.live.http import Fetched, Fetcher
 from ems.ingest.mapping.engine import Row, apply, builtin
 
 log = structlog.get_logger(__name__)
@@ -56,7 +56,11 @@ def build_day_event(
     """
     rows = [r for r in rows if r.get("business_date") == day]
     expected = [s for s, _ in local_day_slots(day)]
-    by_start = {r["interval_start"]: r for r in rows}
+    by_start: dict[datetime, Row] = {}
+    for r in rows:  # per slot the latest publication wins, whatever the row order
+        kept = by_start.get(r["interval_start"])
+        if kept is None or r["published"] > kept["published"]:
+            by_start[r["interval_start"]] = r
     if not rows or sorted(by_start) != expected:
         raise IncompleteDay(f"{report.endpoint} {day}: {len(by_start)} of {len(expected)} slots")
     published = max(r["published"] for r in rows)
@@ -81,27 +85,31 @@ class PseSource:
     base_url: str = BASE_URL
     last_published: dict[date, datetime] = field(default_factory=dict)
 
-    async def fetch_rows(self, day: date) -> list[Row]:
-        """All records of a business day, following ``nextLink`` pages (``$first``,
-        never ``$top``).
+    async def fetch_pages(self, day: date) -> list[Fetched]:
+        """Every response page of a business day, following ``nextLink`` (``$first``, never
+        ``$top``).
         """
-        mapping = builtin(self.report.mapping, self.mappings_dir)
         url: str | None = f"{self.base_url}/{self.report.endpoint}"
         params: dict[str, Any] | None = {
             "$filter": f"business_date eq '{day.isoformat()}'",
             "$first": 1000,
         }
-        rows: list[Row] = []
-        pages = 0
+        pages: list[Fetched] = []
         while url is not None:
             fetched = await self.fetcher.get(url, params=params)
-            payload = json.loads(fetched.body)
-            rows += apply(mapping, payload)
-            url = payload.get("nextLink")
+            pages.append(fetched)
+            url = json.loads(fetched.body).get("nextLink")
             params = None  # nextLink already carries the query
-            pages += 1
-            if pages > 20:
+            if len(pages) > 20:
                 raise RuntimeError("PSE paging did not terminate")
+        return pages
+
+    async def fetch_rows(self, day: date) -> list[Row]:
+        """All records of a business day, mapped."""
+        mapping = builtin(self.report.mapping, self.mappings_dir)
+        rows: list[Row] = []
+        for page in await self.fetch_pages(day):
+            rows += apply(mapping, json.loads(page.body))
         return rows
 
     async def poll(

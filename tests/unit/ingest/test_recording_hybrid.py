@@ -128,7 +128,15 @@ def test_ac_002_11_replay_keeps_ids(tmp_path: Path) -> None:
     recorded = list(read_events(root))
 
     sink = Collect()
-    asyncio.run(replay(settings(tmp_path), "t", sink=sink, clock=lambda: NOW + timedelta(days=1)))
+    asyncio.run(
+        replay(
+            settings(tmp_path),
+            "t",
+            sink=sink,
+            clock=lambda: NOW + timedelta(days=1),
+            check_topics=False,  # spec 008: replay runs the topic preflight; no Kafka here
+        )
+    )
     assert [e.event_id for e in sink.events] == [e.event_id for e in recorded]
     for e in sink.events:
         assert e.source_system.startswith("replay:")

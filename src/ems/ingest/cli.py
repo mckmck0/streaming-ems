@@ -6,7 +6,9 @@ Contract: ``specs/001-data-pipeline-core/contracts/cli.md``.
 from __future__ import annotations
 
 import dataclasses
+import json
 import sys
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -17,8 +19,12 @@ from ems.settings import EmsSettings, TopicsProfile, load_settings
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 topics_app = typer.Typer(no_args_is_help=True, help="Create, inspect and delete the EMS topics.")
 schemas_app = typer.Typer(no_args_is_help=True, help="Export and check the JSON Schemas.")
+history_app = typer.Typer(
+    no_args_is_help=True, help="Fetch and build a real-data window (spec 008)."
+)
 app.add_typer(topics_app, name="topics")
 app.add_typer(schemas_app, name="schemas")
+app.add_typer(history_app, name="history")
 
 ProfileOpt = Annotated[
     TopicsProfile | None,
@@ -354,23 +360,106 @@ def record_cmd(
 def replay_cmd(
     name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
     speed: Annotated[
-        float | None, typer.Option(help="Pace by recorded ingest times / speed.")
+        float | None, typer.Option(help="Pace by recorded ingest times / speed (not for history).")
     ] = None,
     root: Annotated[
         Path | None, typer.Option(help="Recording folder (default data/recordings/NAME).")
     ] = None,
+    background: Annotated[
+        bool,
+        typer.Option(help="History recordings: also generate every other catalog site."),
+    ] = False,
     bootstrap: BootstrapOpt = None,
 ) -> None:
-    """Publish a recording; events keep their ids and are marked replay:<source>."""
+    """Publish a recording; events keep their ids and are marked replay:<source>. Exit 0, 1 if the
+    topic preflight refuses, 2 if the recording is refused, 3 on delivery failures.
+    """
     _need_ingest()
     import asyncio
 
-    from ems.ingest.runner import replay
+    from ems.ingest.runner import PreflightError, ReplayRefused, replay
 
     s = _settings(bootstrap=bootstrap)
-    result = asyncio.run(replay(s, name, root=root, speed=speed))
+    try:
+        result = asyncio.run(replay(s, name, root=root, speed=speed, background=background))
+    except PreflightError as exc:
+        typer.echo(f"preflight refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except ReplayRefused as exc:
+        typer.echo(f"replay refused: {exc}", err=True)
+        raise typer.Exit(2) from exc
     typer.echo(f"replayed {dict(result.counts)}")
     raise typer.Exit(result.exit_code)
+
+
+def _utc_day(value: str, option: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        typer.echo(f"{option} must be a whole UTC day, YYYY-MM-DD (got {value!r})", err=True)
+        raise typer.Exit(2) from None
+
+
+@history_app.command("fetch")
+def history_fetch(
+    name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
+    start: Annotated[str, typer.Option(help="First UTC day, YYYY-MM-DD (inclusive).")],
+    end: Annotated[str, typer.Option(help="UTC day after the window, YYYY-MM-DD (exclusive).")],
+    config: Annotated[
+        Path, typer.Option(help="Generator config; live.locations are the real-data sites.")
+    ] = Path("config/generator.history.yaml"),
+) -> None:
+    """Fetch raw real data for [start, end): forecasts, satellite, ERA5, PSE RCE. Exit 0 complete,
+    2 refused, 4 incomplete (the server's limit was reached; rerun later to resume).
+    """
+    _need_ingest()
+    import asyncio
+
+    from ems.ingest.history.fetch import FetchRefused, fetch
+    from ems.ingest.live.http import SourceHTTPError
+
+    s = load_settings()
+    first, after = _utc_day(start, "--start"), _utc_day(end, "--end")
+    today = datetime.now(UTC).date()
+    try:
+        result = asyncio.run(fetch(s, config, name, first, after, today=today))
+    except (FetchRefused, SourceHTTPError, ValueError) as exc:
+        typer.echo(f"fetch refused: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    state = "complete" if result.complete else "incomplete: rerun later to resume"
+    typer.echo(f"fetched into {result.root} ({state})")
+    raise typer.Exit(result.exit_code)
+
+
+@history_app.command("build")
+def history_build(
+    name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
+    seed: Annotated[
+        int | None, typer.Option(help="Seed of the meters (default: the config's).")
+    ] = None,
+    run_id: Annotated[
+        str | None, typer.Option(help="Run scope of every event (default: the recording name).")
+    ] = None,
+) -> None:
+    """Build a fetched window into events.jsonl and build.json, offline. Exit 0, or 2 if refused."""
+    _need_ingest()
+    from ems.ingest.history.build import BuildRefused, build
+
+    s = load_settings()
+    try:
+        result = build(s, name, seed=seed, run_id=run_id)
+    except BuildRefused as exc:
+        typer.echo(f"build refused: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    info = json.loads((result.root / "build.json").read_text())
+    typer.echo(f"built {result.events} events into {result.root} (sha256 {result.sha256[:12]})")
+    typer.echo(f"counts {info['counts']}; run_id {info['run_id']}; seed {info['seed']}")
+    for location, shares in info["gap_shares"].items():
+        parts = ", ".join(f"{k} {v:.2%}" for k, v in shares.items())
+        typer.echo(f"{location} daylight filled: {parts}")
+    days = info["price_days"]
+    if days["flagged"] or days["incomplete"]:
+        typer.echo(f"price days flagged {days['flagged']}, incomplete {days['incomplete']}")
 
 
 @app.command("stats")

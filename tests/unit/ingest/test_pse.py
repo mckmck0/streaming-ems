@@ -1,5 +1,7 @@
 """AC-002-03/-04/-05: PSE mappings on recorded fixtures, completeness, revisions,
 paging, schedule.
+
+Spec 008 (AC-008-09, -12): the latest row per slot wins; one row per slot is unchanged.
 """
 
 from __future__ import annotations
@@ -14,7 +16,8 @@ import httpx
 import pytest
 import respx
 
-from ems.contracts.envelope import Market, to_json_bytes, validate_strict
+from ems.contracts.envelope import Market, PriceEvent, to_json_bytes, validate_strict
+from ems.contracts.examples import price_event
 from ems.ingest.live.http import Fetcher
 from ems.ingest.live.pse import (
     REPORTS,
@@ -152,3 +155,81 @@ def test_poll_schedule() -> None:
     assert poll_interval(at(11), tomorrow_complete=True) == timedelta(hours=1)
     assert poll_interval(at(17), tomorrow_complete=False) == timedelta(hours=1)  # 19:30 local
     assert days_to_poll(at(23)) == [date(2026, 10, 21), date(2026, 10, 22)]  # 01:30 local next day
+
+
+# ── 008/T09: the latest row per slot (AC-008-09, -12) ────────────────────────────────────────────
+
+DAY = date(2026, 10, 21)
+FIRST_PUB = datetime(2026, 10, 20, 11, 42, 11, 720000, tzinfo=UTC)
+REVISED_PUB = datetime(2026, 10, 20, 14, 5, tzinfo=UTC)
+REVISED_SLOTS = range(40, 48)  # 10:00-12:00 local
+RUN_ID = "spring-2026"
+
+
+def _fixture_body() -> dict:
+    return json.loads((FIX / "rce-pln_2026-10-21.json").read_text())
+
+
+def _revised_rows(body: dict) -> list[dict]:
+    """A second publication of ``REVISED_SLOTS`` with other prices."""
+    out = []
+    for raw in body["value"][REVISED_SLOTS.start : REVISED_SLOTS.stop]:
+        row = dict(raw)
+        row["rce_pln"] = round(raw["rce_pln"] + 123.45, 2)
+        row["publication_ts_utc"] = "2026-10-20 14:05:00.000"
+        row["publication_ts"] = "2026-10-20 16:05:00.000"
+        out.append(row)
+    return out
+
+
+def _mapped(values: list[dict]) -> list:
+    return apply(builtin(REPORTS["rce-pln"].mapping, MAPPINGS), {"value": values})
+
+
+def _expected(prices: list[float], published: datetime) -> PriceEvent:
+    """Today's event for a day: every slot's price, stamped with ``published``."""
+    return price_event(
+        market=Market.PL_RCE,
+        delivery_day=DAY,
+        prices=prices,
+        published_at=published,
+        ingested_at=NOW,
+        source_system="pse-rce",
+        run_id=RUN_ID,
+        synthetic=False,
+        source_record_ref=f"rce-pln:{DAY.isoformat()}:{published.isoformat()}",
+    )
+
+
+def test_ac_008_09_latest_publication_per_slot_wins_whatever_the_order() -> None:
+    """Revised slots listed before the original rows: the revised prices are used, the other
+    slots keep theirs, and ``issued_at`` is the latest publication.
+    """
+    body = _fixture_body()
+    revised = _revised_rows(body)
+    prices = [float(r["rce_pln"]) for r in body["value"]]
+    for i, row in zip(REVISED_SLOTS, revised, strict=True):
+        prices[i] = float(row["rce_pln"])
+    expected = _expected(prices, REVISED_PUB)
+
+    later_first = build_day_event(
+        REPORTS["rce-pln"], DAY, _mapped(revised + body["value"]), NOW, RUN_ID
+    )
+    assert later_first.issued_at == REVISED_PUB
+    assert [s.price for s in later_first.payload.slots] == prices
+    assert later_first.model_dump() == expected.model_dump()
+    later_last = build_day_event(
+        REPORTS["rce-pln"], DAY, _mapped(body["value"] + revised), NOW, RUN_ID
+    )
+    assert later_last.model_dump() == later_first.model_dump()
+    assert later_last.event_id == later_first.event_id
+
+
+def test_ac_008_12_one_row_per_slot_gives_todays_event() -> None:
+    body = _fixture_body()
+    prices = [float(r["rce_pln"]) for r in body["value"]]
+    expected = _expected(prices, FIRST_PUB)
+    event = build_day_event(REPORTS["rce-pln"], DAY, _mapped(body["value"]), NOW, RUN_ID)
+    assert event.model_dump() == expected.model_dump()
+    shuffled = build_day_event(REPORTS["rce-pln"], DAY, _mapped(body["value"][::-1]), NOW, RUN_ID)
+    assert shuffled.model_dump() == event.model_dump()
