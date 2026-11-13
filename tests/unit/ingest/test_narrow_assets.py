@@ -39,16 +39,27 @@ DAY = datetime(2026, 1, 15, tzinfo=UTC)
 # Captured at full float precision on the author's machine (arm64 macOS): a changed digest means
 # changed output, not rounding. The catalog digest dates from commit 51560fa (before spec 005).
 # The two event digests were refreshed by spec 007 (007/T12), whose model changes alter values on
-# purpose (forecast errors, base load); event ids are unchanged (the id digests below).
-HOUSEHOLDS_DIGEST = "699095f8cfc30e45bb928508d3512940ad6319726d46ba00ae5dc5052e848d9d"
+# purpose (forecast errors, base load); event ids are unchanged (the id digests below). Spec 008
+# (008/T15) refreshed them again: synthetic forecasts are emitted 120 min after issue instead of
+# 90, which reorders events within the day; values and ids are unchanged (the sorted digests).
+HOUSEHOLDS_DIGEST = "6e12e9c0f6be802cd563fa369fd64b531b5ad42f1cda553d16498b6bb2001e6a"
 PLANT_CATALOG_DIGEST = "24207803ef373456078935e2800a35a76e18225aa100251fb3f12a1d64a7bee2"
-PLANT_EVENTS_DIGEST = "d35a1fe4cca18847d9a2a7d5cdb23ca83e008e860b967ba5e2844fde3372b87b"
+PLANT_EVENTS_DIGEST = "72bfd3fb6aa5bfe9966c485d06f920dee2267cb6219961799ff1d1f8a36d647a"
 
 # Spec 007 (AC-007-18): event ids only, in emission order, for the same sites and day as the two
 # value digests above. Captured on d3d9f30 (before any spec 007 code); event identity carries no
-# values, so these stay fixed when the value digests are refreshed.
-HOUSEHOLDS_ID_DIGEST = "5ac1508ba5f9f371d4ba2e269be75c8f28ccaebf57d7395d39fde5138da3571d"
-PLANT_ID_DIGEST = "148329e44fc55a86525fa134bbff5fa389ba0956e830b1866a877febaf3737da"
+# values, so these stay fixed when the value digests are refreshed. Refreshed by spec 008
+# (008/T15) for the new emission order only; the sorted-id digest pinned before spec 008 shows the
+# ids are the same.
+HOUSEHOLDS_ID_DIGEST = "6b32c851602ca203358ea85a6c21e3a6ea0fa88c0598a624508cf13ae0982bc1"
+PLANT_ID_DIGEST = "25e142620b43047878d3cf8e90fbba199ce9d21788a9b17efc1985dbd94c3b95"
+
+# Spec 008 (008/T01): the same 20 households and day as HOUSEHOLDS_DIGEST, independent of emission
+# order: the event rows (without ``ingested_at``) sorted by ``event_id``, and the sorted event ids.
+# Pinned on 48fafee before spec 008; must not change when the emission-order digests are refreshed
+# (008/T15).
+HOUSEHOLDS_SORTED_ROWS_DIGEST = "d6b8ea991dfb978e36e9303567a29185ac1698c8229c8230b40af77b85f71d4f"
+HOUSEHOLDS_SORTED_ID_DIGEST = "d9a9f9fdd47bc3251799b167991144c1517db72fbaeddda248ac8cd3d6034768"
 
 
 def _hash_rows(rows: Iterable[Any]) -> str:
@@ -120,6 +131,19 @@ def test_ac_007_18_event_ids_unchanged() -> None:
     plant_ids = _hash_rows(str(e.event_id) for e in _events(plants[:10] + plants[50:55], cfg))
     assert households == HOUSEHOLDS_ID_DIGEST
     assert plant_ids == PLANT_ID_DIGEST
+
+
+def test_ac_008_11_household_events_unchanged_in_any_order() -> None:
+    """Spec 008 moves synthetic forecasts later (AC-008-08), which reorders the emission but must
+    not change a single event: same rows, same ids.
+    """
+    cfg = GeneratorConfig(emit_registers=True)
+    sites = _households()
+    rows = sorted(_event_rows(sites, cfg), key=lambda r: r["event_id"])
+    assert len({r["event_id"] for r in rows}) == len(rows)  # ids are unique: the sort is total
+    assert _hash_rows(rows) == HOUSEHOLDS_SORTED_ROWS_DIGEST
+    ids = sorted(str(e.event_id) for e in _events(sites, cfg))
+    assert _hash_rows(ids) == HOUSEHOLDS_SORTED_ID_DIGEST
 
 
 # ── removed site types, asset kinds and contract values are rejected ─────────────────────────────

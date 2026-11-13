@@ -8,7 +8,8 @@ enters identity.
 Emission schedule (simulated time):
 - meters: at interval end + availability delay, one production and one consumption event per site
   and interval (production only for sites with generation);
-- forecasts: runs issued every 3 h (00, 03, ... UTC), 192 quarter-hour steps, emitted 1.5 h later;
+- forecasts: runs issued every 3 h (00, 03, ... UTC), 192 quarter-hour steps, emitted when they
+  become available (``ems.contracts.availability``: 120 min after issue);
 - prices: one event per local delivery day, published D-1 in the early afternoon local time; the
   day(s) already published when the run starts are emitted at the start.
 """
@@ -28,6 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 from ruamel.yaml import YAML
 
+from ems.contracts.availability import forecast_delay
 from ems.contracts.envelope import (
     Aggregation,
     AssetType,
@@ -407,7 +409,12 @@ class SyntheticModel:
 
 
 def _meter_builders(
-    model: SyntheticModel, chunk: Chunk, i: int, run_id: str | None, emit_registers: bool = False
+    model: SyntheticModel,
+    chunk: Chunk,
+    i: int,
+    run_id: str | None,
+    emit_registers: bool = False,
+    meter_source: str = "synthetic",
 ) -> list[tuple[str, Builder]]:
     start = from_quarter_index(chunk.t0 + i)
     out: list[tuple[str, Builder]] = []
@@ -497,6 +504,7 @@ def _meter_builders(
                     interval_start=start,
                     measurements=ms,
                     ingested_at=ingested_at,
+                    source_system=meter_source,
                     run_id=run_id,
                     metering_point_id=site.metering_point_id,
                     seed=site.seed,
@@ -585,10 +593,12 @@ def emissions(
     start: datetime,
     end: datetime | None,
     run_id: str | None = None,
+    meter_source: str = "synthetic",
 ) -> Iterator[tuple[datetime, str, Builder]]:
     """Yield ``(emit_at, stream, build)`` in emission order for meter intervals starting in
     ``[start, end)`` (``end=None``: forever), forecast runs issued in that span and the price days
-    published in it.
+    published in it. ``meter_source`` is the meters' ``source_system`` (``synthetic-history`` for
+    real-data sites, spec 008).
     """
     start = require_utc(start)
     t_start = quarter_index(start)
@@ -618,10 +628,13 @@ def emissions(
         chunk = model.chunk(c0, c1 - c0, issues)
         for i in range(chunk.n):
             interval_end = from_quarter_index(c0 + i) + QUARTER
-            for stream, build in _meter_builders(model, chunk, i, run_id, cfg.emit_registers):
+            builders = _meter_builders(
+                model, chunk, i, run_id, cfg.emit_registers, meter_source=meter_source
+            )
+            for stream, build in builders:
                 if cfg.stream_on(stream):
                     push(interval_end + delay, stream, build)
-        avail = timedelta(minutes=float(model.weather_params["forecast"]["availability_delay_min"]))
+        avail = forecast_delay("synthetic")
         for issue in issues:
             for build in _forecast_builders(model, chunk.forecasts[issue], run_id):
                 push(from_quarter_index(issue) + avail, "weather_forecast", build)

@@ -105,11 +105,16 @@ def forecast_event(
     seed: int | None = None,
     synthetic: bool = True,
     source_record_ref: str | None = None,
+    first_step: int = 0,
 ) -> WeatherForecastEvent:
-    """``steps`` hold per-step weather values; times and lead times follow from ``issued_at``."""
+    """``steps`` hold per-step weather values; times and lead times follow from ``issued_at``.
+
+    Step k (1-based) ends at ``issued_at + (first_step + k) * 15 min``: an archived run whose first
+    steps are incomplete starts later (spec 008); v1 only requires contiguous steps.
+    """
     built = []
     for k, values in enumerate(steps, start=1):
-        valid_end = issued_at + k * QUARTER
+        valid_end = issued_at + (first_step + k) * QUARTER
         built.append(
             ForecastStep(
                 valid_start=valid_end - QUARTER,

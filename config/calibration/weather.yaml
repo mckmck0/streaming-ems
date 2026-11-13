@@ -41,7 +41,8 @@ wind:
 forecast:
   cadence_h: 3
   horizon_h: 48
-  availability_delay_min: 90    # ICON-D2 runs are available ~1.5 h after initialisation
+  # Availability (emission) delay: ems.contracts.availability.FORECAST_DELAY_MIN (spec 008), one table for
+  # synthetic and real forecasts and the consumer rule in 08-contracts.md.
   # kt error in logit units of (kt - 0.03) / 1.07 (bounded, no clipping). Calibrated by simulation so the daylight
   # total kt error, timing included, follows hourly NWP verification: ~0.20 at 0-6 h -> ~0.23 at 48 h
   # (Perez et al. 2013 Table 9, Germany day 1-3 rRMSE 40/42/45 %; Lorenz et al. 2008, 37 -> 46 %; NWP error flat
