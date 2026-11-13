@@ -8,7 +8,8 @@ live sources, record/replay and hybrid mode (spec 002), scale, background batter
 003), EV chargers and site types (spec 004), narrowed to PV prosumer sites (spec 005). Kafka runs as one broker
 (spec 006 removed spec 004's 3-broker profile). Spec 007 made the statistics fit for comparing strategies: run-
 consistent forecast errors with timing errors, persistent base load with appliance peaks, and hybrid truth that
-deviates from the live forecasts.
+deviates from the live forecasts. Spec 008 adds one real-data window: archived forecast runs, PSE prices
+and observed truth weather (satellite, ERA5) fetched once into a recording and replayed many times.
 
 ```mermaid
 flowchart LR
@@ -50,7 +51,8 @@ flowchart LR
   load read weather only from that `Truth`. `SyntheticTruth` is the synthetic weather above; `LiveForecastTruth`
   serves hybrid live sites (below). A historical backfill adds a source (satellite or reanalysis arrays) without
   touching the asset models.
-- **Forecasts** (spec 007): runs every 3 h, 192 steps, emitted 90 min after issue. For variable x, valid time v and
+- **Forecasts** (spec 007): runs every 3 h, 192 steps, emitted when available (`ems.contracts.availability`: 120 min
+  after issue since spec 008; was 90). For variable x, valid time v and
   run r with lead L = (k + 1)·0.25 h, `err_x = sd_x(L)·(ρ·Z_x(v) + √(1−ρ²)·Y_x(r, v))`: Z is an AR(1) over valid
   time shared by every run (τ 2 h), Y an AR(1) along one run's steps, ρ = 0.9, so consecutive runs' errors for one
   valid time correlate at about ρ² and agree in sign. The clear-sky index error acts in a bounded logit space
@@ -133,12 +135,24 @@ uncontrolled assets, and prices. These rows move into `01-architecture.md` when 
   source from a snapshot of the latest events, so the same event and seed always give the same meters. The truth
   kt jumps by about 0.12 when a new run arrives (the per-run part changes), and in logit space it regresses mildly
   toward mid kt. `config/generator.live.yaml` + `make gen-live` run it.
-- **Record and replay** (`sources/recording.py`): `ems-gen record --name N` stores raw responses (redacted),
-  events (`events.jsonl`) and a manifest in `data/recordings/N/`; `ems-gen replay --name N` re-publishes them
-  with their ids, marked `replay:<source>`.
+- **Record and replay** (`sources/recording.py`): `ems-gen record --name N` stores raw responses (redacted,
+  atomic writes, SHA-256 in each `.meta.json` since spec 008), events (`events.jsonl`) and a manifest in
+  `data/recordings/N/`; `ems-gen replay --name N` re-publishes them with their ids, marked `replay:<source>`.
+  Since spec 008 replay first runs the topic preflight of `ems-gen run` over the recording's record times and
+  refuses (exit 1) topics that would reject or expire them (K1), for every recording.
 - **Calibration** (`ingest/calibration.py`, `jobs/calibrate.py`): price and temperature fits → candidate files in
   `config/calibration/candidates/` (review before adopting). Example: ERA5 2024 at Poznań gives an annual mean of
   11.5 °C (a record-warm year; the default 8.7 °C is the 1991–2020 normal).
+- **Forecast-error calibration** (spec 008, `jobs/calibrate.py forecast-error NAME`, offline): on a built history
+  recording, forecast-vs-truth error sd by forecast model and 3-hour lead (kt plain and in the bounded logit space
+  where both kt are inside the bounds, temperature, 10 m wind log-ratio, hourly kt) and the correlation of
+  consecutive runs' errors, with linear fits beside `weather.yaml`'s values, written to
+  `candidates/forecast-error.yaml` with the recording, hashes and attribution. The truth is the satellite and ERA5,
+  so every sd is an upper bound (caveats in the file). On `spring-2026` (2026-11-13; review only, not adopted):
+  ICON-D2 at Poznań kt sd 0.20 (0–3 h) → 0.27 (45–48 h), consecutive-run correlation 0.77–0.81 (spec 007 assumes
+  ρ² = 0.81 and gives totals of 0.19 → 0.24–0.27); temperature sd 1.25 → 1.60 K (assumed 1.3 → 2.0 K); 10 m wind
+  log sd 0.44–0.49 (assumed 0.34 → 0.51; ERA5 inflates it). DMI at Radom: kt sd 0.25 → 0.28, temperature 1.16 →
+  1.68 K, wind 0.35–0.40.
 - **Load calibration** (spec 007, `jobs/calibrate.py load PATH… --format csv|wpuq`): fits the H25 noise
   (τ_fast, slow share w, σ, daily sd; τ_slow fixed at 3 h). Input is per-household quarter-hour base-load energy
   (heat pump and EV excluded): either a CSV with header `timestamp_utc,household_id,kwh` (`timestamp_utc` = interval
@@ -164,7 +178,89 @@ uncontrolled assets, and prices. These rows move into `01-architecture.md` when 
     pvmonitor.pl (Polish PV, consumption and heat-pump dashboards) has no API, export or reuse terms (checked
     2026-11-10) and is not used without the operator's written permission.
 
-Attribution: Open-Meteo data is CC BY 4.0 (NOTICE next to fixtures; "Weather data by Open-Meteo.com"); ENTSO-E
+### Historical backfill on real data (spec 008)
+
+One real-data window for evaluating strategies, **fetched once and replayed many times**. Real: PSE RCE prices,
+archived forecast runs of record, and the truth weather the meters respond to. **Household meters stay synthetic**:
+PV and heat pump are the models above driven by observed weather, base load and EV are the spec 007 and spec 004
+models. No real meter data is used.
+
+- **Real-data sites** = `live.locations` of the config (`config/generator.history.yaml`: PL-LOC-000001, Poznań,
+  ICON-D2; PL-LOC-000004, a generated household in Radom, 51.14 N 21.25 E, DMI HARMONIE). Sites with a
+  site-controlled battery are refused (it would dispatch on synthetic prices). Every other site stays synthetic.
+- **Fetch** (`history/fetch.py`, `ems-gen history fetch --name N --start YYYY-MM-DD --end YYYY-MM-DD`, whole UTC
+  days `[start, end)`): per site ERA5 (temperature, 10 m wind, GHI), the satellite's 10-minute GHI/DNI/DHI and every
+  archived run issued in the window (3-hourly; `model_for` as live); every PSE `rce-pln` business day
+  `local_date(start)` … `local_date(end − 1 s)`. Layout `data/recordings/N/`: `generator.yaml` (copy),
+  `raw/<source>/…` with `.meta.json` (URL without secrets, fetch time, SHA-256) or `.missing.json` for a run the
+  archive lacks, `manifest.json` (window, sites and models, grid cells, sources with attribution and licence,
+  `complete`, ERA5T flag, git commit, versions, hardware). Refused before any request: a start before 2026-04-02 (the
+  Single Runs archive), an end later than today − 6 days (ERA5 lag), an unknown site, more than 9,000 weighted
+  Open-Meteo calls (split the window), or a rerun with another window, site set or config. Requests are ≥ 0.8 s
+  apart (Open-Meteo) and ≥ 1 s (PSE); an ERA5 response without temperature or wind at `end` is refused, a 401/403
+  on a customer host too. A final 429 stops with `complete: false` and exit 4; rerunning resumes (stored responses
+  are never requested again). With `EMS_OPEN_METEO_API_KEY` the `customer-` hosts are used (exist, 401 without a
+  key; checked 2026-11-13).
+- **Archived runs**: Single Runs API, `run=YYYY-MM-DDTHH:MM`, `forecast_minutely_15=193` from the run time
+  (`start_minutely_15` is rejected). `build_event` drops the step labelled at the run time and skips up to four
+  leading incomplete steps (archived DMI runs lack radiation at +15 and +30 min: DMI's `dswrf` is "not present on
+  first model step"), so an event may start after +15 min (`forecast_event(first_step=…)`; v1 only needs contiguous
+  steps). Archived ICON-D2 runs end at 191 steps (cloud cover missing at +48 h). Live responses have no leading gap,
+  so live events are byte-identical (pinned); a live response with up to four leading gaps now gives an event instead
+  of none. Only 3-hourly runs are archived, for both models (hourly runs: "The requested model run is not
+  available", checked 2026-11-13). Archived values differ slightly from what the live API served for the same run
+  (GHI by a few W/m², temperature by 0.1–0.2 K), hence `source_system` `open-meteo-single-runs`.
+- **Observed truth** (`history/observed.py`, pure; `ObservedTruth` is a `TruthSource`, no asset model changed):
+  satellite 10-minute backward means labelled at their end (Open-Meteo docs; a clear-day check on the six clearest
+  days of 2026-04-02 … 06-30 fits the end label within −2 … +5 min and the start label clearly worse, 2026-11-13)
+  become quarter-hour means (weights 2/3 and 1/3); a null slot whose clear-sky GHI is 0 is night and counts as 0.
+  ERA5 hourly instants are interpolated to each quarter's end. Fallbacks, in order: satellite GHI with missing or
+  implausible DNI/DHI (DHI > GHI, DNI > extraterrestrial, DNI·cos z > GHI + 20 W/m²) → Erbs split; satellite GHI
+  missing in daylight → ERA5's hourly clear-sky index (label `floor_hour(s) + 1 h`, clipped to 1.1) × the quarter's
+  clear-sky GHI, Erbs split; ERA5 missing too → the synthetic truth; ERA5 temperature or wind missing → the synthetic
+  truth. Fields no asset model reads at these sites (kt, cloud, 100/120 m wind, direction) keep the synthetic values.
+  Whether the satellite's DNI/DHI are DWD retrievals or an Open-Meteo separation: VERIFY.
+- **Build** (`history/build.py`, `ems-gen history build --name N [--seed S] [--run-id ID]`, offline): forecasts,
+  prices (`build_day_event`, which keeps the latest row per slot since spec 008) and meters
+  (`source_system` `synthetic-history`) of the real-data sites into `events.jsonl`, sorted by `emission_key`
+  (availability, never before `start`, then stream, subject, interval, id), written atomically; then `build.json`
+  (seed, `run_id` (default: the name), raw-set digest, input digests, events hash, counts, gap shares, flagged and
+  incomplete price days, empty and malformed runs, the complete local delivery days, diagnostics, hardware).
+  Measurements that depend on a fallback carry quality `estimated` and `quality_raw` `truth:erbs|era5|synthetic`
+  (PV: any fallback; heat pump: temperature; grid flows at unmanaged sites: whenever PV or heat pump are). Refused:
+  an incomplete fetch, a raw body whose SHA-256 changed, a coordinate change, or a rebuild under the same `run_id`
+  with other inputs (G11: pass a new `--run-id`, no refetch needed). `ingested_at` is the recorded fetch time, so a
+  rebuild is byte-identical on one machine with the same `uv.lock`, tzdata and config (meter values carry full float
+  precision; `build.json` records the hardware). Price days are flagged when they carry more than one publication
+  time or the latest is not on D−1; a flagged day published after the next day's publication sorts after it, the one
+  per-key order exception (06).
+- **Replay** (`ems-gen replay --name N [--background]`, `make replay NAME=N [BACKGROUND=1]`): a history recording
+  must still match `build.json` (events hash, raw-set digest); `--speed` is refused (it paces by `ingested_at`, a
+  fetch time). `--background` generates every other catalog site synthetically over the window with the recording's
+  seed and `run_id`, synthetic prices off, merged by `emission_key`; refused if calibration or catalog changed since
+  the build. A run manifest goes to `data/runs/`.
+- **The default window** (`make history NAME=spring-2026 START=2026-04-02 END=2026-07-01`, fetched 2026-11-13;
+  `data/recordings/spring-2026`, not committed): 1,535 expected requests, fetched in 24 min (1,458 s); 1,435 archived
+  runs stored and 5 missing in the archive (Poznań 2026-06-10T15, 06-11T12; Radom 2026-06-10T21, 06-11T00,
+  06-11T06); 7 stored ICON-D2 runs give no event (2026-04-12T03 and 05-13T06 have no 100/120 m wind; five runs on
+  2026-06-10/11 are all null), so 1,428 forecast events; 91 price days, none flagged or incomplete; 17,280
+  production and 17,280 consumption events; 36,079 events in all, 104 MB, built in 5 s,
+  `events.jsonl` SHA-256 `75fc631fc194…` (after the 120 min change). Daylight quarters filled from ERA5: 2.07 % (Poznań), 2.08 % (Radom); Erbs
+  split of satellite GHI: 0.04 %, 0.05 %; synthetic: 0. ERA5 fills clipped at 1.1: 21 % and 17 % (the satellite
+  and ERA5 run above pvlib's Ineichen clear-sky on clear days, L9). Satellite zeros at low sun: 0.002 % of clear-sky
+  irradiation. Complete local delivery days 2026-04-03 … 06-30. Replayed into `sim` topics with `--background` (18
+  synthetic sites): 308,239 events in 64 s, `validate` clean.
+- **Forecast availability** (`src/ems/contracts/availability.py`): Open-Meteo's `last_run_availability_time` minus
+  the run time, measured 2026-10-20 … 11-13 on `api.open-meteo.com`: ICON-D2 85.2–106.7 min (6 runs; the 12 UTC
+  run of 2026-11-13 took 106.7), DMI HARMONIE 168.9–170.4 min (3 runs); plus Open-Meteo's recommended 10-minute
+  wait, rounded up to a quarter-hour: 120 and 195 min (synthetic: 120). The short sample of 2026-11-13 (spec
+  008/T07) found the 106.7 min run and raised ICON-D2 from 105; a planned 7-day sample was ended early by the
+  user. Spring 2026 delays cannot be measured afterwards (assumed alike, L8).
+
+Attribution: Open-Meteo data is CC BY 4.0 (NOTICE next to fixtures; "Weather data by Open-Meteo.com"); ERA5 is CC BY
+4.0 on the CDS since 2025-07-02 ("Contains modified Copernicus Climate Change Service information 2026", DOI
+10.24381/cds.adbb2d47); the satellite product's terms (DWD, EUMETSAT MTG via Open-Meteo) are VERIFY, so only
+hand-written satellite bodies appear in tests and raw data is never committed (L6); ENTSO-E
 day-ahead prices are not open data, so only hand-written fixtures are committed; PSE data is kept only as a few
 test fixtures.
 

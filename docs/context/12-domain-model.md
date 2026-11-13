@@ -28,9 +28,22 @@
 - Distinct quarter-hour values since business date 2025-10-01 (SDAC 15-minute MTU go-live); earlier RCE history
   is hourly values in quarter-hour records.
 - Over 2025-10-20 … 2026-10-19, 3.8–3.9 % of quarter-hours were negative (0 % Nov–Dec, 13.5 % April).
-- **Correction of the brief §4 (energy-domain review 2026-10-20):** RCE is the default for prosumers connected
-  from 2024-07-01 (RCEm remains for earlier cohorts unless they opt in) and it is quarter-hourly, not hourly, since
-  2025-10-01. VERIFY against art. 4b of the consolidated RES act before implementing settlement.
+- **Correction of the brief §4 (energy-domain review 2026-10-20):** RCE is the default for prosumers who first
+  generated and fed in from 2024-07-01 (RCEm remains for earlier cohorts unless they opt in) and it is
+  quarter-hourly, not hourly, since 2025-10-01.
+- **Net-billing facts found by the spec 008 energy review (2026-11-13)**, from the RES act as consolidated in Dz.U.
+  2024 poz. 1361 and amended by Dz.U. 2024 poz. 1847 (https://api.sejm.gov.pl/eli/acts/DU/2024/1361,
+  https://api.sejm.gov.pl/eli/acts/DU/2024/1847). VERIFY each against the current consolidated text, Dz.U. 2026
+  poz. 68, before the settlement spec:
+  - cohorts: first generation and feed-in by 2024-06-30 → monthly RCEm (art. 4b ust. 1); from 2024-07-01 → RCE
+    per imbalance settlement period (ust. 2); the earlier cohort may opt in by declaration, from the next month,
+    without return (ust. 2a–2b);
+  - negative RCE counts as 0 for individual prosumers (ust. 2 pkt 2, subject to ust. 17–18); RCEm is built from
+    RCEt floored at 0 (ust. 7); art. 4b defines no RCE correction procedure;
+  - the deposit offsets only energy purchase, not distribution fees (art. 4c ust. 2), is "zwiększana o współczynnik
+    1,23" (ust. 4), is usable for 12 months and then written off, oldest first (ust. 5–7);
+  - refunds are capped at 20 % (ust. 1 cohort) and 30 % (ust. 2 cohort) of the month's energy value (art. 4
+    ust. 11a), paid by the end of the 13th month (art. 4 ust. 11 pkt 2).
 
 ### Battery (brief §4 spike defaults; `src/ems/domain/battery.py`, spec 003)
 
@@ -55,8 +68,8 @@ C11 for low voltage ≤ 40 kW **and** fuse ≤ 63 A, otherwise C21. Metering poi
 
 ## Open questions
 
-- VERIFY: net-billing rules for the modelling year (negative RCE treated as 0 for the deposit, cohort rules,
-  12-month deposit window, refund caps), from art. 4b/4c of the consolidated RES act (Dz.U. 2026 poz. 68).
+- VERIFY: the net-billing facts above (cohorts, negative RCE as 0, 12-month deposit, factor 1.23, refund caps)
+  against the consolidated RES act Dz.U. 2026 poz. 68, which could not be parsed on 2026-11-13.
 - VERIFY: typical household consumption (GUS BDL primary figure; secondary sources give a median of about
   2,000–2,500 kWh/yr, plus 5–6 MWh/yr with a heat pump).
 - OPEN: battery wear model.

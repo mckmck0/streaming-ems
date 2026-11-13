@@ -21,6 +21,26 @@ First run 2026-10-20 (`benchmark-20261020T202144Z`): one simulated day, 1,000 si
 (`benchmark-20261111T005219Z`): the same event counts, array generation 4.4 s for 10,000 sites (was 3.0 s), event
 building 8.9k/s, producer 5.1k events/s. Details in `13-subsystem-ingest.md`.
 
+### Real-data window (spec 008)
+
+`data/recordings/spring-2026` (not committed; rebuild with `make history NAME=spring-2026 START=2026-04-02
+END=2026-07-01`): 2026-04-02 … 2026-06-30 at the Poznań test site (ICON-D2 forecasts) and a Radom household
+(DMI HARMONIE). Real: PSE RCE prices with their publication times, archived forecast runs of record, and the
+weather the meters respond to (satellite and ERA5). Synthetic: household behaviour (base load, appliances, EV) and
+the PV and heat-pump models that turn the observed weather into energy. Numbers (36,079 events, gap shares,
+missing runs, hash `75fc631fc194…`) are in `13-subsystem-ingest.md`.
+
+- Experiments replay it (`make replay NAME=spring-2026`, with `BACKGROUND=1` for a synthetic fleet around the two
+  sites) into the sim profile and never refetch. A result names the recording, its `events.jsonl` SHA-256 and
+  `run_id` (from `build.json`) beside config, seed, hardware and commit (P14).
+- Per-day scoring uses only the complete local delivery days in `build.json` (2026-04-03 … 06-30); the window
+  starts and ends at 02:00 local.
+- Forecasts become usable 120 min (ICON-D2) or 195 min (DMI) after issue; the first ones arrive after `start`, so
+  the first hours are a warm-up.
+- Limits: spring only (13.5 % negative RCE quarter-hours in April, 8.3 % in May, 4.4 % in June); households stay
+  modelled; background sites use synthetic weather and forecasts uncorrelated with the window's real prices, so they
+  serve scale and systems metrics, not energy results.
+
 ## What to build
 
 - Experiment harness spec (`make exp`, runner, export of Restate state to Parquet, reports).

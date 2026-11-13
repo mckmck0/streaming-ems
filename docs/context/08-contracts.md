@@ -28,14 +28,22 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   with datetimes as RFC 3339 UTC, milliseconds, `Z`; subject = location id or market key; origin source =
   `source_system` without `replay:`. A replay inside its run scope keeps the id; a new `run_id` gives new ids.
 - **Payloads**: measurements (one event per location and interval; asset, quantity, direction, aggregation,
-  value ≥ 0, unit, quality), weather forecast (one event per location and run; 192 PT15M steps; radiation is the
-  preceding-interval mean labelled at `valid_end`, temperature/wind/cloud are instants at `valid_end`), price
+  value ≥ 0, unit, quality), weather forecast (one event per location and run; up to 192 contiguous PT15M steps
+  from the first complete one, so `interval_start` and `t` may lie after `issued_at` (archived DMI runs start at
+  +30 min, spec 008); radiation is the preceding-interval mean labelled at `valid_end`, temperature/wind/cloud are
+  instants at `valid_end`), price
   (one event per market and local delivery day; 92/96/100 slots; native currency per MWh; negatives allowed).
 - **Measurement values** (spec 005): `asset_type` is `pv`, `bess`, `heat_pump`, `ev_charger`, `load` or
   `grid_connection`; `quantity` is `active_energy`, `soc` (both emitted), `active_power` or `reactive_energy`
   (reserved).
 - **EMS-managed batteries** (ADR 0014): sites whose battery the EMS controls emit no `bess` and no
   `grid_connection` measurements.
+- **`source_system` values in use** (pattern `^(replay:)?[a-z0-9-]+$`, no enum): `synthetic`, `open-meteo`
+  (live forecasts), `pse-rce`, `pse-csdac`, `entsoe`, and since spec 008 `open-meteo-single-runs` (archived runs of
+  record; their values differ slightly from the live API's, so they are not the same fact) and `synthetic-history`
+  (meters of real-data sites, driven by observed weather). A PSE day built from history equals the live event of the
+  same publication under the same `run_id`. History recordings always carry a non-null `run_id` (default: the
+  recording name), so they never collide with live topics.
 
 ### Topics, keys, headers (`config/topics.yaml`)
 
@@ -64,7 +72,12 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   stable `group.id`. The standalone ingress (`ingress-integration-kafka`) needs Restate ≥ 1.8.1.
 - Join production and consumption per `(location, t)`; there is no cross-topic ordering.
 - Availability rule: a strategy at step `t` sees only data whose `available_at ≤ t` (meters: interval end;
-  forecasts: `issued_at` + 90 min; prices: publication time).
+  forecasts: `issued_at` + the delay of `payload.forecast_model`; prices: publication time). One table,
+  `ems.contracts.availability` (spec 008), used by the generator's emission, the history build and consumers:
+  `icon_d2` and `synthetic` 120 min, `dmi_harmonie_arome_europe` 195 min. Each delay is the largest measured
+  Open-Meteo availability delay plus Open-Meteo's recommended 10-minute wait, rounded up to a quarter-hour: when a
+  run was publicly usable (a live poller can only be later). It was a flat 90 min before spec 008, up to 27 min early
+  for real ICON-D2 runs.
 - One pure function maps measurement events to the domain observation `{t, pv_kw, load_kw}` and is shared with the
   offline reference. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place.
 - Run scoping: with `run_id` set, keys are `run_id:location_id` (fresh Virtual Object state per run).
@@ -85,3 +98,5 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 - OPEN (ingestion spec): Kafka record timestamp policy if handlers need wall-clock order (CreateTime = event time
   is the default).
 - OPEN (spec 003): forecast volume at 100k sites (tens of GB/day); a weather-cell key may be added additively.
+- OPEN (ingestion spec): consumer behaviour for a `forecast_model` missing from the availability table (producers
+  refuse it); for example the most conservative delay plus a counter.
