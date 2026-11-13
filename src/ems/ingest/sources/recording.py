@@ -8,7 +8,9 @@ A recording lives in ``data/recordings/<name>/``: ``raw/<source>/<n>.<ext>`` wit
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from collections import Counter
 from collections.abc import Iterator
 from datetime import datetime
@@ -22,6 +24,41 @@ from ems.ingest.live.http import Fetched, redact
 Event = Any
 
 
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write ``data`` to a temporary file next to ``path``, then rename it.
+
+    A crash leaves the old file or the new one, never a partial one.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def write_raw(base: Path, fetched: Fetched, secrets: list[str], source: str | None = None) -> Path:
+    """Store a response body at ``base`` plus its extension, with a ``.meta.json`` beside it.
+
+    The body is redacted before it is stored and the meta records the SHA-256 of the stored bytes.
+    ``source`` overrides ``fetched.source`` in the meta (history recordings name it by folder).
+    """
+    base.parent.mkdir(parents=True, exist_ok=True)
+    ext = "xml" if "xml" in fetched.content_type else "json"
+    body = redact(fetched.text(), secrets).encode()
+    path = base.with_name(f"{base.name}.{ext}")
+    write_atomic(path, body)
+    meta = {
+        "source": source or fetched.source,
+        "url": redact(fetched.url, secrets),
+        "status": fetched.status,
+        "content_type": fetched.content_type,
+        "fetched_at": fetched.fetched_at.isoformat(),
+        "sha256": hashlib.sha256(body).hexdigest(),
+    }
+    write_atomic(
+        base.with_name(f"{base.name}.meta.json"), (json.dumps(meta, indent=2) + "\n").encode()
+    )
+    return path
+
+
 class Recorder:
     def __init__(self, root: Path, secrets: list[str] | None = None) -> None:
         self.root = root
@@ -33,20 +70,8 @@ class Recorder:
 
     def raw(self, fetched: Fetched) -> None:
         self._seq[fetched.source] += 1
-        folder = self.root / "raw" / fetched.source
-        folder.mkdir(parents=True, exist_ok=True)
-        ext = "xml" if "xml" in fetched.content_type else "json"
-        base = folder / f"{self._seq[fetched.source]:05d}"
-        body = redact(fetched.text(), self.secrets)
-        base.with_suffix(f".{ext}").write_text(body)
-        meta = {
-            "source": fetched.source,
-            "url": redact(fetched.url, self.secrets),
-            "status": fetched.status,
-            "content_type": fetched.content_type,
-            "fetched_at": fetched.fetched_at.isoformat(),
-        }
-        base.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+        base = self.root / "raw" / fetched.source / f"{self._seq[fetched.source]:05d}"
+        write_raw(base, fetched, self.secrets)
 
     def event(self, event: EnvelopeBase) -> None:
         self._events.write(to_json_bytes(event) + b"\n")

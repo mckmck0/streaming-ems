@@ -1,0 +1,1 @@
+{"query": "latitude=52.41&longitude=16.93&elevation=85.0&start_date=2026-05-15&end_date=2026-05-16&hourly=temperature_2m,wind_speed_10m,shortwave_radiation&models=era5&wind_speed_unit=ms&timezone=UTC&timeformat=unixtime"}

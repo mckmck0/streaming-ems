@@ -19,7 +19,10 @@ Contract and design: `docs/context/08-contracts.md`, `13-subsystem-ingest.md`, A
 - Keys: location topics `[run_id:]location_id`, prices market keys (`PL:RCE`); never null keys. Partition = Java
   murmur2 (`ems.contracts.topics.expected_partition`). Record timestamp = event time.
 - Topics are created only by `ems-gen topics ensure` from `config/topics.yaml`; backfill and accelerated runs
-  use the `sim` profile (preflight refuses otherwise). Never change partition counts of existing topics casually.
+  use the `sim` profile (preflight refuses otherwise; `ems-gen replay` runs it too). Never change partition counts of
+  existing topics casually.
+- Forecast availability comes from one table, `ems.contracts.availability` (per `forecast_model`); never a literal
+  delay in code or config.
 - `src/ems/contracts/` imports no Kafka client, numpy or I/O beyond reading `topics.yaml`: actors import it.
 - Synthetic models are pure functions of (seed, location, variable, `t`): use `ems.ingest.rng`, never a shared
   numpy Generator over a batch; loop over time, never over sites. EMS-managed sites emit no battery or grid

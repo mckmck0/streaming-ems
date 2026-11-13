@@ -14,6 +14,7 @@ compared counterfactually while one of them drives the real battery.
   - [Environment variables](#environment-variables)
   - [Start Kafka](#start-kafka)
   - [Generate data](#generate-data)
+    - [Real-data window](#real-data-window)
   - [Check the setup](#check-the-setup)
   - [Start the engine (TBD)](#start-the-engine-tbd)
   - [Stop and reset](#stop-and-reset)
@@ -128,7 +129,9 @@ Other ways to run it:
 | `make gen` | Synthetic data in real time, in the `ems-gen` container. It keeps running; stop it with `docker compose -f infra/docker-compose.yml stop ems-gen`. |
 | `make gen-fast` | Synthetic data at 96 times real time, starting at `START`; stop with Ctrl+C. |
 | `make gen-live` | Hybrid real time: live PSE prices and Open-Meteo weather for the configured live site, synthetic for the rest. Needs network. |
-| `make record NAME=x` / `make replay NAME=x` | Record the live sources once, then publish that recording (event ids are kept). |
+| `make record NAME=x` / `make replay NAME=x` | Record the live sources once, then publish that recording (event ids are kept). Replay refuses topics that would reject or expire the recording's records. |
+| `make history NAME=x START=2026-04-02 END=2026-07-01` | Fetch a real-data window once (archived Open-Meteo forecasts, PSE RCE, satellite and ERA5 truth) and build it into events; see [Real-data window](#real-data-window). Needs network for the fetch only. |
+| `make replay NAME=x BACKGROUND=1` | Publish a real-data window together with a synthetic fleet around its sites. |
 | `make gen-backfill START=2025-10-25T00:00:00Z DAYS=365` | A year of history for one site takes seconds to generate (about 10 s measured without Kafka). It is synthetic climate, not the real weather of that year. |
 
 More sites, fault injection and run isolation are not exposed through `make`. Use the CLI directly:
@@ -143,6 +146,22 @@ EMS_TOPICS_PROFILE=sim uv run ems-gen run --mode backfill --start 2026-10-20T00:
 - `--faults` injects missing, duplicate, late and stuck readings (rates in `faults:` of the config).
 - `--run-id X` prefixes the Kafka keys and enters the event ids. Without it, a second run of the same window
   republishes identical event ids and the topic holds duplicates.
+
+#### Real-data window
+
+`make history NAME=spring-2026 START=2026-04-02 END=2026-07-01` fetches, once, the real data of a past window for the
+sites in `live.locations` of [config/generator.history.yaml](config/generator.history.yaml) (the Poznań test site and
+a household in Radom): every archived ICON-D2 or DMI HARMONIE forecast run (Open-Meteo Single Runs API), the PSE RCE
+prices with their publication times, satellite radiation and ERA5 temperature and wind. It then builds them offline
+into `data/recordings/spring-2026/events.jsonl` (never committed). Prices, forecasts and the weather the households
+respond to are real; household behaviour (base load, appliances, EV) stays synthetic. The fetch takes about 25 minutes
+on Open-Meteo's free tier, resumes if interrupted, and refuses windows before 2026-04-02 or within six days of
+today. `make replay NAME=spring-2026 [BACKGROUND=1]` publishes it into the `sim` topics as often as needed. Details:
+[docs/context/13-subsystem-ingest.md](docs/context/13-subsystem-ingest.md).
+
+Attribution: weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0; DWD ICON-D2, DMI HARMONIE AROME
+Europe, DWD/EUMETSAT MTG satellite radiation); ERA5: contains modified Copernicus Climate Change Service information
+2026 (CC BY 4.0, DOI 10.24381/cds.adbb2d47); prices: Polskie Sieci Elektroenergetyczne S.A.
 
 Every generator parameter, the config files and what they connect to are described in
 [docs/context/13-subsystem-ingest.md](docs/context/13-subsystem-ingest.md); `uv run ems-gen --help` lists all
@@ -305,7 +324,7 @@ meaningless (backfill, replay, simulation).
 |---|---|---|---|
 | **Event time** (world clock) | When does the data apply? | `interval_start`, `interval_end` and `t` on every event; `valid_start` and `valid_end` on each forecast step. The Kafka record timestamp is also the event time. | A reading for 00:00 to 00:15 has event time `[00:00, 00:15)`. |
 | **Issue time** (world clock) | When did the source produce this information? | `issued_at`: the model run time for forecasts, the publication time for prices, null for meter readings. | The ICON-D2 run of 18:00; prices published at 13:41 on the day before. |
-| **Availability time** (world clock) | From when could a consumer know it? | **Not a field.** It is derived: meter readings at `interval_end` (plus `meters.availability_delay_s`), forecasts at `issued_at` + 90 minutes, prices at `publication_time`. | The 18:00 run is usable from 19:30. |
+| **Availability time** (world clock) | From when could a consumer know it? | **Not a field.** It is derived: meter readings at `interval_end` (plus `meters.availability_delay_s`), forecasts at `issued_at` + the model's delay (120 minutes for ICON-D2 and synthetic runs, 195 for DMI HARMONIE; `ems.contracts.availability`), prices at `publication_time`. | The 18:00 ICON-D2 run is usable from 20:00. |
 | **Processing time** (system clock) | When did the system handle it? | `ingested_at`: the wall-clock time at which the generator handed the record to Kafka. | `2026-10-20T00:15:05Z` |
 
 #### Why event time alone is not enough
@@ -315,7 +334,7 @@ today from its publication at 13:41. A strategy running at 15:00 today may use i
 Event time cannot express that, and processing time can't either in a backfill, where every event is produced
 within minutes of the others. Issue time is the deterministic stand-in: it travels with the data, so a replay gives the
 same answer every time. The same holds for a forecast run, which describes the next 48 hours but is only known from
-its run time plus the 90-minute delivery delay.
+its run time plus the model's delivery delay (120 minutes for ICON-D2).
 
 #### What ingested_at is, and is not
 
@@ -331,7 +350,7 @@ the event time; only the dead-letter topic uses append time).
 Things to know when you use the times:
 
 - **In live mode** `ingested_at` is close to the availability time: a meter reading is produced right after its
-  interval ends, a forecast about 90 minutes after its run, a price when PSE publishes it.
+  interval ends, a forecast 1.5 to 3 hours after its run (by model), a price when PSE publishes it.
 - **In backfill, accelerated and replay runs `ingested_at` is the real wall clock**, not simulated time. Backfilling
   2025 data in 2026 gives `ingested_at` values in 2026, and a replay refreshes it to the replay moment (the
   `event_id` stays). So `ingested_at` cannot tell you "what was known when" in simulated time. Event time plus
@@ -690,7 +709,7 @@ Result: `source_system` `entsoe`, `source_record_ref` `entsoe:A44:2026-10-21`, m
 | Stream | Emitted at |
 |---|---|
 | Measurements | At `interval_end` plus `meters.availability_delay_s` (0 by default). |
-| Forecasts | 90 minutes after `issued_at`, which is when ICON-D2 runs become available. |
+| Forecasts | When the run becomes available: `issued_at` plus 120 minutes for synthetic and ICON-D2 runs, 195 minutes for DMI HARMONIE runs (`ems.contracts.availability`; Open-Meteo's measured availability plus its recommended 10-minute wait). |
 | Prices | In the early afternoon on the day before the delivery day (mostly 13:00 to 15:00 local, occasionally until 16:15). The days already published when a run starts are emitted at the start. |
 
 In backfill mode the whole window is written as fast as possible; the Kafka record timestamps are still the event
@@ -704,4 +723,5 @@ values) or flagged `estimated` or `substituted`, and consumers must tolerate all
   means a new major version on new topics (`...v2`).
 - Deduplicate on `event_id`; do not assume ordering across topics or between a site's late events and later ones.
 - A strategy at time `t` may only use data that was available then: measurements at `interval_end`, forecasts at
-  `issued_at` plus 90 minutes, prices at their publication time.
+  `issued_at` plus the delay of its `forecast_model` (`ems.contracts.availability`), prices at their publication
+  time.

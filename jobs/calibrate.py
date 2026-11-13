@@ -3,6 +3,7 @@
 uv run python jobs/calibrate.py prices tests/fixtures/pse/rce-pln_*.json uv run python
 jobs/calibrate.py temperature tests/fixtures/openmeteo/archive_era5_2024_temperature.json uv run
 python -I jobs/calibrate.py load data/external/wpuq/2019_data_15min.hdf5 --format wpuq
+uv run python jobs/calibrate.py forecast-error spring-2026   (a built history recording, spec 008)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import typer
 
 from ems.ingest.calibration import (
     WPUQ_DATASET,
+    fit_forecast_error,
     fit_load,
     fit_prices,
     fit_temperature,
@@ -69,6 +71,39 @@ def load(
     params = load_load_params(load_settings().config_dir / "calibration" / "load.yaml")
     result = fit_load(frame, dataset=dataset, model_params=params)
     typer.echo(f"wrote {write_candidate(result, out, ', '.join(f.name for f in files))}")
+
+
+@app.command("forecast-error")
+def forecast_error(
+    name: Annotated[str, typer.Argument(help="Built history recording under data/recordings/")],
+    out: Annotated[Path, typer.Option(help="Candidate folder")] = OUT,
+) -> None:
+    """Forecast-vs-truth error by model and lead on a real-data window (spec 008); no network."""
+    import hashlib
+
+    from ems.contracts.envelope import Stream
+    from ems.ingest.history.build import observed_truth_series, read_build_info
+    from ems.ingest.sources.recording import read_events
+    from ems.ingest.synthetic.weather import load_params
+
+    settings = load_settings()
+    root = settings.data_dir / "recordings" / name
+    info = read_build_info(root)
+    manifest = json.loads((root / "manifest.json").read_text())
+    forecasts = [e for e in read_events(root) if e.stream is Stream.WEATHER_FORECAST]
+    truth = observed_truth_series(settings, name)
+    params = load_params(settings.config_dir / "calibration" / "weather.yaml")
+    result = fit_forecast_error(forecasts, truth, params)
+    result["recording"] = {
+        "name": name,
+        "window": manifest["window"],
+        "sites": manifest["sites"],
+        "events_sha256": info["events_sha256"],
+        "build_json_sha256": hashlib.sha256((root / "build.json").read_bytes()).hexdigest(),
+        "run_id": info["run_id"],
+    }
+    result["attribution"] = {k: v["attribution"] for k, v in manifest["sources"].items()}
+    typer.echo(f"wrote {write_candidate(result, out, f'history recording {name}')}")
 
 
 if __name__ == "__main__":

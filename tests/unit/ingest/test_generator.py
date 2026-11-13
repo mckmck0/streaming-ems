@@ -52,11 +52,17 @@ def test_ac_001_27_two_day_backfill_counts_and_order() -> None:
 
 
 def test_meters_are_emitted_at_interval_end_and_forecasts_after_availability() -> None:
+    # AC-008-08: one delay per forecast_model (spec 008); imported here so the other tests of
+    # this file still collect before 008/T15.
+    from ems.contracts.availability import forecast_delay
+
+    delay = forecast_delay("synthetic")
     for at, stream, ev in _run(START, 0.5):
         if stream in ("production", "consumption"):
             assert at == ev.interval_end
         elif stream == "weather_forecast":
-            assert at == ev.issued_at + timedelta(minutes=90)
+            assert ev.payload.forecast_model == "synthetic"
+            assert at == ev.issued_at + delay
             assert len(ev.payload.steps) == 192 and ev.issued_at.hour % 3 == 0
 
 

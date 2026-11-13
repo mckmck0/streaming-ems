@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -440,3 +442,200 @@ def write_candidate(result: dict[str, Any], out_dir: Path, source: str) -> Path:
         )
         yaml.dump(json.loads(json.dumps(doc, default=str)), f)
     return path
+
+
+# ── forecast error measured on a history recording (spec 008, AC-008-20) ─────────────────────────
+
+FORECAST_BIN_H = 3.0
+FORECAST_HORIZON_H = 48.0
+KT_DAYLIGHT_CS = 50.0  # W/m2: clear-sky GHI from which kt is meaningful
+WIND_MIN_MS = 0.5
+FORECAST_CAVEATS = [
+    "Truth GHI is a satellite (DWD MTG) retrieval: its own error is part of the measured kt error.",
+    "Truth temperature and wind are ERA5 (25 km reanalysis, linearly interpolated, damped diurnal "
+    "range): their error is part of the measured error, the wind log-ratio most of all.",
+    "DMI HARMONIE 15-minute radiation is interpolated from hourly output, so its 15-minute kt "
+    "error includes smoothing; compare models on hourly_kt_sd.",
+    "The measured kt error includes timing (phase) error, while weather.yaml's kt_sd_base and "
+    "kt_sd_per_h set only the amplitude part of the spec 007 model; compare totals, not "
+    "parameters.",
+    "kt_logit_sd uses only steps whose forecast and truth kt lie strictly inside (0.03, 1.1); on "
+    "clear days the satellite often exceeds pvlib's Ineichen clear-sky (kt >= 1.1), so kt_sd is "
+    "the more robust figure.",
+    "Every sd here is an upper bound to review, not a value to adopt as it is.",
+]
+
+
+@dataclass(frozen=True)
+class TruthSeries:
+    """One site's truth on the quarter-hour grid; NaN where not observed."""
+
+    t0: int  # quarter index of the first value
+    ghi: Any  # W/m2, the mean over [t, t + 1)
+    cs_ghi: Any  # clear-sky GHI of the same quarters
+    temp_c: Any  # instant at the quarter's end
+    wind10: Any  # m/s, instant at the quarter's end
+
+
+def _sd(x: Any) -> float | None:
+    return float(np.std(x, ddof=1)) if len(x) > 1 else None
+
+
+def _corr(a: Any, b: Any) -> float | None:
+    if len(a) < 3:
+        return None
+    sa, sb = np.std(a), np.std(b)
+    if sa == 0 or sb == 0:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def _linear_fit(
+    lead: Sequence[Any], sd: Sequence[Any], n: Sequence[Any]
+) -> dict[str, float | None]:
+    pts = [(x, y, w) for x, y, w in zip(lead, sd, n, strict=True) if y is not None and w > 1]
+    if len(pts) < 2:
+        return {"base": None, "per_h": None}
+    x, y, w = (np.array(v, dtype=np.float64) for v in zip(*pts, strict=True))
+    design = np.stack([np.ones_like(x), x], axis=1) * np.sqrt(w)[:, None]
+    coef, *_ = np.linalg.lstsq(design, y * np.sqrt(w), rcond=None)
+    return {"base": round(float(coef[0]), 4), "per_h": round(float(coef[1]), 6)}
+
+
+def fit_forecast_error(
+    forecasts: Sequence[Any],
+    truth: Mapping[str, TruthSeries],
+    weather_params: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Forecast-vs-truth error statistics by forecast model and 3-hour lead bin (spec 008, US5).
+
+    A step pairs with the truth at the quarter of its ``valid_start``; lead = ``valid_end`` -
+    ``issued_at``. kt uses daylight steps (clear-sky GHI >= 50 W/m2) with kt clipped to [0.03, 1.1];
+    the logit-space error (spec 007) only where both kt lie strictly inside the bounds;
+    temperature is forecast - truth; wind is log(forecast / truth) at 10 m where truth >= 0.5 m/s.
+    ``rho2_*`` is the correlation of a run's error with the error of the run issued 3 h earlier at
+    the same site and valid time (by the newer run's lead).
+    """
+    from ems.contracts.time import quarter_index
+    from ems.ingest.synthetic.weather import to_x
+
+    n_bins = int(FORECAST_HORIZON_H / FORECAST_BIN_H)
+    run_gap_q = int(FORECAST_BIN_H * 4)
+    # per model: list of (bin, lead, site, issue_q, valid_q, e_kt, e_ktx, e_temp, e_wind)
+    rows: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
+    for event in forecasts:
+        series = truth.get(event.location_id)
+        if series is None:
+            continue
+        issue_q = quarter_index(event.issued_at)
+        model = event.payload.forecast_model
+        n = len(series.ghi)
+        for step in event.payload.steps:
+            lead = (step.valid_end - event.issued_at).total_seconds() / 3600.0
+            b = int(np.ceil(lead / FORECAST_BIN_H)) - 1
+            if not 0 <= b < n_bins:
+                continue
+            i = quarter_index(step.valid_start) - series.t0
+            if not 0 <= i < n:
+                continue
+            cs, g = float(series.cs_ghi[i]), float(series.ghi[i])
+            e_kt = e_ktx = e_t = e_w = np.nan
+            if cs >= KT_DAYLIGHT_CS and not np.isnan(g):
+                raw_f, raw_t = step.ghi_wm2 / cs, g / cs
+                kf, kt = min(max(raw_f, 0.03), 1.1), min(max(raw_t, 0.03), 1.1)
+                e_kt = kf - kt
+                if 0.03 < raw_f < 1.1 and 0.03 < raw_t < 1.1:  # the logit explodes at the bounds
+                    e_ktx = float(to_x(np.array([kf]))[0] - to_x(np.array([kt]))[0])
+            tt = float(series.temp_c[i])
+            if not np.isnan(tt):
+                e_t = step.temp_air_c - tt
+            tw, fw = float(series.wind10[i]), step.wind_speed_ms.get("10", np.nan)
+            if not np.isnan(tw) and tw >= WIND_MIN_MS and fw > 0:
+                e_w = float(np.log(fw / tw))
+            key_q = quarter_index(step.valid_start)
+            rows[model].append((b, lead, event.location_id, issue_q, key_q, e_kt, e_ktx, e_t, e_w))
+
+    models: dict[str, Any] = {}
+    for model, items in sorted(rows.items()):
+        arr = np.array([(*r[5:], r[0], r[1]) for r in items], dtype=np.float64)
+        e_kt, e_ktx, e_t, e_w, bins, leads = (arr[:, k] for k in range(6))
+        index = {(r[2], r[3], r[4]): k for k, r in enumerate(items)}
+        older = np.array(
+            [index.get((r[2], r[3] - run_gap_q, r[4]), -1) for r in items], dtype=np.int64
+        )
+        # hourly kt error: four complete daylight quarters of one clock hour in one run
+        hourly: dict[tuple[str, int, int], list[int]] = defaultdict(list)
+        for k, r in enumerate(items):
+            hourly[(r[2], r[3], r[4] // 4)].append(k)
+        hour_bin, hour_err = [], []
+        for ks in hourly.values():
+            if len(ks) == 4 and not np.isnan(e_kt[ks]).any():
+                hour_bin.append(int(np.ceil(leads[ks].mean() / FORECAST_BIN_H)) - 1)
+                hour_err.append(float(e_kt[ks].mean()))
+        hour_bin_a, hour_err_a = np.array(hour_bin), np.array(hour_err)
+        out_bins = []
+        for b in range(n_bins):
+            sel = bins == b
+            lo, hi = b * FORECAST_BIN_H, (b + 1) * FORECAST_BIN_H
+
+            def stat(
+                err: Any, sel: Any = sel, older: Any = older
+            ) -> tuple[int, float | None, float | None]:
+                ok = sel & ~np.isnan(err)
+                pair = ok & (older >= 0)
+                pair &= ~np.isnan(err[np.where(older >= 0, older, 0)])
+                return int(ok.sum()), _sd(err[ok]), _corr(err[pair], err[older[pair]])
+
+            n_kt, kt_sd, rho_kt = stat(e_kt)
+            _n, ktx_sd, _r = stat(e_ktx)
+            n_t, t_sd, rho_t = stat(e_t)
+            n_w, w_sd, rho_w = stat(e_w)
+            hsel = hour_bin_a == b if hour_bin_a.size else np.zeros(0, dtype=bool)
+            out_bins.append(
+                {
+                    "lead_h": [lo, hi],
+                    "mean_lead_h": round(float(leads[sel].mean()), 4) if sel.any() else None,
+                    "n_kt": n_kt,
+                    "kt_sd": kt_sd,
+                    "kt_logit_sd": ktx_sd,
+                    "n_temp": n_t,
+                    "temp_sd": t_sd,
+                    "n_wind": n_w,
+                    "wind_ln_sd": w_sd,
+                    "rho2_kt": rho_kt,
+                    "rho2_temp": rho_t,
+                    "rho2_wind": rho_w,
+                    "hourly_kt_sd": _sd(hour_err_a[hsel]) if hsel.size else None,
+                }
+            )
+        lead_c = [b["mean_lead_h"] or 0.0 for b in out_bins]
+        models[model] = {
+            "bins": out_bins,
+            "fit": {
+                "kt_logit": _linear_fit(
+                    lead_c, [b["kt_logit_sd"] for b in out_bins], [b["n_kt"] for b in out_bins]
+                ),
+                "temp": _linear_fit(
+                    lead_c, [b["temp_sd"] for b in out_bins], [b["n_temp"] for b in out_bins]
+                ),
+                "wind_ln": _linear_fit(
+                    lead_c, [b["wind_ln_sd"] for b in out_bins], [b["n_wind"] for b in out_bins]
+                ),
+            },
+        }
+    fp = weather_params["forecast"]
+    keys = (
+        "kt_sd_base",
+        "kt_sd_per_h",
+        "temp_sd_base_c",
+        "temp_sd_per_h_c",
+        "wind_ln_sd_base",
+        "wind_ln_sd_per_h",
+        "rho",
+    )
+    return {
+        "kind": "forecast-error",
+        "models": models,
+        "weather_yaml": {k: fp[k] for k in keys},
+        "caveats": list(FORECAST_CAVEATS),
+    }

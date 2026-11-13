@@ -8,7 +8,7 @@ SHELL := /bin/bash
 
 .PHONY: help install format lint type-check test test-unit test-integration ci clean \
         up down reset topics topics-describe gen gen-fast gen-backfill tail validate schemas \
-        gen-live record replay stats bench
+        gen-live record replay stats bench history
 
 help:
 	@echo ""
@@ -28,8 +28,9 @@ help:
 	@echo "  gen         generator in compose (realtime); gen-fast (x96); gen-backfill DAYS=2 START=..."
 	@echo "  tail TOPIC=...  validate   inspect and validate topics; schemas re-exports JSON Schemas"
 	@echo "  gen-live    hybrid realtime (live PSE + Open-Meteo for live.locations, synthetic rest)"
-	@echo "  record NAME=...  replay NAME=...   record live sources / publish a recording"
+	@echo "  record NAME=...  replay NAME=... [BACKGROUND=1]   record live sources / publish a recording"
 	@echo "  stats       gaps, duplicates, late events per topic; bench  generation + producer benchmark"
+	@echo "  history NAME=... START=YYYY-MM-DD END=YYYY-MM-DD   fetch + build a real-data window"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
 
@@ -115,11 +116,16 @@ record:
 	uv run ems-gen record --name $(NAME)
 replay:
 	uv run ems-gen topics ensure --profile sim --apply-config
-	EMS_TOPICS_PROFILE=sim uv run ems-gen replay --name $(NAME)
+	EMS_TOPICS_PROFILE=sim uv run ems-gen replay --name $(NAME) $(if $(BACKGROUND),--background,)
 
 # ── Spec 003: scale and faults ──
 bench:
 	uv run python jobs/benchmark.py
+
+# ── Spec 008: historical backfill on real data ──
+history:
+	uv run ems-gen history fetch --name $(NAME) --start $(START) --end $(END)
+	uv run ems-gen history build --name $(NAME)
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)

@@ -2,3 +2,8 @@ Weather data by Open-Meteo.com (https://open-meteo.com), licensed CC BY 4.0
 (https://creativecommons.org/licenses/by/4.0/). Recorded 2026-10-20 for tests; the EMS converts it to
 canonical units and intervals. Underlying model: DWD ICON-D2. Citation: Zippenfenig, P. (2023). Open-Meteo.com
 Weather API. Zenodo. https://doi.org/10.5281/ZENODO.7970649
+
+Spec 008 fixtures (recorded 2026-11-13): archived forecast runs from the Open-Meteo Single Runs API
+(single_run_*: DWD ICON-D2 and DMI HARMONIE AROME Europe, CC BY 4.0) and an ERA5 response from the Open-Meteo
+Historical Weather API (era5_*). ERA5: Contains modified Copernicus Climate Change Service information 2026
+(CC BY 4.0); Hersbach et al., ERA5 hourly data on single levels, DOI 10.24381/cds.adbb2d47.

@@ -13,10 +13,11 @@ run saw.
 | Stream | Emitted at | Record timestamp |
 |---|---|---|
 | production, consumption | interval end + `meters.availability_delay_s` (default 0) | interval end |
-| weather forecast | issue time + 90 min; runs at 00, 03, … UTC; 192 quarter-hour steps | issue time |
+| weather forecast | issue time + the model's delay (`ems.contracts.availability`: 120 min synthetic and ICON-D2, 195 min DMI); runs at 00, 03, … UTC; 192 quarter-hour steps | issue time |
 | price | publication D−1 (13:00–16:15 local); days already published at the start are emitted at the start | publication time |
 
-Within a run, events leave in emission-time order; per key, `interval_start` is monotonic. A two-day backfill
+Within a run, events leave in emission-time order; per key, `interval_start` is monotonic. One exception: a PSE
+day republished after the next day's publication (live revisions, flagged history days) arrives after it. A two-day backfill
 from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 price events (D, D+1, D+2).
 
 ### Clock modes of the generator
@@ -33,7 +34,12 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - Hybrid: live locations get live forecasts and synthetic meters driven by them; other locations stay fully
   synthetic; one price source (live PSE when prices are live).
 - Experiments use recordings: `ems-gen replay` re-emits recorded events with their ids (`replay:<source>`), so a
-  live session can be replayed into the sim profile any number of times.
+  live session can be replayed into the sim profile any number of times. Replay runs the topic preflight first and
+  refuses topics that would reject or expire the recording's record times (spec 008).
+- Historical backfill (spec 008): `ems-gen history fetch` stores a real-data window once (archived forecasts, PSE,
+  satellite and ERA5), `ems-gen history build` turns it offline into events in availability order, and replay
+  publishes it, optionally with a synthetic background fleet (`--background`). Experiments replay it into the sim
+  profile; they never refetch.
 
 ### Faults (spec 003)
 

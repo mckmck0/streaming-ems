@@ -32,6 +32,13 @@ VARIABLES = (
 )
 STEPS = 192
 AVAILABILITY_GRACE = timedelta(minutes=10)
+# Single Runs API (archived runs of record by initialisation time, from 2026-04-02; spec 008). It
+# rejects start_/end_minutely_15, so a request asks for 193 steps from the run time and the step
+# labelled at the run time is dropped when the event is built.
+SINGLE_RUNS_HOST = "https://single-runs-api.open-meteo.com"
+SINGLE_RUNS_CUSTOMER_HOST = "https://customer-single-runs-api.open-meteo.com"
+SINGLE_RUN_STEPS = STEPS + 1
+LEADING_GAP_MAX = 4  # one hour of incomplete leading steps (archived DMI runs: two)
 # Open-Meteo's ICON-D2 grid (verified 2026-10-20): 43.18-58.08 N, 3.94 W-20.34 E.
 ICON_D2_BOX = (43.18, 58.08, -3.94, 20.34)
 
@@ -81,6 +88,17 @@ def forecast_params(site: Site, model: Model, issued_at: datetime) -> dict[str, 
     }
 
 
+def single_run_params(site: Site, model: Model, issued_at: datetime) -> dict[str, Any]:
+    """Single Runs API parameters for one archived run: the live parameters without the
+    run-anchored window, plus ``run`` and ``forecast_minutely_15``.
+    """
+    params = forecast_params(site, model, issued_at)
+    del params["start_minutely_15"], params["end_minutely_15"]
+    params["run"] = issued_at.strftime("%Y-%m-%dT%H:%M")
+    params["forecast_minutely_15"] = SINGLE_RUN_STEPS
+    return params
+
+
 def build_event(
     site: Site,
     model: Model,
@@ -89,14 +107,34 @@ def build_event(
     mappings_dir: Path,
     ingested_at: datetime,
     run_id: str | None = None,
+    source_system: str = "open-meteo",
 ) -> WeatherForecastEvent | None:
-    rows = apply(builtin("openmeteo.forecast.v1", mappings_dir), payload)
+    """The event of one run: the complete steps after the run time, as one contiguous block.
+
+    Rows labelled at or before the run time are dropped (the Single Runs archive starts there). Up
+    to ``LEADING_GAP_MAX`` leading rows with a missing value are skipped (archived DMI runs have no
+    radiation in their first 30 minutes); the block ends before the next missing value (an early
+    end of the horizon). Live responses start at +15 min with no gap, so their events are as
+    before.
+    """
+    rows = [
+        r
+        for r in apply(builtin("openmeteo.forecast.v1", mappings_dir), payload)
+        if r["valid_end"] > issued_at
+    ]
+    first = 0
+    while first < len(rows) and rows[first].get("quality") == "missing":
+        first += 1
+    if first > LEADING_GAP_MAX:
+        return None
     steps: list[dict[str, Any]] = []
-    for k, row in enumerate(rows):
+    for k, row in enumerate(rows[first:]):
         if row.get("quality") == "missing":
             break  # horizon ended early: keep the complete prefix
-        if row["valid_end"] != issued_at + (k + 1) * QUARTER:
-            raise ValueError(f"step {k} at {row['valid_end']}, expected the run-anchored window")
+        if row["valid_end"] != issued_at + (first + k + 1) * QUARTER:
+            raise ValueError(
+                f"step {first + k} at {row['valid_end']}, expected the run-anchored window"
+            )
         steps.append(
             {
                 "ghi_wm2": max(0.0, row["ghi_wm2"]),
@@ -120,10 +158,11 @@ def build_event(
         steps=steps,
         ingested_at=ingested_at,
         forecast_model=model.request,
-        source_system="open-meteo",
+        source_system=source_system,
         run_id=run_id,
         synthetic=False,
-        source_record_ref=f"open-meteo:{model.request}:{issued_at.isoformat()}",
+        source_record_ref=f"{source_system}:{model.request}:{issued_at.isoformat()}",
+        first_step=first,
     )
 
 

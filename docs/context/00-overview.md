@@ -11,7 +11,7 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-11-10)
+### Status of every piece (2026-11-13)
 
 | Piece | Status |
 |---|---|
@@ -25,6 +25,7 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Generator narrowed to PV prosumers, contract v1 frozen (spec 005) | Built |
 | Simplified scope: one Kafka broker, optional Helm and LLM strategy, results from Restate state (spec 006) | Built |
 | Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
+| Historical backfill on real data: fetch once, build offline, replay; window 2026-04-02 … 06-30 fetched (spec 008) | Built |
 | Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
@@ -53,6 +54,20 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     applicability VERIFY) through a neutral CSV layout. Impulse rates stay at literature values. pvmonitor.pl is
     not used without the operator's written permission.
   - The historical backfill on real data (finding 4) is its own spec.
+- 2026-11-12/13 (spec 008): historical backfill on real data, pulled ahead of the Kafka-ingestion spec.
+  - Fetch once, replay many: `ems-gen history fetch` stores raw responses with SHA-256 and a manifest;
+    `ems-gen history build` builds events offline and byte-deterministically; meters are stored in the recording,
+    not recomputed at replay. The `run_id` is chosen at build (default: the recording name).
+  - Real: PSE RCE, archived forecast runs (Open-Meteo Single Runs; ICON-D2 inside its domain, DMI HARMONIE east of
+    20.34° E, as live), observed truth (DWD MTG satellite radiation, ERA5 temperature and wind). Households stay
+    synthetic. Real-data sites are `live.locations`; sites with a site-controlled battery are refused.
+  - Forecast availability is one table per `forecast_model` (`ems.contracts.availability`): 120 min for ICON-D2
+    and synthetic forecasts (was 90), 195 min for DMI; public availability plus Open-Meteo's 10-minute wait.
+  - `source_system` values `open-meteo-single-runs` and `synthetic-history`; prices keep `pse-rce`.
+  - `ems-gen replay` runs the topic preflight for every recording; `--background` generates the synthetic fleet
+    around a history recording.
+  - Not DMI everywhere: at Poznań ICON-D2's GHI error was 11–19 % lower and its 15-minute radiation native
+    (spec 008 plan §3).
 
 ### Repo map (current and planned)
 
@@ -83,11 +98,11 @@ templates/                   bootstrap templates; frontend/ reserved
 | 5 | **005 Narrow generator assets** | Remove wind, CHP, biogas, biomass, hydro and the industrial and plant site types; trim and freeze contract v1 |
 | 6 | **006 Simplify scope** | Remove the 3-broker profile (one broker everywhere); Helm and LLM strategy optional; results from Restate state |
 | 7 | **007 Realistic generator data** | Forecast errors shared by consecutive runs with timing errors; two-timescale log noise and appliance impulses in base load, daily factor on the local day, WPuQ fit; hybrid truth deviates from live forecasts (L5) |
+| 8 | **008 Historical backfill on real data** | Fetch once, build offline, replay: PSE RCE, archived ICON-D2/DMI runs (Single Runs API), satellite and ERA5 truth behind the spec 007 seam; per-model forecast availability; replay preflight and `--background`; forecast-error candidate. Window 2026-04-02 … 06-30 (spring, no winter) |
 | next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
 | next | Dev environment and spike reproduction | Restate in compose, test tiers, spike experiments A–C (brief §11, former 001) |
 | next | Domain core | Battery model, settlement with RCE/RCEm options, actions, `Policy`, offline reference |
 | next | Actor skeleton; sim clock and replay driver | Brief §11 |
-| later | Historical backfill on real data | One real window (proposed 2026-04-02 … 2026-06-30, spring with negative RCE): PSE RCE by business date; archived ICON-D2/DMI runs from the Open-Meteo Single Runs API (full runs by initialisation time from 2026-04-02, 15-minutely; VERIFY access and licence); truth GHI/DNI/DHI from the Satellite Radiation API (DWD MTG, 10 min, archive since Feb 2026) and temperature/wind from ERA5, as truth sources behind the spec 007 seam; household meters stay synthetic. Handoff facts: `specs/007-realistic-generator-data/spec.md` |
 | later | Forecasting, MPC and oracle, adaptive Selector, experiment harness (results exported from Restate state) | Brief §11 |
 
 ### Optional
