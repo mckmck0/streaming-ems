@@ -13,6 +13,20 @@
 - Energy and per-step results are read from Restate Virtual Object state after a run and written to Parquet by a
   batch CLI (P10). No Kafka egress topic is built for results (spec 006).
 
+### Cost metric (spec 009; definitions in `12-domain-model.md`)
+
+Every energy result reports three cost numbers per household and strategy, from the offline reference or actor
+state:
+- `bill_pln`: Σ monthly `payable_pln` − Σ refunds, the primary cost. A refund is booked in its tranche's expiry
+  month (paid in the next). Bill metrics use windows of whole civil months.
+- `deposit_closing_pln`: the deposit left at the window's end, shown beside the bill and never netted (valuing it
+  needs an assumption about the future).
+- `ledger_net_cost_pln`: Σ hourly (energy + distribution cost − 1.23 × export value). Additive, so it suits
+  per-interval paired statistics; it values export as if the deposit is always used, like the price signal.
+
+Savings are reported against NoBattery and SelfConsumption on both `bill_pln` and `ledger_net_cost_pln`. Results
+record the tariff version ids, the RCEm entries used (source `pse` or `proxy`) and the cohort (P14).
+
 ### Data-generator benchmark (spec 003)
 
 `make bench` → `experiments/results/benchmark-<UTC>/results.json` (window, config, versions, hardware, commit).
@@ -47,7 +61,7 @@ missing runs, hash `75fc631fc194…`) are in `13-subsystem-ingest.md`.
 
 ## Prerequisites
 
-- Actors and the domain core (later specs).
+- Actors (later spec). The domain core and the cost metric exist (spec 009).
 
 ## Open questions
 

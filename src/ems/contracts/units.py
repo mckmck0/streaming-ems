@@ -20,8 +20,3 @@ def to_kw(value: float, unit: str) -> float:
 def kw_to_kwh(power_kw: float, dt_h: float) -> float:
     """Power becomes energy only through the interval length."""
     return power_kw * dt_h
-
-
-def price_per_mwh_to_per_kwh(price: float) -> float:
-    """Wire prices are per MWh in native currency; the domain uses per kWh."""
-    return price / 1000.0

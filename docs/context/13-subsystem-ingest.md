@@ -310,6 +310,11 @@ and froze the range: a new site type or asset kind needs its own spec and ADR.
 
 - The type comes from its own hash of (catalog seed, location) and household EVs from another, so households keep
   all earlier draws. Commercial sites and solar farms are background sites (never EMS-managed).
+- Spec 009 (config, not wire contract): `TariffGroup.G12W` (`G12w`, profile H25) for hand-defined sites only;
+  `Site.net_billing: {first_feed_in, rce_from}`, set to the constant `DEFAULT_NET_BILLING` (first feed-in
+  2024-07-01, RCE) on every generated household and None on plants, so no existing value changes (a pinned
+  household digest checks it). The test site has first feed-in 2024-09-01. The catalog parquet gains a
+  `net_billing` column (JSON).
 - An unknown name in `scale.site_mix` (for example `wind_farm`) fails at config load and in `build_catalog`; an
   unknown asset `kind` or site type in `config/sites.yaml` fails at catalog load.
 - **EV** (`synthetic/ev.py`): one session per site and local day (overnight 18:30 → 07:00, daytime 08:30 →

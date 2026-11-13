@@ -21,3 +21,4 @@ sites:
       - {kind: heat_pump, asset_id: hp-1, heat_loss_kw_per_k: 0.16, dhw_kwh_per_year: 2500}
       - {kind: bess, asset_id: bess-1, capacity_kwh: 10.0, p_max_kw: 5.0, eta: 0.95,
          soc_min_kwh: 1.0, soc_max_kwh: 9.5, control: ems}
+    net_billing: {first_feed_in: 2024-09-01, rce_from: null}   # RCE cohort (spec 009)

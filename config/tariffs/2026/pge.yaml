@@ -1,0 +1,92 @@
+# PGE Dystrybucja (DSO) and PGE Obrót (incumbent seller), groups G11, G12, G12w, 2026 (spec 009).
+# Net values; VAT, excise and the national fees are in national.yaml. Checked 2026-11-13.
+#   PGE Dystrybucja tariff 2026, annex to decision DRE.WRE.4211.50.7.2025.JTr of 2025-12-17, as
+#   reprinted by URE (Biuletyn Branżowy URE – Energia elektryczna Nr 269 (4799)); pages are the
+#   tariff's own ("Strona x z 66"), PDF page = tariff page + 2. One set of G rates for all areas.
+#   The quality fee follows PSE's change from 2026-02-01 under tariff pkt 7.10.1. From 2026-10-01 no
+#   subscription fee (Dz.U. 2026 poz. 1182 § 56 ust. 3).
+#   PGE Obrót tariff 2026, decision DRE.WRE.4211.55.10.2025.JTr (Biuletyn URE 267 (4797)).
+# PGE names the G12w zones "dzienna / nocna"; they map to peak / offpeak.
+dso: PGE
+operator:
+  name: PGE Dystrybucja
+  zones:
+    ref: "pkt 2.2.6 (G12, seasons), 2.2.8 (G12w), clock on winter time 2.2.11; tariff pp. 16–17"
+    G11: {default: all}
+    G12:
+      default: day
+      rules:
+        - {zone: night, days: [weekday, saturday, sunday, holiday], hours: [[15, 17], [22, 6]], season: ["04-01", "10-01"]}
+        - {zone: night, days: [weekday, saturday, sunday, holiday], hours: [[13, 15], [22, 6]], season: ["10-01", "04-01"]}
+    G12w:
+      default: peak
+      rules:
+        - {zone: offpeak, days: [saturday, sunday, holiday], hours: [[0, 24]]}
+        - {zone: offpeak, days: [weekday], hours: [[15, 17], [22, 6]], season: ["04-01", "10-01"]}
+        - {zone: offpeak, days: [weekday], hours: [[13, 15], [22, 6]], season: ["10-01", "04-01"]}
+  versions:
+    - id: pge-dystr-2026-01
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla usług dystrybucji energii elektrycznej PGE Dystrybucja S.A. na 2026 r. (decyzja DRE.WRE.4211.50.7.2025.JTr)"
+        url: "https://bip.ure.gov.pl/download/3/20345/PGEDystrybucja.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.3469, unit: PLN/kWh, ref: "pkt 7.9 Lp. 2, p. 59"}}
+          fixed_fee: {value: 9.98, unit: PLN/month, ref: "pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 4.50, unit: PLN/month, ref: "pkt 7.9 Lp. 4, p. 59, 1-month period"}
+        G12:
+          variable_fee:
+            day: {value: 0.4014, unit: PLN/kWh, ref: "pkt 7.9 Lp. 2, p. 59"}
+            night: {value: 0.0765, unit: PLN/kWh, ref: "pkt 7.9 Lp. 2, p. 59"}
+          fixed_fee: {value: 14.40, unit: PLN/month, ref: "pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 4.50, unit: PLN/month, ref: "pkt 7.9 Lp. 4, p. 59, 1-month period"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.4276, unit: PLN/kWh, ref: "pkt 7.9 Lp. 2, p. 59 (strefa dzienna)"}
+            offpeak: {value: 0.0845, unit: PLN/kWh, ref: "pkt 7.9 Lp. 2, p. 59 (strefa nocna)"}
+          fixed_fee: {value: 14.98, unit: PLN/month, ref: "pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 4.50, unit: PLN/month, ref: "pkt 7.9 Lp. 4, p. 59, 1-month period"}
+    - id: pge-dystr-2026-10
+      valid_from: 2026-10-01
+      source:
+        document: "Taryfa PGE Dystrybucja S.A. na 2026 r. with Dz.U. 2026 poz. 1182 § 56 ust. 3 (no subscription fee from 2026-10-01)"
+        url: "https://api.sejm.gov.pl/eli/acts/DU/2026/1182/text.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.3469, unit: PLN/kWh, ref: "tariff pkt 7.9 Lp. 2, p. 59"}}
+          fixed_fee: {value: 9.98, unit: PLN/month, ref: "tariff pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12:
+          variable_fee:
+            day: {value: 0.4014, unit: PLN/kWh, ref: "tariff pkt 7.9 Lp. 2, p. 59"}
+            night: {value: 0.0765, unit: PLN/kWh, ref: "tariff pkt 7.9 Lp. 2, p. 59"}
+          fixed_fee: {value: 14.40, unit: PLN/month, ref: "tariff pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.4276, unit: PLN/kWh, ref: "tariff pkt 7.9 Lp. 2, p. 59 (strefa dzienna)"}
+            offpeak: {value: 0.0845, unit: PLN/kWh, ref: "tariff pkt 7.9 Lp. 2, p. 59 (strefa nocna)"}
+          fixed_fee: {value: 14.98, unit: PLN/month, ref: "tariff pkt 7.9 Lp. 1, p. 59, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+seller:
+  name: PGE Obrót
+  versions:
+    - id: pge-obrot-2026
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla energii elektrycznej PGE Obrót S.A., grupy G, 2026 (decyzja DRE.WRE.4211.55.10.2025.JTr)"
+        url: "https://bip.ure.gov.pl/download/3/20342/PGEObrot.pdf"
+        checked: 2026-11-13
+      groups:
+        G11: {energy: {all: {value: 0.4982, unit: PLN/kWh, ref: "pkt 5, PDF p. 8 / tariff p. 6"}}}
+        G12:
+          energy:
+            day: {value: 0.5656, unit: PLN/kWh, ref: "pkt 5, PDF p. 8 / tariff p. 6"}
+            night: {value: 0.3718, unit: PLN/kWh, ref: "pkt 5, PDF p. 8 / tariff p. 6"}
+        G12w:
+          energy:
+            peak: {value: 0.5821, unit: PLN/kWh, ref: "pkt 5, PDF p. 8 / tariff p. 6 (strefa dzienna)"}
+            offpeak: {value: 0.4235, unit: PLN/kWh, ref: "pkt 5, PDF p. 8 / tariff p. 6 (strefa nocna)"}

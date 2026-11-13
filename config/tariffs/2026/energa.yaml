@@ -1,0 +1,87 @@
+# Energa-Operator (DSO) and Energa Obrót (incumbent seller), groups G11, G12, G12w, 2026 (spec 009).
+# Net values; VAT, excise and the national fees are in national.yaml. Checked 2026-11-13.
+#   Energa-Operator tariff 2026 (e-signed 2025-12-17; decision DRE.WPR.4211.9.8.2025.JSz, number from
+#   the operator's tariff page). From 2026-10-01 no subscription fee (Dz.U. 2026 poz. 1182 § 56 ust. 3).
+#   Energa Obrót tariff 2026, decision DRE.WPR.4211.8.9.2025.JSz (Biuletyn URE 270 (4800)).
+# Subscription: the 1-month rate for a remote-read meter (0.74), one global assumption of spec 009.
+dso: Energa
+operator:
+  name: Energa-Operator
+  zones:
+    ref: "pkt 3.2.5–3.2.6, p. 12; clock on winter time 3.2.10"
+    G11: {default: all}
+    G12:
+      default: day
+      rules:
+        - {zone: night, days: [weekday, saturday, sunday, holiday], hours: [[13, 15], [22, 6]]}
+    G12w:
+      default: peak
+      rules:
+        - {zone: offpeak, days: [saturday, sunday, holiday], hours: [[0, 24]]}
+        - {zone: offpeak, days: [weekday], hours: [[13, 15], [22, 6]]}
+  versions:
+    - id: energa-op-2026-01
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla usług dystrybucji energii elektrycznej ENERGA-OPERATOR SA na 2026 r."
+        url: "https://cdn-netpr.pl/file/mediakit/2933024/8/20251217_taryfa_2026.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.3485, unit: PLN/kWh, ref: "pkt 9.2, p. 41"}}
+          fixed_fee: {value: 11.77, unit: PLN/month, ref: "pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.74, unit: PLN/month, ref: "pkt 8, p. 39, 1-month period, remote-read meter"}
+        G12:
+          variable_fee:
+            day: {value: 0.3844, unit: PLN/kWh, ref: "pkt 9.2, p. 41"}
+            night: {value: 0.0827, unit: PLN/kWh, ref: "pkt 9.2, p. 41"}
+          fixed_fee: {value: 20.17, unit: PLN/month, ref: "pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.74, unit: PLN/month, ref: "pkt 8, p. 39, 1-month period, remote-read meter"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.4017, unit: PLN/kWh, ref: "pkt 9.2, p. 41 (strefa dzienna)"}
+            offpeak: {value: 0.0851, unit: PLN/kWh, ref: "pkt 9.2, p. 41 (strefa nocna)"}
+          fixed_fee: {value: 20.17, unit: PLN/month, ref: "pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.74, unit: PLN/month, ref: "pkt 8, p. 39, 1-month period, remote-read meter"}
+    - id: energa-op-2026-10
+      valid_from: 2026-10-01
+      source:
+        document: "Taryfa ENERGA-OPERATOR SA na 2026 r. with Dz.U. 2026 poz. 1182 § 56 ust. 3 (no subscription fee from 2026-10-01)"
+        url: "https://api.sejm.gov.pl/eli/acts/DU/2026/1182/text.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.3485, unit: PLN/kWh, ref: "tariff pkt 9.2, p. 41"}}
+          fixed_fee: {value: 11.77, unit: PLN/month, ref: "tariff pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12:
+          variable_fee:
+            day: {value: 0.3844, unit: PLN/kWh, ref: "tariff pkt 9.2, p. 41"}
+            night: {value: 0.0827, unit: PLN/kWh, ref: "tariff pkt 9.2, p. 41"}
+          fixed_fee: {value: 20.17, unit: PLN/month, ref: "tariff pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.4017, unit: PLN/kWh, ref: "tariff pkt 9.2, p. 41 (strefa dzienna)"}
+            offpeak: {value: 0.0851, unit: PLN/kWh, ref: "tariff pkt 9.2, p. 41 (strefa nocna)"}
+          fixed_fee: {value: 20.17, unit: PLN/month, ref: "tariff pkt 9.2, p. 41, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+seller:
+  name: Energa Obrót
+  versions:
+    - id: energa-obrot-2026
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla energii elektrycznej ENERGA OBRÓT SA, grupy G, 2026 (decyzja DRE.WPR.4211.8.9.2025.JSz)"
+        url: "https://bip.ure.gov.pl/download/3/20346/ENERGAOBROT.pdf"
+        checked: 2026-11-13
+      groups:
+        G11: {energy: {all: {value: 0.4968, unit: PLN/kWh, ref: "pkt 5.1, PDF p. 8 / tariff p. 6"}}}
+        G12:
+          energy:
+            day: {value: 0.5789, unit: PLN/kWh, ref: "pkt 5.1, PDF p. 8 / tariff p. 6"}
+            night: {value: 0.3753, unit: PLN/kWh, ref: "pkt 5.1, PDF p. 8 / tariff p. 6"}
+        G12w:
+          energy:
+            peak: {value: 0.6057, unit: PLN/kWh, ref: "pkt 5.1, PDF p. 8 / tariff p. 6 (strefa dzienna)"}
+            offpeak: {value: 0.3940, unit: PLN/kWh, ref: "pkt 5.1, PDF p. 8 / tariff p. 6 (strefa nocna)"}

@@ -1,0 +1,55 @@
+# PSE's published RCEm (rynkowa miesięczna cena energii elektrycznej), PLN/MWh net (spec 009).
+# Every publication of a month is kept with its date: billing uses the latest one (sellers re-settle
+# on a correction), and a strategy's signal uses only publications made before q's civil date.
+#   Definition: RES act art. 4b ust. 6–7 (feed-in-weighted mean of max(RCE, 0)).
+#   Corrections: Prawo energetyczne art. 11y ust. 1 pkt 7–8 as amended by Dz.U. 2024 poz. 1847
+#   art. 3 pkt 2 lit. a (re-published when the value moves by more than 2 %, from January 2025, art. 27).
+#   PSE footnote *: corrections are possible until the end of the 12th month after the priced month.
+# Status on 2026-11-13: 2025-10 is final; 2025-11 … 2026-10 may still be corrected.
+source:
+  document: "PSE, OIRE: RCEm – rynkowa miesięczna cena energii elektrycznej (tables 2025 and 2026, 'data publikacji')"
+  url: "https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej"
+  checked: 2026-11-13
+months:
+  - month: "2025-10"
+    publications:
+      - {value: 334.02, unit: PLN/MWh, published: 2025-11-11, ref: "table 2025, first publication"}
+      - {value: 340.84, unit: PLN/MWh, published: 2026-02-11, ref: "table 2025, correction 1 (+2.04 %)"}
+      - {value: 330.27, unit: PLN/MWh, published: 2026-10-11, ref: "table 2025, correction 2 (−3.10 %)"}
+  - month: "2025-11"
+    publications:
+      - {value: 382.88, unit: PLN/MWh, published: 2025-12-11, ref: "table 2025"}
+  - month: "2025-12"
+    publications:
+      - {value: 466.08, unit: PLN/MWh, published: 2026-01-11, ref: "table 2025"}
+  - month: "2026-01"
+    publications:
+      - {value: 551.96, unit: PLN/MWh, published: 2026-02-11, ref: "table 2026"}
+  - month: "2026-02"
+    publications:
+      - {value: 339.01, unit: PLN/MWh, published: 2026-03-11, ref: "table 2026, first publication"}
+      - {value: 331.39, unit: PLN/MWh, published: 2026-06-11, ref: "table 2026, correction (−2.25 %)"}
+  - month: "2026-03"
+    publications:
+      - {value: 191.95, unit: PLN/MWh, published: 2026-04-11, ref: "table 2026"}
+  - month: "2026-04"
+    publications:
+      - {value: 132.92, unit: PLN/MWh, published: 2026-05-11, ref: "table 2026"}
+  - month: "2026-05"
+    publications:
+      - {value: 191.37, unit: PLN/MWh, published: 2026-06-11, ref: "table 2026"}
+  - month: "2026-06"
+    publications:
+      - {value: 273.20, unit: PLN/MWh, published: 2026-07-11, ref: "table 2026"}
+  - month: "2026-07"
+    publications:
+      - {value: 262.88, unit: PLN/MWh, published: 2026-08-11, ref: "table 2026"}
+  - month: "2026-08"
+    publications:
+      - {value: 294.53, unit: PLN/MWh, published: 2026-09-11, ref: "table 2026"}
+  - month: "2026-09"
+    publications:
+      - {value: 345.68, unit: PLN/MWh, published: 2026-10-11, ref: "table 2026"}
+  - month: "2026-10"
+    publications:
+      - {value: 439.78, unit: PLN/MWh, published: 2026-11-11, ref: "table 2026"}

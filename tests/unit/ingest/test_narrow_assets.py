@@ -61,6 +61,11 @@ PLANT_ID_DIGEST = "25e142620b43047878d3cf8e90fbba199ce9d21788a9b17efc1985dbd94c3
 HOUSEHOLDS_SORTED_ROWS_DIGEST = "d6b8ea991dfb978e36e9303567a29185ac1698c8229c8230b40af77b85f71d4f"
 HOUSEHOLDS_SORTED_ID_DIGEST = "d9a9f9fdd47bc3251799b167991144c1517db72fbaeddda248ac8cd3d6034768"
 
+# Spec 009 (009/T01): 100 generated households (no overrides), with ``net_billing`` dropped. Pinned
+# on e39b4be before spec 009 added the field; every existing catalog value must stay the same
+# (AC-009-09).
+HOUSEHOLD_CATALOG_DIGEST = "cb6cf5fd14f41dea6a76aa0355498acce3a2f98137fd9bbb6bf97bc592bb676c"
+
 
 def _hash_rows(rows: Iterable[Any]) -> str:
     h = hashlib.sha256()
@@ -115,9 +120,22 @@ def _plants() -> list[Site]:
     return commercial + solar
 
 
+def _catalog_rows(sites: list[Site]) -> Iterable[dict[str, Any]]:
+    """Catalog rows without ``net_billing`` (spec 009), so the pinned digests keep their meaning."""
+    for s in sites:
+        row = s.model_dump(mode="json")
+        row.pop("net_billing", None)
+        yield row
+
+
+def test_ac_009_09_household_catalog_values_unchanged() -> None:
+    sites = build_catalog(100, catalog_seed=7, global_seed=4242, site_controlled_bess_share=0.5)
+    assert _hash_rows(_catalog_rows(sites)) == HOUSEHOLD_CATALOG_DIGEST
+
+
 def test_ac_005_07_commercial_and_solar_farms_unchanged() -> None:
     plants = _plants()
-    assert _hash_rows(s.model_dump(mode="json") for s in plants) == PLANT_CATALOG_DIGEST
+    assert _hash_rows(_catalog_rows(plants)) == PLANT_CATALOG_DIGEST
     day_sites = plants[:10] + plants[50:55]
     assert any(s.ev for s in day_sites) and all(s.pv for s in plants[50:55])
     digest = _hash_rows(_event_rows(day_sites, GeneratorConfig(emit_registers=True)))
@@ -202,14 +220,16 @@ def test_ac_005_02_removed_asset_kinds_rejected(asset: dict[str, Any], tmp_path:
     site = _test_site()
     site["assets"] = [*site["assets"], asset]
     path = tmp_path / "sites.yaml"
-    path.write_text(json.dumps({"sites": [site]}))
+    path.write_text(json.dumps({"sites": [site]}, default=str))
     with pytest.raises(ValidationError):
         load_overrides(path, 4242)
 
 
 def test_ac_005_02_removed_site_type_rejected(tmp_path: Path) -> None:
     path = tmp_path / "sites.yaml"
-    path.write_text(json.dumps({"sites": [dict(_test_site(), site_type="industrial")]}))
+    path.write_text(
+        json.dumps({"sites": [dict(_test_site(), site_type="industrial")]}, default=str)
+    )
     with pytest.raises(ValidationError):
         load_overrides(path, 4242)
 

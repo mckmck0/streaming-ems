@@ -1,0 +1,90 @@
+# Enea Operator (DSO) and Enea S.A. (incumbent seller), groups G11, G12, G12w, 2026 (spec 009).
+# Net values; VAT, excise and the national fees are in national.yaml. Checked 2026-11-13.
+#   Enea Operator tariff 2026, decision DRE.WRE.4211.52.11.2025.TG of 2025-12-17: extracts for
+#   Jan–Sep and Oct–Dec (the latter implements Dz.U. 2026 poz. 1182 § 56 ust. 3: no subscription fee).
+#   Enea S.A. tariff 2026, decision DRE.WRE.4211.51.8.2025.TG (Biuletyn URE 266 (4796)).
+# Assumption: G12 night hours. The tariff lets the operator place 2 h within 13–17 and 8 h within
+# 22–7 ("Godziny zegarowe trwania stref czasowych określa Operator", 2.2.7); 13–15 and 22–6 is the
+# default on Enea's product page, checked again 2026-11-13 (risk D12).
+dso: Enea
+operator:
+  name: Enea Operator
+  zones:
+    ref: "pkt 2.2.5 (G12w), 2.2.7 (G12, hours assumed), clock on winter time 2.2.12"
+    G11: {default: all}
+    G12:
+      default: day
+      rules:
+        - {zone: night, days: [weekday, saturday, sunday, holiday], hours: [[13, 15], [22, 6]]}
+    G12w:
+      default: peak
+      rules:
+        - {zone: offpeak, days: [saturday, sunday, holiday], hours: [[0, 24]]}
+        - {zone: offpeak, days: [weekday], hours: [[21, 6]]}
+  versions:
+    - id: enea-op-2026-01
+      valid_from: 2026-01-01
+      source:
+        # The file name reads 01022026-31122026; its header says 1 January – 30 September 2026.
+        document: "Wyciąg z Taryfy Enea Operator Sp. z o.o. na 2026 r., obowiązuje 1 stycznia – 30 września 2026 r."
+        url: "https://www.operator.enea.pl/media/3988/enea-operatorwyciag-z-taryfy01022026-31122026pdf.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.2456, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}}
+          fixed_fee: {value: 10.41, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 3.84, unit: PLN/month, ref: "pkt 7.3, p. 7, 1-month period"}
+        G12:
+          variable_fee:
+            day: {value: 0.2779, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+            night: {value: 0.0913, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+          fixed_fee: {value: 14.56, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 3.84, unit: PLN/month, ref: "pkt 7.3, p. 7, 1-month period"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.2702, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+            offpeak: {value: 0.0813, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+          fixed_fee: {value: 26.23, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 3.84, unit: PLN/month, ref: "pkt 7.3, p. 7, 1-month period"}
+    - id: enea-op-2026-10
+      valid_from: 2026-10-01
+      source:
+        document: "Wyciąg z Taryfy Enea Operator Sp. z o.o. na 2026 r., obowiązuje od 1 października 2026 r. do 31 grudnia 2026 r."
+        url: "https://www.operator.enea.pl/media/5191/enea-operatorwyciag-z-taryfy01102026-31122026pdf.pdf"
+        checked: 2026-11-13
+      groups:
+        G11:
+          variable_fee: {all: {value: 0.2456, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}}
+          fixed_fee: {value: 10.41, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "pkt 7.3, p. 7, footnote **; Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12:
+          variable_fee:
+            day: {value: 0.2779, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+            night: {value: 0.0913, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+          fixed_fee: {value: 14.56, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "pkt 7.3, p. 7, footnote **; Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+        G12w:
+          variable_fee:
+            peak: {value: 0.2702, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+            offpeak: {value: 0.0813, unit: PLN/kWh, ref: "pkt 7.2, p. 6"}
+          fixed_fee: {value: 26.23, unit: PLN/month, ref: "pkt 7.2, p. 6, 3-phase"}
+          subscription_fee: {value: 0.0, unit: PLN/month, ref: "pkt 7.3, p. 7, footnote **; Dz.U. 2026 poz. 1182 § 56 ust. 3"}
+seller:
+  name: Enea S.A.
+  versions:
+    - id: enea-sa-2026
+      valid_from: 2026-01-01
+      source:
+        document: "Taryfa dla energii elektrycznej Enea S.A., grupy G, 2026 (decyzja DRE.WRE.4211.51.8.2025.TG)"
+        url: "https://bip.ure.gov.pl/download/3/20341/Enea.pdf"
+        checked: 2026-11-13
+      groups:
+        G11: {energy: {all: {value: 0.4980, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 7"}}}
+        G12:
+          energy:
+            day: {value: 0.5779, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 7"}
+            night: {value: 0.3369, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 7"}
+        G12w:
+          energy:
+            peak: {value: 0.6518, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 7"}
+            offpeak: {value: 0.3465, unit: PLN/kWh, ref: "pkt 5, PDF p. 9 / tariff p. 7"}
