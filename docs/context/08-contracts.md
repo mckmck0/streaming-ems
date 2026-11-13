@@ -78,8 +78,11 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   Open-Meteo availability delay plus Open-Meteo's recommended 10-minute wait, rounded up to a quarter-hour: when a
   run was publicly usable (a live poller can only be later). It was a flat 90 min before spec 008, up to 27 min early
   for real ICON-D2 runs.
-- One pure function maps measurement events to the domain observation `{t, pv_kw, load_kw}` and is shared with the
-  offline reference. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place.
+- One pure function maps measurement events to the domain inputs (per quarter-hour PV and load energy and RCE; the
+  policy's `Observation` is a domain type defined in `12-domain-model.md`, not a wire message) and is shared with
+  the offline reference. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place,
+  `ems.domain.units.pln_per_mwh_to_pln_per_kwh`. Tariff, RCEm and catalog config (`config/tariffs/`,
+  `Site.net_billing`) are not part of the wire contract (spec 009).
 - Run scoping: with `run_id` set, keys are `run_id:location_id` (fresh Virtual Object state per run).
 
 ## What to build

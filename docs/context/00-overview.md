@@ -26,7 +26,8 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Simplified scope: one Kafka broker, optional Helm and LLM strategy, results from Restate state (spec 006) | Built |
 | Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
 | Historical backfill on real data: fetch once, build offline, replay; window 2026-04-02 … 06-30 fetched (spec 008) | Built |
-| Dev environment beyond Kafka, spike reproduction, domain core, actors, sim clock, … | Documented in the brief only |
+| Domain core: 2026 tariffs of four DSOs, hourly net-billing settlement with the deposit, price signal, actions, `Policy`, offline reference and stepper (spec 009) | Built |
+| Dev environment beyond Kafka, spike reproduction, actors, sim clock, … | Documented in the brief only |
 | `frontend/` | Reserved, out of scope |
 
 ### Decisions so far (not yet in an ADR)
@@ -68,6 +69,16 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     around a history recording.
   - Not DMI everywhere: at Poznań ICON-D2's GHI error was 11–19 % lower and its 15-minute radiation native
     (spec 008 plan §3).
+- 2026-11-13 (spec 009): the domain core, written in parallel with spec 008.
+  - Settlement follows the 2026 bill: G11/G12/G12w of Enea, Energa, PGE and Tauron with their incumbent sellers,
+    sourced config per version (`config/tariffs/`); hourly vector-balanced net-billing with RCE or RCEm by first
+    feed-in and the deposit (1.23, m+1 assignment, energy-only offset, 12 months, refund cap before 1.23).
+  - Brief §5.2 changes: `Tariff` stays keyed by market and serves price curves only; per-site tariff rules come
+    from config through `ems.tariffs` and the domain functions. `Meter` calls `settle_quarter` only.
+  - Cost metric: `bill_pln` primary, `deposit_closing_pln` beside it, `ledger_net_cost_pln` for additive statistics
+    (11).
+  - The action set gains `SELF_CONSUME` (the self-consumption baseline); the dynamic (day-ahead) tariff is dropped
+    for now.
 
 ### Repo map (current and planned)
 
@@ -75,9 +86,10 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 CLAUDE.md, .claude/          harness (rules, skills, agents, hooks)
 specs/NNN-*/                 feature specs (spec.md, plan.md, tasks.md)
 docs/context/                canonical docs (this folder); docs/adr/ decisions; docs/bootstrap/ frozen brief
-src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery), actors/,
+src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery, tariffs,
+                             settlement, actions, reference), tariffs/ (tariff config loader), actors/,
                              strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
-config/, mappings/, schemas/ generator config, live-source mappings, exported JSON Schemas (specs 001–005)
+config/, mappings/, schemas/ generator and tariff config, live-source mappings, exported JSON Schemas
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka now, Restate later), Dockerfiles
 helm/ems/                    umbrella chart (optional spec)
@@ -99,9 +111,9 @@ templates/                   bootstrap templates; frontend/ reserved
 | 6 | **006 Simplify scope** | Remove the 3-broker profile (one broker everywhere); Helm and LLM strategy optional; results from Restate state |
 | 7 | **007 Realistic generator data** | Forecast errors shared by consecutive runs with timing errors; two-timescale log noise and appliance impulses in base load, daily factor on the local day, WPuQ fit; hybrid truth deviates from live forecasts (L5) |
 | 8 | **008 Historical backfill on real data** | Fetch once, build offline, replay: PSE RCE, archived ICON-D2/DMI runs (Single Runs API), satellite and ERA5 truth behind the spec 007 seam; per-model forecast availability; replay preflight and `--background`; forecast-error candidate. Window 2026-04-02 … 06-30 (spring, no winter) |
+| 9 | **009 Domain core** | 2026 purchase tariffs (four DSOs, G11/G12/G12w) and zone calendar, hourly net-billing ledger and monthly bill with the deposit, RCE/RCEm by cohort, price signal, actions and `Policy` with NoBattery and SelfConsumption, offline reference bit-identical to an incremental stepper |
 | next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
 | next | Dev environment and spike reproduction | Restate in compose, test tiers, spike experiments A–C (brief §11, former 001) |
-| next | Domain core | Battery model, settlement with RCE/RCEm options, actions, `Policy`, offline reference |
 | next | Actor skeleton; sim clock and replay driver | Brief §11 |
 | later | Forecasting, MPC and oracle, adaptive Selector, experiment harness (results exported from Restate state) | Brief §11 |
 
