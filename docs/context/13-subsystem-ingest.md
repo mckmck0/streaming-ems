@@ -97,7 +97,7 @@ now, wall-clock pacing). Wall time is used only for pacing and `ingested_at`.
 ### Facts owned (single writer)
 
 `ems-gen` is the only writer of the external inputs: weather forecasts, metered production/consumption of
-uncontrolled assets, and prices. These rows move into `01-architecture.md` when the actor spec writes it.
+uncontrolled assets, and prices. The single-writer table is in `01-architecture.md`.
 
 ### Live sources, routing, record and replay (spec 002)
 
@@ -334,7 +334,10 @@ balance.
 
 ## What to build
 
-- Ingestion spec (Plan 2): consume these topics into Restate.
+- Stages 2 and 3 (`01-architecture.md`): consume these topics into Restate through the Kafka ingress
+  integration, then join and order them per household (ADR 0017). Stage 3 adds the schedule constants (forecast
+  run cadence, price publication window) to `ems.contracts.availability` with a test of the generator against
+  them; stage 4 adds pacing for history replays.
 - Later, if needed: weather-cell keyed forecasts (G6), DSO standard profiles for C-tariff shapes.
 
 ## Prerequisites

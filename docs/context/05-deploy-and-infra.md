@@ -71,11 +71,22 @@ changed `after.max.ms` to 1 h (KIP-1030) and time-based retention deletes old-ti
 | demandlib | 0.2.2 | 2025-04-09 | pypi.org/project/demandlib |
 | holidays | 0.105 | 2026-09-21 | pypi.org/project/holidays |
 | httpx / tenacity / lxml / respx (spec 002) | 0.28.1 / 9.1.4 / 6.1.3 / 0.23.1 | 2024-12-06 / 2026-02-07 / 2026-09-02 / 2026-04-08 | pypi.org |
-| restate-server (later) | 1.7.13 (`restatedev/restate:1.7.13-20261005@sha256:65abc8016d40…`) | 2026-10-01 | github.com/restatedev/restate |
+| restate-server (stage 2; verified 2026-11-14) | 1.8.1-hotfix.2 (`restatedev/restate:1.8.1-hotfix.2-20261102`, index digest `sha256:e3a11e7c694cfe0c134eca1652992c068bef0bcba3caeec9d2a3b3bc50daa62e`) | 2026-11-02 | github.com/restatedev/restate/releases, hub.docker.com/r/restatedev/restate |
+| Kafka ingress integration (stage 2; verified 2026-11-14) | v0.1.0, its only release (`ghcr.io/restatedev/ingress-integration-kafka`; exact tag and digest VERIFY, the docs show `latest`) | 2026-10-15 | github.com/restatedev/ingress-integration-kafka |
+
+### Restate (decided 2026-11-14, pinned in stage 2)
+
+- Restate 1.8.1-hotfix.2 replaces the 1.7.13 named earlier: the Kafka ingress integration needs 1.8.1 or later,
+  and Restate's in-server Kafka subscriptions are not used (`00-overview.md`, K6).
+- The hotfix has no release notes and is not marked Latest. Its 26 commits over 1.8.1 (GitHub compare API,
+  read 2026-11-14) are CI changes, dependency bumps for security advisories, a CLI change and one opt-in VQueues
+  option that removes orphaned active markers (risk A5). It is two weeks old on 2026-11-16.
+- The plain `1.8.1` tag is re-pushed weekly (last 2026-11-09), so pins use a dated tag plus digest.
 
 ## What to build
 
-- Dev-environment spec: Restate in the same compose project, `make register`, e2e/fault tiers and coverage.
+- Stage 2 (brief in `01-architecture.md`): Restate and the Kafka ingress integration in the same compose
+  project, `make register`, e2e/fault tiers and coverage.
 - Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Scale
   experiments run on Docker Compose.
 

@@ -5,8 +5,10 @@ paths:
 
 # Actor adapters (`src/ems/actors/`)
 
-Actors are thin Restate Virtual Objects (Python SDK 1.0.x) over the domain core. Before changing a handler,
-message, timer or state ownership, invoke the `ems-actor-contract` skill and update `docs/context/08-contracts.md`.
+Actors are thin Restate Virtual Objects (Python SDK, pinned in stage 2) over the domain core. The actors, their
+edges and the time and ordering model are in `docs/context/01-architecture.md` (ADR 0017). Before changing a
+handler, message, timer or state ownership, invoke the `ems-actor-contract` skill and update
+`docs/context/08-contracts.md`.
 
 - Handler shape: validate the message → call the domain → write only this actor's own state → send messages.
   No business logic in handlers.
@@ -17,11 +19,17 @@ message, timer or state ownership, invoke the `ems-actor-contract` skill and upd
 - R3: everything non-deterministic or external goes through the journal: `ctx.run_typed` / `ctx.run` for
   HTTP, model inference and solver calls, `ctx.time()`, `ctx.random()` and `ctx.uuid()` for time and randomness.
 - Async-first: no blocking call on the event loop. Offload CPU-bound or blocking work inside `ctx.run` to a
-  bounded executor. Never `time.sleep` or `ctx.sleep` inside an exclusive handler (R5); schedule with
-  `send_delay` (live mode) or a virtual timer in state (sim mode, principle 7).
-- R4: idempotent ingress, keyed by household; Kafka record key = household id.
+  bounded executor. Never `time.sleep` or `ctx.sleep` inside an exclusive handler (R5). In sim mode, wait by
+  buffering in state until the input watermarks pass; a scheduled action is data fired at its step. Wall-clock
+  deadlines with `send_delay` exist only in live mode (principle 7).
+- Ordering: release a step only when the watermarks of all its input streams cover it. Judge lateness and
+  duplicates inside the record's own stream, never by arrival time or the Kafka record timestamp.
+- R4: idempotent ingress. Restate deduplicates redelivered Kafka records and a handler's own sends; the slot
+  table in state drops an event published twice (`event_id` per stream and `t`). Kafka record key = household
+  key. A handler fed from Kafka must not raise on bad data, because a retried record would block its key: it
+  counts the record and returns. Whether that needs raw-bytes input is VERIFY until stage 2 (V2, V3 in 01).
 - R6: self-rescheduling jobs carry a generation number and stale chains stop themselves.
-- R7: every message carries `schema_version`, `t` and a sim timestamp; receivers check monotonicity and
-  count violations instead of failing.
+- R7: every message carries `schema_version`, `t` and a sim timestamp; receivers apply messages in `t` or
+  sequence order, hold back early ones, and count every reordering instead of failing.
 - Messages are versioned and additive within a major version; breaking changes need a new version, an ADR
   and refreshed golden replay examples.

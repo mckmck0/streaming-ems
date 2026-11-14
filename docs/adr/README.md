@@ -23,6 +23,7 @@ a new ADR that supersedes the old one, and `docs/context/` is updated in the sam
 | 0014 | [No simulation of EMS-managed batteries](0014-no-simulation-of-ems-managed-batteries.md) | Accepted |
 | 0015 | [Wire contract v1 identity and run scope](0015-wire-contract-v1-identity.md) | Accepted |
 | 0016 | [PV prosumers only; wire contract v1 frozen](0016-pv-only-generator-and-v1-freeze.md) | Accepted |
+| 0017 | [Per-household event-time watermarks order the actors' inputs](0017-per-household-event-time-ordering.md) | Accepted |
 
 ## Template
 

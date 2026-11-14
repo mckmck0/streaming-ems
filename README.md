@@ -177,10 +177,11 @@ make test-integration  # tests against the real stack; run `make up` first
 ### Start the engine (TBD)
 
 **Not available yet.** The EMS engine (Restate server, the Python service with the household, battery and
-strategy actors, the Kafka subscriptions that feed it from the topics above) has not been built. It is next in the
-backlog in [docs/context/00-overview.md](docs/context/00-overview.md): first the Kafka ingestion into Restate,
-then the dev environment, the domain core and the actors. This section will hold the start commands (the
-planned `make` targets for it are listed, commented out, at the bottom of the [Makefile](Makefile)).
+strategy actors, the Kafka ingress that feeds it from the topics above) has not been built. Its design is in
+[docs/context/01-architecture.md](docs/context/01-architecture.md), and it is next in the backlog in
+[docs/context/00-overview.md](docs/context/00-overview.md): first Restate with the Kafka ingress, then the
+actors. This section will hold the start commands (the planned `make` targets for it are listed, commented
+out, at the bottom of the [Makefile](Makefile)).
 
 Until then, the generated topics are the engine's input. Everything an engine needs to consume them is in
 [Data](#data): the topics, keys, event format and the rules for consumers.

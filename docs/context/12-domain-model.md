@@ -204,14 +204,22 @@ bill differs (D2):
 - Each quarter keeps the signal price the policy saw and the export price the ledger used, so an RCEm month never
   values export at the lagged price. Results record the operator, seller and quality-fee ids, the RCEm entries
   used (source and publication date) and the cohort (P14).
-- Notes for the actor spec: `Tariff` stays keyed by market (ADR 0012) and serves price curves; per-site tariff
-  rules come from `config/tariffs/` through `ems.tariffs`. `Meter` owns the real bill and calls only
-  `settle_quarter` (`Battery` owns the real SoC, ADR 0014); each `Strategy_*` runs `stepper.step` on its virtual
-  battery. A mode action resolves where q's measurement arrives, so the command to `Battery` carries the `Action`.
-  State per object: the open hour (≤ 3 quarters), the open month's rows (≤ 745) and the tranches (≤ 13). For an
-  RCEm site, month m's payable can close at the boundary but its tranche only once PSE publishes m's RCEm (the 11th
-  of m+1); live, close on publication and ignore later corrections, while the offline reference uses the
-  corrected table. Live RCEm is a market price on `Tariff` (brief §5.2), not a config edit.
+- Notes for the actor stages (design in `01-architecture.md`, ADR 0017):
+  - `Tariff` stays keyed by market (ADR 0012) and pushes price curves to households as one-way messages; per-site
+    tariff rules come from `config/tariffs/` through `ems.tariffs`.
+  - `Meter` owns the real bill and settles with `settle_quarter` (`Battery` owns the real SoC, ADR 0014); each
+    strategy runs `stepper.step` on its virtual battery. A mode action resolves where q's measurement arrives, so
+    the command to `Battery` carries the `Action`. State per object: the open hour (≤ 3 quarters), the open
+    month's rows (≤ 745) and the tranches (≤ 13).
+  - Both functions close an hour on its fourth quarter and reject an out-of-order `t`. A late reading that
+    corrects the settlement of an hour already closed (ADR 0017) therefore needs a domain addition; OPEN until
+    stage 3, which also splits `reference.quarter` into its decide and apply halves for `Ems` and `Battery`.
+  - The RCEm table is a run parameter read as config, by the actors and the offline reference alike: PSE values
+    for a real-data run, the proxy table for a synthetic run. Both sides therefore value a month's export with
+    the same entry, and results compare with `==`.
+  - In live mode a month's tranche can only be created once PSE publishes that month's RCEm (the 11th of m+1).
+    How a newly published value reaches running actors is OPEN (01): it needs a new event, which is wire
+    contract.
 
 ### Battery (brief §4 spike defaults; `src/ems/domain/battery.py`, spec 003)
 
@@ -230,8 +238,8 @@ fuse ≤ 63 A, otherwise C21 (not settled). Metering points (PPE) are 18-digit G
 ## What to build
 
 - Built by spec 009: tariffs, settlement, price signal, actions, `Policy`, offline reference and stepper.
-- Next: the actor skeleton calls `settle_quarter` and `stepper.step` (notes above); the experiment harness reports
-  the cost metric of `11-experiments.md`.
+- Next: stage 3 (the actor skeleton) calls `settle_quarter` and `stepper.step` and adds the correction of late
+  readings (notes above); stage 4's export reports the cost metric of `11-experiments.md`.
 
 ## Prerequisites
 

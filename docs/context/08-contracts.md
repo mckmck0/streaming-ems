@@ -63,14 +63,20 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 - Values are UTF-8 JSON, no registry prefix, < 900,000 bytes with key and headers.
 - Two measurement topics (ADR 0013): production and consumption arrive as two records per location and `t`.
 
-### Handoff to the Kafka-ingestion spec (Plan 2)
+### Handoff to the actor stages (`01-architecture.md`)
 
-- Restate 1.7.13 legacy Kafka subscriptions: record key → Virtual Object key (must be UTF-8; never null on these
-  topics), value bytes → handler input. Record headers are **not** forwarded (only `kafka.timestamp`,
-  `kafka.offset`, `kafka.partition`, `kafka.key`, …). Offsets are deduplicated, but no idempotency key can be set
-  from a record: dedup by `event_id` in object state. Create subscriptions with `auto.offset.reset: earliest` and a
-  stable `group.id`. The standalone ingress (`ingress-integration-kafka`) needs Restate ≥ 1.8.1.
-- Join production and consumption per `(location, t)`; there is no cross-topic ordering.
+- Kafka reaches Restate only through the standalone Kafka ingress integration (Restate ≥ 1.8.1;
+  <https://docs.restate.dev/services/integrations/kafka>, checked 2026-11-14): record key → Virtual Object key
+  (must be UTF-8; never null on these topics), value → JSON handler input, one container per target handler (it
+  may consume several topics), a stable consumer group id. The handler sees `kafka.topic`, `kafka.partition`,
+  `kafka.offset` and `kafka.timestamp`; forwarding of record headers is not documented, so the JSON value stays
+  self-contained (K6). Restate deduplicates a redelivered record by consumer group, topic, partition and offset.
+  Restate's in-server Kafka subscriptions are documented as old and due for removal and are not used.
+- Dedup by slot (stream, `t`) in object state: an identical `event_id` is ignored, different content for the same
+  slot is a revision. No idempotency key is taken from a record.
+- Join production and consumption per `(location, t)` by the watermark rules of ADR 0017; there is no cross-topic
+  ordering. Actors order by the event's own `t` and `available_at`, never by the Kafka record timestamp, so
+  CreateTime = event time stays the timestamp policy (this closes the former open question).
 - Availability rule: a strategy at step `t` sees only data whose `available_at ≤ t` (meters: interval end;
   forecasts: `issued_at` + the delay of `payload.forecast_model`; prices: publication time). One table,
   `ems.contracts.availability` (spec 008), used by the generator's emission, the history build and consumers:
@@ -78,17 +84,24 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   Open-Meteo availability delay plus Open-Meteo's recommended 10-minute wait, rounded up to a quarter-hour: when a
   run was publicly usable (a live poller can only be later). It was a flat 90 min before spec 008, up to 27 min early
   for real ICON-D2 runs.
+- Schedule constants for the watermarks of the sparse streams (ADR 0017) join the same module in stage 3: the run
+  cadence per `forecast_model` and the opening of the price publication window (13:00 local on D−1). They are
+  code, not wire contract, and the generator is tested against them.
 - One pure function maps measurement events to the domain inputs (per quarter-hour PV and load energy and RCE; the
   policy's `Observation` is a domain type defined in `12-domain-model.md`, not a wire message) and is shared with
   the offline reference. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place,
   `ems.domain.units.pln_per_mwh_to_pln_per_kwh`. Tariff, RCEm and catalog config (`config/tariffs/`,
   `Site.net_billing`) are not part of the wire contract (spec 009).
-- Run scoping: with `run_id` set, keys are `run_id:location_id` (fresh Virtual Object state per run).
+- Run scoping: with `run_id` set, keys are `run_id:location_id` (fresh Virtual Object state per run). Actors read
+  `run_id` from the event, never from the key (market keys contain `:`).
+- Messages between actors are internal Restate messages, not wire contract: versioned models that carry
+  `schema_version`, `t` and the sim timestamp (R7). Any new Kafka topic or event is wire contract (ADR 0016).
 
 ## What to build
 
-- Initial actor contracts (tick, step result, ranking, selection, command, SoC ack, energy flows, result Parquet,
-  run summary, strategy registry entry) with the actor-skeleton spec.
+- The internal actor messages of `01-architecture.md` (`Step`, `PriceUpdate`, `ForecastUpdate`, `Subscribe`,
+  `Apply`, `Ack`, `Flows`) with stage 3; the result Parquet and run summary with stage 4; ranking and selection
+  with stage 6.
 - Results leave Restate through an export CLI that reads Virtual Object state after a run and writes the result
   Parquet and run summary (spec 006 decision). There is no Kafka result (egress) topic in v1.
 
@@ -98,8 +111,6 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 
 ## Open questions
 
-- OPEN (ingestion spec): Kafka record timestamp policy if handlers need wall-clock order (CreateTime = event time
-  is the default).
 - OPEN (spec 003): forecast volume at 100k sites (tens of GB/day); a weather-cell key may be added additively.
-- OPEN (ingestion spec): consumer behaviour for a `forecast_model` missing from the availability table (producers
+- OPEN (stage 3): consumer behaviour for a `forecast_model` missing from the availability table (producers
   refuse it); for example the most conservative delay plus a counter.
