@@ -14,12 +14,12 @@ Read only the docs the task needs, usually one to three, not the whole folder. E
 | The task touches | Read |
 |---|---|
 | Orientation, status of each piece, repo map, backlog, decisions so far | `00-overview.md` |
-| Actors, keys, who owns which fact, the message diagram | `01-architecture.md` |
-| Restate services and handlers, R1–R7, registration, Kafka ingress | `02-subsystem-actors.md` |
-| Strategies, shadow vs live, Evaluator, Selector | `03-subsystem-strategies-and-evaluation.md` |
-| Forecasters, MILP/MPC, the oracle | `04-subsystem-forecasting-and-optimization.md` |
+| Actors, keys, who owns which fact, the message diagram, ordering across topics (watermarks, late records), the brief for each remaining stage | `01-architecture.md` |
+| Restate services and handlers, R1–R7, registration, Kafka ingress | `02-subsystem-actors.md` (planned, stages 2 and 3; until then `01-architecture.md`) |
+| Strategies, shadow vs live, Evaluator, Selector | `03-subsystem-strategies-and-evaluation.md` (planned, stages 5 and 6) |
+| Forecasters, MILP/MPC, the oracle | `04-subsystem-forecasting-and-optimization.md` (planned, stage 5) |
 | uv/pyproject, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions | `05-deploy-and-infra.md` |
-| Tick, live loop, replay and sim clock, failure and recovery, timers | `06-data-flows.md` |
+| Emission schedule, generator clock modes, record and replay, faults, the live loop and timers | `06-data-flows.md` |
 | Any plan, review or design decision | `07-design-principles.md` |
 | Message schemas, Kafka topics, result schemas, versioning | `08-contracts.md` |
 | Known issues, pitfalls, risks and their fix hints | `09-risks-and-tech-debt.md` |

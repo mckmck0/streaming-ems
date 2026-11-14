@@ -19,7 +19,7 @@ which test or review shows it?
 | P3 | Does every new or changed fact have exactly one writer? Is the ownership table in 01 updated? |
 | P4 | Draw the call graph. Is any exclusive handler reached by request-response? Does any wait-for cycle exist? |
 | P5 | Is every blocking, CPU-heavy or non-deterministic call inside `ctx.run` and offloaded? |
-| P6 | Idempotency keys at ingress? Side effects journaled? A bit-exact replay test against the offline reference? |
+| P6 | Idempotent ingress (Kafka offsets, slot dedup by `event_id`, `Idempotency-Key` on control calls)? Side effects journaled? Does any result depend on arrival order across topics or actors (ADR 0017)? A bit-exact replay test against the offline reference? |
 | P7 | Is sim-mode logic free of wall-clock timers? Do live-mode timers use delayed messages? |
 | P8 | Does the Battery actor still clamp or reject infeasible commands? |
 | P9 | Are contract changes versioned and additive? (section 2) |
@@ -35,14 +35,17 @@ which test or review shows it?
 
 Source: `docs/context/08-contracts.md`.
 
-- Which contracts change: measurement event, tick, step result, ranking, selection, command, SoC ack,
-  energy flows, per-step result Parquet, run summary, strategy registry entry?
+- Which contracts change: a wire event (measurement, forecast, price), an internal actor message (`Step`,
+  `PriceUpdate`, `ForecastUpdate`, `Subscribe`, `Apply`, `Ack`, `Flows`; later ranking and selection), the
+  per-step result Parquet or the run summary? A new Kafka topic or event is wire contract (ADR 0016).
 - Within a major version changes are additive only. Renaming or removing a field means a new version (and
   a new Kafka topic), an ADR, coordinated updates of all producers and consumers, and refreshed golden
   examples in the replay tests.
-- Every message and Kafka record carries `schema_version`, `t` and a sim timestamp; the ingress
-  idempotency key follows the documented format.
-- Kafka record key = household id, so per-household order holds within a partition.
+- Every message and Kafka record carries `schema_version`, `t` and a sim timestamp. No idempotency key is
+  taken from a Kafka record: duplicates are dropped by slot and `event_id` in actor state (01); control calls
+  through HTTP ingress carry an `Idempotency-Key`.
+- Kafka record key = household key (`[run_id:]location_id`), so per-household order holds within a partition.
+  Nothing may depend on order across topics or between actors (ADR 0017).
 
 ## 3. Risks
 

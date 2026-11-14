@@ -47,15 +47,43 @@ With faults on, a duplicate is the identical record published twice, a late reco
 but arrives up to `late_max` after newer intervals of its key, and a missing record never arrives. Downstream
 consumers must deduplicate by `event_id` and tolerate out-of-order intervals per key.
 
-### EMS (later specs)
+### EMS: time and ordering (ADR 0017; designed, built from stage 3)
 
-Sim mode advances on event timestamps with virtual timers in entity state; live mode uses durable delayed
-messages (brief §5.5, principle 7). The ingestion spec joins the two measurement topics per `(location, t)` and
-applies the availability rule in `08-contracts.md`.
+Kafka gives an order inside one topic partition and none across topics, and in a backfill each topic is consumed
+at its own speed. So each household orders its own inputs by event time; the full model is in
+`01-architecture.md`.
+
+- **Watermarks.** Every input stream of a household (production, consumption, prices through `Tariff`, forecasts
+  through `Weather`) has a watermark: everything a step ending at or before it may read from that stream has
+  arrived or is declared missing. A quarter-hour step is released, in order from the run's first step (a run
+  parameter on a UTC hour), only when the watermarks of all needed streams are at or past its end. There is no
+  global clock, barrier or replay driver.
+- **Where watermarks come from in sim:** the stream's content and the emission schedule above, never the wall
+  clock. A meter slot closes when its record is there or its stream is `L` slots past it; a forecast run moves
+  the watermark to its availability plus the run cadence; the curve of a new delivery day moves it to 13:00
+  local on that day, when the next publication window opens. A step that starts at a sparse stream's watermark
+  waits for that stream's next record; a missing forecast run makes the household wait for the run after it.
+- **Join.** Step `q` needs the production and consumption records of `q` (consumption only for a site without
+  PV), the price of `q`, and the forecast run visible at its start (`08-contracts.md`, availability rule).
+- **Late and missing readings.** A step waits `L` slots (default 8) of the reading's own stream, then runs on
+  an estimate flagged `estimated`. A reading up to `2L` late corrects the settlement of its hour and never a
+  decision, the executed battery power or the SoC; later ones are dropped and counted. With the default `L`
+  equal to the generator's `late_max`, every late reading of a `--faults` run is waited for; corrections and
+  drops appear only at a smaller `L`.
+- **Duplicates** are dropped by slot (stream, `t`) and `event_id` in actor state.
+- **The real loop.** `Ems` decides step `t` only after `Battery` acknowledged `t−1`, so the decision uses the
+  real SoC and never a stale view.
+- **Live mode** runs the same rules; one durable wall-clock timer per household raises the watermarks to "now
+  minus a grace period" (P7). Scheduled actions are data in state, fired at their step in both modes.
+- **Pacing.** Results never depend on publication speed, but buffers grow with the skew between a household's
+  inputs. Large backfills are published in `accelerated` mode (risk A1).
+- **End of a run.** No marker: steps the rules cannot release stay unreleased, in the actors and on the offline
+  side alike, so a run can stop mid-hour.
 
 ## What to build
 
-- Sim clock and replay driver for the actors (later spec).
+- The assembler and the actors (stage 3), the live timer and pacing for history replays (stage 4); briefs in
+  `01-architecture.md`.
 
 ## Prerequisites
 

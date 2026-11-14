@@ -11,13 +11,13 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-11-13)
+### Status of every piece (2026-11-14)
 
 | Piece | Status |
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
-| Canonical docs | 00, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 01–04 land with the actor and strategy specs |
-| ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005); 0001–0009 are candidates from the brief, not yet written |
+| Canonical docs | 00, 01, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 02–04 land with the actor and strategy stages |
+| ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005), 0017 (time and ordering); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
 | Scale, background batteries, faults, stats, benchmark (spec 003) | Built |
@@ -27,7 +27,8 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
 | Historical backfill on real data: fetch once, build offline, replay; window 2026-04-02 … 06-30 fetched (spec 008) | Built |
 | Domain core: 2026 tariffs of four DSOs, hourly net-billing settlement with the deposit, price signal, actions, `Policy`, offline reference and stepper (spec 009) | Built |
-| Dev environment beyond Kafka, spike reproduction, actors, sim clock, … | Documented in the brief only |
+| Time and ordering model, actor skeleton design (stage 1: ADR 0017, `01-architecture.md`) | Designed, not built |
+| Restate environment, spike reproduction, actors, experiments, strategies, Selector (stages 2–6) | Not built; briefs in `01-architecture.md` |
 | `frontend/` | Reserved, out of scope |
 
 ### Decisions so far (not yet in an ADR)
@@ -79,6 +80,21 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     (11).
   - The action set gains `SELF_CONSUME` (the self-consumption baseline); the dynamic (day-ahead) tariff is dropped
     for now.
+- 2026-11-14 (stage 1, docs only): the time and ordering model and the actor skeleton (`01-architecture.md`).
+  - Each household orders its own inputs by event-time watermarks; there is no global clock, barrier or replay
+    driver (ADR 0017). Late readings wait `L` = 8 quarter-hours, then the step runs on an estimate.
+  - Kafka reaches Restate only through the standalone Kafka ingress integration, on Restate 1.8.1-hotfix.2.
+    Restate's in-server Kafka subscriptions are documented as old and due for removal: nothing is built on them
+    and no fallback is kept. This replaces the "Kafka subscription" and "Restate 1.7.13" wording in the
+    consequences of ADRs 0010, 0011, 0012 and 0015; their decisions stand. ADR 0010 checked the broker against
+    Restate's bundled Kafka client; the integration's client is checked in stage 2 (V11 in 01).
+  - Scheduled commands are data in actor state, fired at their step in sim and live. Durable timers remain for
+    the live deadline and, later, forecaster refreshes (this narrows a consequence of ADR 0011).
+  - The skeleton is `Household`, `Tariff`, `Weather`, `Ems`, `Battery`, `Meter` and one service per strategy. No
+    `Registry`, `Evaluator`, `Selector` or inverter actor yet; `Ems` evaluates the live policy itself.
+  - `Weather` is part of the skeleton: the household gates on forecasts and records the run visible at each step.
+  - The RCEm table is a run parameter read as config; a synthetic run computes its proxy table before the run.
+  - The remaining work is six stages, one spec and one conversation each (table below).
 
 ### Repo map (current and planned)
 
@@ -112,10 +128,18 @@ templates/                   bootstrap templates; frontend/ reserved
 | 7 | **007 Realistic generator data** | Forecast errors shared by consecutive runs with timing errors; two-timescale log noise and appliance impulses in base load, daily factor on the local day, WPuQ fit; hybrid truth deviates from live forecasts (L5) |
 | 8 | **008 Historical backfill on real data** | Fetch once, build offline, replay: PSE RCE, archived ICON-D2/DMI runs (Single Runs API), satellite and ERA5 truth behind the spec 007 seam; per-model forecast availability; replay preflight and `--background`; forecast-error candidate. Window 2026-04-02 … 06-30 (spring, no winter) |
 | 9 | **009 Domain core** | 2026 purchase tariffs (four DSOs, G11/G12/G12w) and zone calendar, hourly net-billing ledger and monthly bill with the deposit, RCE/RCEm by cohort, price signal, actions and `Policy` with NoBattery and SelfConsumption, offline reference bit-identical to an incremental stepper |
-| next | Kafka ingestion into Restate | Subscriptions keyed by household, production/consumption join, dedup by event_id (the "Plan 2" input) |
-| next | Dev environment and spike reproduction | Restate in compose, test tiers, spike experiments A–C (brief §11, former 001) |
-| next | Actor skeleton; sim clock and replay driver | Brief §11 |
-| later | Forecasting, MPC and oracle, adaptive Selector, experiment harness (results exported from Restate state) | Brief §11 |
+
+Stages from here (2026-11-14). Each gets the next free spec number when it starts and is planned in its own
+conversation from its brief in `01-architecture.md`.
+
+| Stage | Scope | Done when |
+|---|---|---|
+| 1 Ordering decision (docs only, no spec) | ADR 0017, `01-architecture.md`, updates to 00, 05, 06, 08, 09 | Done 2026-11-14 |
+| 2 Restate environment and Kafka into a Virtual Object | Restate 1.8.1-hotfix.2 and the Kafka ingress integration in compose (one container per target handler), `make register` and `make dev`, the e2e and fault tiers, a probe object fed from the four topics, spike experiments A–C (the spike sits untracked at `restate-ems-spike/`; the stage moves it to `reference/restate-ems-spike/`). Merges the former "Kafka ingestion" and "Dev environment" rows | The stack is healthy and registration is idempotent. The probe sees each key's records in partition order, with none lost or doubled after `kill -9` of the server, the SDK service or an ingress container. The skew between topics during a backfill is recorded for the thesis. Spike A and C show 0 mismatches and B 0 duplicates. V1–V4 and V7–V11 of 01 are resolved with value, source and date |
+| 3 Actor skeleton | The pure assembler (watermarks, join, dedup, late rule) with property tests, one mapping from events to `QuarterIn` shared with the offline reference, the actors of 01 with NoBattery and SelfConsumption | 10 households × 1 day through Kafka give strategy and `Meter` state equal to the offline side with `==`, also with the topics published in different orders, with `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (the run that produces corrections and drops). The parity check holds. Unmanaged sites keep O(1) state |
+| 4 Clocks and systems experiments | The live wall-clock deadline timer; adding a strategy from a data time `t0`; `kill -9` runs; scaling households × strategies at paced speeds; the export CLI and run manifest | Results stay identical under failures. Recovery latency by phase, sustained speed, events per second and decision latency are reported (P16) |
+| 5 Strategies and forecasts | Price rules, MPC with the offline oracle, forecasts with a persistence baseline | Per-strategy results against the reference |
+| 6 Adaptive Selector | Selector against the best fixed strategy (RQ3) | RQ3 results |
 
 ### Optional
 

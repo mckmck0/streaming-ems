@@ -57,18 +57,21 @@ missing runs, hash `75fc631fc194…`) are in `13-subsystem-ingest.md`.
 
 ## What to build
 
-- Experiment harness spec (`make exp`, runner, export of Restate state to Parquet, reports).
+- Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to
+  Parquet, the run manifest and reports. Scale runs are published paced (`accelerated` mode), and the highest
+  speed the system sustains is a result (risk A1).
+- Stage 3 delivers the first bit-exact comparison through Kafka (10 households × 1 day).
 
 ## Prerequisites
 
-- Actors (later spec). The domain core and the cost metric exist (spec 009).
+- Actors (stage 3). The domain core and the cost metric exist (spec 009).
 
 ## Open questions
 
 - OPEN: which strategies form the research contribution (brief §13). The LLM-based strategy (CLM-8B) is optional
   (gate in `00-overview.md`).
-- OPEN (harness spec): how the export reads state (Restate SQL introspection on the admin API vs a shared read
-  handler; VERIFY against the Restate 1.7 docs) and which per-step data stay in object state for export (state
-  size per object: VERIFY).
-- OPEN (harness spec): where the systems metrics come from (Restate metrics or traces, runner timings); object
+- OPEN (stage 4): how the export reads state (Restate SQL introspection on the admin API vs a shared read
+  handler; VERIFY against the docs of the pinned Restate, 1.8.1-hotfix.2) and which per-step data stay in object
+  state for export (state size per object: VERIFY, V7 in 01).
+- OPEN (stage 4): where the systems metrics come from (Restate metrics or traces, runner timings); object
   state cannot supply latencies or throughput.

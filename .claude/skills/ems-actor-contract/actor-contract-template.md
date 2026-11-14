@@ -9,7 +9,7 @@ timer. Replace every `<…>`; write "none" rather than deleting a row.
 
 | Actor (Virtual Object) | Key | State (field: type, unit) | Owner of facts | New / changed |
 |---|---|---|---|---|
-| `<Name>` | `<household id \| zone \| fleet>` | `<field: type [unit]>` | `<facts from the ownership table>` | `<new \| changed>` |
+| `<Name>` | `<[run_id:]location_id \| [run_id:]market_key>` | `<field: type [unit]>` | `<facts from the ownership table>` | `<new \| changed>` |
 
 ### Handlers
 
@@ -25,9 +25,9 @@ timer. Replace every `<…>`; write "none" rather than deleting a row.
 
 ### Timers
 
-| Timer | Owner | Sim mode (virtual, fires on `t ≥ due`) | Live mode (`send_delay`) | Generation guard |
+| Timer | Owner | Sim mode (data in state, fired at its step) | Live mode (`send_delay`) | Generation guard |
 |---|---|---|---|---|
-| `<what is scheduled>` | `<Actor>` | `<state field>` | `<delay>` | `<yes>` |
+| `<what is scheduled>` | `<Actor>` | `<state field, or "none">` | `<delay, or "none">` | `<yes>` |
 
 ### Failure modes
 
@@ -48,5 +48,6 @@ timer. Replace every `<…>`; write "none" rather than deleting a row.
 | R4: idempotent ingress | | |
 | R5: no waiting in exclusive handlers | | |
 | R6: generation numbers on self-rescheduling jobs | | |
-| R7: envelope fields and monotonicity checks | | |
+| R7: envelope fields; messages applied in `t` or sequence order, early ones held back, reorderings counted | | |
+| Ordering (ADR 0017): steps released only when every input watermark covers them; lateness and dedup judged inside the record's own stream | | |
 | Single writer per fact (ownership table updated) | | |
