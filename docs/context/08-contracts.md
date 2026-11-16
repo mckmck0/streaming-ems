@@ -66,12 +66,16 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 ### Handoff to the actor stages (`01-architecture.md`)
 
 - Kafka reaches Restate only through the standalone Kafka ingress integration (Restate ≥ 1.8.1;
-  <https://docs.restate.dev/services/integrations/kafka>, checked 2026-11-14): record key → Virtual Object key
-  (must be UTF-8; never null on these topics), value → JSON handler input, one container per target handler (it
-  may consume several topics), a stable consumer group id. The handler sees `kafka.topic`, `kafka.partition`,
-  `kafka.offset` and `kafka.timestamp`; forwarding of record headers is not documented, so the JSON value stays
-  self-contained (K6). Restate deduplicates a redelivered record by consumer group, topic, partition and offset.
-  Restate's in-server Kafka subscriptions are documented as old and due for removal and are not used.
+  <https://docs.restate.dev/services/integrations/kafka>, checked 2026-11-14; built in spec 010, details in
+  `02-subsystem-actors.md`): record key → Virtual Object key (must be UTF-8; never null on these topics), one
+  container per target handler (it may consume several topics), consumer groups `ems-ingress-meters`,
+  `ems-ingress-forecasts` and `ems-ingress-prices` that start at the earliest offset. The value reaches the
+  handler as raw bytes without a content type, so Kafka-fed handlers take bytes and parse the JSON themselves
+  (spec 010). The handler sees `kafka.topic`, `kafka.partition`, `kafka.offset`, `kafka.timestamp` and
+  `kafka.key`; other record headers are not forwarded (only `traceparent` and `tracestate`, as trace context),
+  so the JSON value stays self-contained (K6). Restate deduplicates a redelivered record by consumer group,
+  topic, partition and offset. Restate's in-server Kafka subscriptions are documented as old and due for removal
+  and are not used.
 - Dedup by slot (stream, `t`) in object state: an identical `event_id` is ignored, different content for the same
   slot is a revision. No idempotency key is taken from a record.
 - Join production and consumption per `(location, t)` by the watermark rules of ADR 0017; there is no cross-topic

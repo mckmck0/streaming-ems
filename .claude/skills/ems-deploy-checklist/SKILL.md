@@ -12,30 +12,38 @@ the data-pipeline spec 001 (Kafka) and the dev-environment spec (Restate); the H
 ## Before changing anything
 
 - [ ] An approved spec or task covers the change (or the user asked for this specific fix or bump).
-- [ ] Two-week rule: every new or bumped version (PyPI package, image, chart, pre-commit rev, CLI tool)
-      was released at least 14 days ago. Record version, release date and source URL in 05.
-- [ ] Pins are exact. Python: `uv.lock` under `[tool.uv] exclude-newer`. Images: tag plus `@sha256:`
+- [ ] Newest release: every new or bumped version (PyPI package, image, action, chart, pre-commit rev, CLI
+      tool) is the newest release when pinned; read its release notes. Record version, release date and
+      source URL in 05. There is no minimum age (decided 2026-11-15, spec 010).
+- [ ] Pins are exact. Python: `uv.lock`. Actions: full commit SHA. Images: tag plus `@sha256:`
       digest (tags such as `restatedev/restate:1.7.12` are re-pushed by weekly OS refreshes). Helm:
       `Chart.lock`. Pre-commit: tagged `rev`, with the ruff rev equal to the ruff pin in `pyproject.toml`.
 - [ ] No secrets in files; settings come from the environment through pydantic-settings.
 
 ## Before running anything
 
-- [ ] Ports are free: `lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(8080|9070|5122|9080|9081|9092)\b'`.
-      The reference spike's native `restate-server` and hypercorn processes may still be running from an
-      earlier session; stop them by port, not with `pkill`, and only after asking the user.
+- [ ] Ports are free: `lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(8080|9070|9080|9081|9092)\b'`.
+      `make dev`, a test tier or `make spike` may hold 9080/9081; stop them by port or process group, not
+      with `pkill`, and only after asking the user. `make spike` also needs 8080 and 9070 (`make down`).
 - [ ] Kubernetes: `kubectl config current-context` must be `kind-ems`. This machine's default context is
       a corporate cluster; never run `helm install|upgrade` or `kubectl apply|delete` against it
       (`make deploy-local` prompts for approval for this reason).
-- [ ] Docker Desktop has enough memory for what you start (its VM has 8 GB; Restate and Kafka share it,
-      and kind too if the optional Helm spec runs).
+- [ ] Docker Desktop has enough memory for what you start (its VM has 7.75 GiB: Kafka 1 GB, Restate 2 GB,
+      768 MB per ingress container, and kind too if the optional Helm spec runs).
 
 ## Compose (`infra/docker-compose.yml`)
 
-- Restate image pinned by tag and digest; healthcheck `curl -fsS http://127.0.0.1:9070/health`; host
-  ports bound to `127.0.0.1`; `extra_hosts: ["host.docker.internal:host-gateway"]` so the container can
-  reach SDK services on the host (Linux engines need it); a named volume on `/restate-data` with a fixed
-  node name, so state survives the `kill -9` fault experiments.
+- Restate image pinned by a dated tag and digest (`restatedev/restate:1.8.1-hotfix.2-20261102@sha256:…`);
+  healthcheck on the admin `/health` and the ingress `/restate/health`; host ports bound to `127.0.0.1`;
+  `extra_hosts: ["host.docker.internal:host-gateway"]` so the container reaches the SDK service on the host
+  (Linux engines need it); the named volume `restate-data` with the fixed node name `restate-1`, so state
+  survives the `kill -9` fault experiments.
+- Kafka ingress integration: one container per target handler in the `ingress` profile (only `make register`
+  starts them, `make down` removes them), `KAFKA_AUTO_OFFSET_RESET=earliest`, `restart: unless-stopped`, label
+  `ems.role=ingress`, healthcheck `["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9464"]` (the image's
+  `/bin/sh` is dash). The image is linux/amd64 only.
+- Registration: the admin API's `force` defaults to **true**; `make register` sends false. With false, an
+  existing URI answers 200 and keeps its old handlers even when they changed: re-register with `FORCE=true`.
 - Kafka-compatible broker: single node, KRaft, one listener for the compose network and one for the host,
   a healthcheck, a bounded JVM heap.
 - `make up` runs `docker compose up -d --wait`, so it is only as good as the healthchecks.

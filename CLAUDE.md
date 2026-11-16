@@ -61,23 +61,28 @@ Path-scoped rules in `.claude/rules/` load when you touch matching files: `domai
 ## Commands
 
 The `Makefile` is the only entry point. It holds only the targets the repo can use today; planned ones
-(test tiers, `up`/`down`/`register`, `dev`, `exp`, kind and Helm) sit commented out at its bottom, grouped
-by the spec that enables them. Enable a block with its spec, never ad hoc.
+(`exp`, kind and Helm) sit commented out at its bottom, grouped by the spec that enables them. Enable a block
+with its spec, never ad hoc.
 
 | Command | Purpose |
 |---|---|
 | `make install` | `uv sync` all groups + pre-commit hooks |
 | `make format` | `ruff check --fix` + `ruff format`. **Run at the end of every code change.** |
 | `make lint` / `make type-check` | `uv lock --check` + ruff check + format check / `ty check` |
-| `make test-unit` / `make test-integration` / `make ci` | unit+property / against `make up` / lint + type-check + test-unit |
-| `make up` / `make down` / `make topics` | Kafka stack (`infra/docker-compose.yml`) / stop / ensure topics (`PROFILE=`) |
+| `make test-unit` / `make ci` | unit+property / lint + type-check + test-unit (CI runs `make ci` on GitHub Actions) |
+| `make test-integration` / `make test-e2e` / `make test-fault` | tiers against the stack; each starts its own SDK service on 9080 and leaves the stack's ingestion closed |
+| `make report-coverage` | combine the tiers' coverage (`logs/.coverage.<tier>`) into `logs/coverage.xml` |
+| `make up` / `make down` / `make topics` | Kafka and Restate (`infra/docker-compose.yml`) / stop, removing the ingress containers / ensure topics (`PROFILE=`) |
+| `make dev` / `make register [FORCE=true]` | SDK service on 127.0.0.1:9080 / register it (`force: false`; `FORCE=true` after handler changes, dev only) and start the Kafka ingress |
+| `make measure [MODE=]` / `make spike` | ingress measurements (`skew`, `state-cost`, `backlog`) / the reference spike's A–C on the pinned server |
 | `make gen-backfill DAYS=2` / `make validate` / `make tail TOPIC=` | backfill to Kafka (sim profile) / validate topics / inspect |
 | `make gen-live` / `make record NAME=` / `make replay NAME= [BACKGROUND=1]` | hybrid live run / record live sources / replay a recording (with a synthetic fleet) |
 | `make history NAME= START= END=` | fetch and build a real-data window (spec 008) |
 | `make clean` | Remove caches and build artefacts |
 
 Dev tools come from the `dev` group in `pyproject.toml` (ruff and ty pinned exactly; the ruff pin must equal
-the ruff-pre-commit `rev`). `[tool.uv] exclude-newer` keeps every locked version at least two weeks old.
+the ruff-pre-commit `rev`). A new or bumped pin takes the newest release, with no minimum age; `uv.lock`, image
+digests and action SHAs keep every version exact (decided 2026-11-15, spec 010).
 
 The PostToolUse hook in `.claude/settings.json` formats each `.py` file you edit and flags Restate imports
 in `src/ems/domain/`. It does not see edits made through Bash, hence `make format`.
@@ -107,8 +112,8 @@ in `src/ems/domain/`. It does not see edits made through Bash, hence `make forma
 - Build request-response cycles, or call an exclusive handler with request-response.
 - Use wall-clock timers in sim mode, or sleep inside an exclusive handler (use delayed messages).
 - Make blocking calls in handlers.
-- Add an unpinned dependency, image or tool: everything comes from `uv.lock` or an exact tag + digest
-  that is at least two weeks old.
+- Add an unpinned dependency, image, action or tool: everything comes from `uv.lock`, an exact tag + digest
+  or a commit SHA, and a new or bumped pin takes the newest release.
 - Commit secrets. `.env` files are unreadable to Claude by design.
 - Touch `frontend/` without asking (out of scope; an `ask` rule enforces it).
 - Hand-edit experiment results, `docs/bootstrap/` or `reference/`.

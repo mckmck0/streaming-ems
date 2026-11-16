@@ -15,7 +15,7 @@ Read only the docs the task needs, usually one to three, not the whole folder. E
 |---|---|
 | Orientation, status of each piece, repo map, backlog, decisions so far | `00-overview.md` |
 | Actors, keys, who owns which fact, the message diagram, ordering across topics (watermarks, late records), the brief for each remaining stage | `01-architecture.md` |
-| Restate services and handlers, R1–R7, registration, Kafka ingress | `02-subsystem-actors.md` (planned, stages 2 and 3; until then `01-architecture.md`) |
+| Restate services and handlers, R1–R7, registration, Kafka ingress | `02-subsystem-actors.md` (stage 2 written; handlers land with stage 3) |
 | Strategies, shadow vs live, Evaluator, Selector | `03-subsystem-strategies-and-evaluation.md` (planned, stages 5 and 6) |
 | Forecasters, MILP/MPC, the oracle | `04-subsystem-forecasting-and-optimization.md` (planned, stage 5) |
 | uv/pyproject, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions | `05-deploy-and-infra.md` |

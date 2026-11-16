@@ -6,8 +6,14 @@ paths:
 # Tests (`tests/`)
 
 - Tiers and markers: `unit` and `property` need no infrastructure; `integration` runs against real services
-  from `make up` (Kafka now, Restate later), isolated per run by a topic prefix; `e2e` replays data and compares strategy state bit-exactly with the offline reference;
-  `fault` kills the SDK service or the server with `kill -9` during replay.
+  from `make up` (Kafka and Restate), isolated per run by a topic prefix; `e2e` replays data and compares
+  actor state bit-exactly with the offline side; `fault` kills the SDK service, the server or an ingress
+  container with `kill -9` during a replay.
+- The Restate tiers use the fixtures in `tests/stack_fixtures.py` (harness: `ems.experiments.stack`): each
+  module gets its own topic prefix, SDK service on 127.0.0.1:9080 and ingress containers (compose project
+  `ems-it-*`), each test its own `run_id`; nothing is written to the stack's topics. Port 9080 must be free.
+- Each tier target writes coverage to `logs/.coverage.<tier>` (including the SDK service it starts, through
+  coverage's `patch = subprocess`); `make report-coverage` combines them.
 - Directory = tier: `tests/unit/`, `tests/property/`, `tests/integration/`, `tests/e2e/`, `tests/fault/`.
   Every test carries exactly one tier marker, added from its directory by `tests/conftest.py` (strict markers:
   an unknown marker is an error).

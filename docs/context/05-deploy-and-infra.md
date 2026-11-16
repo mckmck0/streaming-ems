@@ -4,12 +4,18 @@
 
 ### uv project and tooling
 
-- One uv project `ems` at the repo root, `requires-python >= 3.13`, `[tool.uv] exclude-newer =
-  2026-10-02T00:00:00Z` (every locked version at least two weeks old), `default-groups = ["dev", "ingest"]`.
+- One uv project `ems` at the repo root, `requires-python >= 3.13`, `default-groups = ["dev", "ingest",
+  "actors"]`.
+- **Version policy** (decided 2026-11-15, spec 010; P12): every version is pinned exactly (`uv.lock`, image tag
+  plus digest, action commit SHA), and a new or bumped pin takes the newest release, with no minimum age,
+  because security fixes arrive often. Read the release notes before a bump and run the tiers after it. Until
+  2026-11-15 pins had to be at least two weeks old (`[tool.uv] exclude-newer`, now removed); the pins added
+  before that date are listed under Open questions.
 - Dependency layout: `[project].dependencies` hold what contracts and settings need (pydantic, pydantic-settings,
   ruamel.yaml, structlog, typer, tzdata); group `ingest` holds the generator (confluent-kafka, numpy, scipy,
-  pandas, pyarrow, pvlib, demandlib, holidays, faker, jsonschema, httpx, tenacity, lxml); group `dev` the tooling
-  (incl. respx). The image also ships `mappings/` (`EMS_MAPPINGS_DIR`).
+  pandas, pyarrow, pvlib, demandlib, holidays, faker, jsonschema, httpx, tenacity, lxml); group `actors` the
+  Restate SDK service (restate-sdk, hypercorn; spec 010); group `dev` the tooling (incl. respx, pytest-cov,
+  coverage). The image also ships `mappings/` (`EMS_MAPPINGS_DIR`).
 - Exact pins only where behaviour depends on them: ruff 0.16.10 (= ruff-pre-commit rev), ty 0.0.84, faker
   40.40.0 (locale data feeds a golden catalog test), pvlib 0.16.1 and demandlib 0.2.2 (APIs used directly).
 - Test tiers by directory and marker (`tests/conftest.py` adds the marker): `make test-unit` = unit + property,
