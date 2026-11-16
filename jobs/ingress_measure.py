@@ -86,6 +86,7 @@ def _times(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "mean_ms": statistics.fmean(durations),
         "median_ms": statistics.median(durations),
         "p99_ms": nearest_rank(durations, 0.99),
+        "max_ms": max(durations),
         "calls_per_s": len(durations) / span if span > 0 else None,
     }
 
