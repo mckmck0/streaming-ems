@@ -65,6 +65,12 @@ their handlers come with stage 3, which adds them to this doc. The ordering mode
   `kafka.timestamp` and `kafka.key`; other record headers are not forwarded (only `traceparent` and
   `tracestate`, as trace context). Restate deduplicates by consumer group, topic, partition and offset, and the
   integration commits a Kafka offset only after Restate's durable acknowledgement.
+- **Outages.** While Restate is down the integration reconnects every 500 ms and never exits, whatever
+  `RESTATE_RETRY_MAX_ATTEMPTS` says: each gRPC stream opens before it fails, and a successful open resets the
+  back-off (tested in spec 010, AC-010-16); the records wait in Kafka. A process that exits for another reason
+  is restarted by `restart: unless-stopped`. While the SDK service is down, records still flow into Restate and
+  queue there as invocations per key, so Kafka's consumer lag says nothing about how far the handlers are behind
+  (`docs/thesis/kafka-ingress.md`).
 - **Dedup hazard (risk K11).** Because of that offset dedup, wiping Kafka alone or recreating a consumed topic
   would make new records look like ones Restate already has. `make reset` wipes both volumes together.
 - **Bad records.** Kafka-fed handlers take raw bytes (`BytesSerde`, `accept="*/*"`), parse inside, count a record

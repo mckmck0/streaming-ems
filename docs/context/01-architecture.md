@@ -2,9 +2,11 @@
 
 ## Current consensus
 
-Designed on 2026-11-14, not built yet. The time and ordering model is ADR 0017. The actors are the minimal
-skeleton of stage 3 (stages in `00-overview.md`); the domain functions they call exist since spec 009
-(`12-domain-model.md`). Changes to the brief §5:
+Designed on 2026-11-14. Stage 2 (spec 010, 2026-11-15) built the runtime under it: Restate, the SDK service,
+registration and the Kafka ingress, feeding a probe object (`02-subsystem-actors.md`); the actors below are not
+built yet. The time and ordering model is ADR 0017. The actors are the minimal skeleton of stage 3 (stages in
+`00-overview.md`); the domain functions they call exist since spec 009 (`12-domain-model.md`). Changes to the
+brief §5:
 - `Tariff` is keyed by market and holds price curves only (ADR 0012, spec 009); `Weather` is keyed by location.
   Both are fed from Kafka and call no API (ADR 0011). `Tariff` pushes curves to households as one-way messages;
   no step reads another actor through a shared handler.
@@ -55,6 +57,7 @@ flowchart LR
 | Grid energy per step, real ledger, bills and deposit | `Meter` |
 | Virtual SoC, shadow ledger and bills | each strategy, for its own key |
 | Per-site tariff rules, battery parameters, the RCEm table | config, through `ems.tariffs` and the site catalog (not an actor) |
+| The ingress log of a record key (count, last offset, offset digest, regressions, rejected records) and its stream leads | `Probe` in stage 2; from stage 3 the Kafka-fed actor of that key (`Household`, `Weather`, `Tariff`) keeps the log |
 
 ### Time and ordering model (ADR 0017)
 
@@ -213,6 +216,21 @@ confirms the behaviour on the pinned versions (`05-deploy-and-infra.md`).
 | HTTP ingress: `Idempotency-Key` header, result kept 24 h; one-way sends and delays | 2026-11-14, <https://docs.restate.dev/services/invocation/http> |
 | Delayed sends are durable; a sleep in an exclusive handler blocks its key; state is sent with every invocation unless lazy state is enabled | 2026-10-30, <https://docs.restate.dev/develop/python/durable-timers>, <https://docs.restate.dev/develop/python/state> |
 
+Confirmed on the pinned versions in stage 2 (spec 010; Restate 1.8.1-hotfix.2, integration 0.1.1, `restate-sdk`
+1.5.2), with the test or result that shows it:
+- Per-key partition order and exactly-once delivery from Kafka hold, also across `kill -9` of the server, the SDK
+  service and an ingress container (`tests/e2e/test_probe_backfill.py`, `tests/fault/test_probe_kills.py`).
+- The value reaches the handler as raw bytes without a content type; besides `kafka.topic`, `kafka.partition`,
+  `kafka.offset` and `kafka.timestamp` the handler sees `kafka.key`; other record headers are not forwarded
+  (only `traceparent`, `tracestate`) (`StaticRecordMapper.kt` at v0.1.1; `tests/integration/test_probe_*.py`).
+  `sys_invocation` shows these invocations as `invoked_by = ingress`.
+- The integration commits a Kafka offset after Restate's durable acknowledgement, not after the handler ran:
+  with the SDK service down the consumer lag still fell to 0 (`ingress-backlog-20261116T081316Z`).
+- Registration with `force: false` at a known URI answers 200 and keeps the old handlers, even when they changed
+  (checked by hand 2026-11-15, `02-subsystem-actors.md`). The admin API's own default for `force` is true.
+- Lazy state is `state_preload=False` in `restate-sdk` 1.5.2; the SDK marks `enable_lazy_state` deprecated
+  (`object.py`).
+
 ## What to build
 
 One spec per stage, each planned in its own conversation with `ems-plan-change`. The stage table (scope and
@@ -220,6 +238,10 @@ One spec per stage, each planned in its own conversation with `ems-plan-change`.
 brief.
 
 ### Stage 2 · Restate environment and Kafka into a Virtual Object
+
+**Done 2026-11-15 (spec 010).** What it decided is in `02-subsystem-actors.md`, `05-deploy-and-infra.md` and the
+resolved VERIFY items below; its measurements are in `docs/thesis/kafka-ingress.md` and
+`docs/thesis/spike-reproduction.md`. The brief as it was handed over:
 
 - **Read first:** this doc (model, Restate facts, VERIFY list), `05-deploy-and-infra.md`, `08-contracts.md`
   (topics, keys, handoff), `09-risks-and-tech-debt.md` (K6, A5), `11-experiments.md`, brief §6 (the spike and
@@ -249,13 +271,30 @@ brief.
 
 ### Stage 3 · Actor skeleton
 
-- **Read first:** this doc, ADR 0017, `12-domain-model.md` (actions, `Policy`, stepper, reference, the notes for
-  the actor stages), `08-contracts.md` (handoff, availability), `06-data-flows.md` (emission schedule, faults),
-  `specs/009-domain-core/`, the stage 2 results. Where the actor notes in `specs/009-domain-core/plan.md` differ
-  (shared price reads, live RCEm on `Tariff`), this doc and `12-domain-model.md` win.
+- **Read first:** this doc, ADR 0017, `02-subsystem-actors.md` (runtime, registration, Kafka ingress, the probe),
+  `12-domain-model.md` (actions, `Policy`, stepper, reference, the notes for the actor stages), `08-contracts.md`
+  (handoff, availability), `06-data-flows.md` (emission schedule, faults), `specs/009-domain-core/`,
+  `specs/010-restate-kafka-ingress/` and `docs/thesis/kafka-ingress.md` (the stage 2 results). Where the actor
+  notes in `specs/009-domain-core/plan.md` differ (shared price reads, live RCEm on `Tariff`), this doc and
+  `12-domain-model.md` win.
 - **Already decided:** the ordering model; the actors, edges and messages above; `L` = 8 by default; the
   household gates on forecasts and records the visible run per step; `Ems` evaluates the live policy; the first
-  step and the RCEm table are run parameters and the tests use RCE sites; results are read from state.
+  step and the RCEm table are run parameters and the tests use RCE sites; results are read from state. From
+  stage 2:
+  - the three ingress containers are re-pointed from `Probe` to `Household.on_measurement`,
+    `Weather.on_forecast` and `Tariff.on_price` (`RESTATE_RECORD_MAPPER_SERVICE` and `_HANDLER` in
+    `infra/docker-compose.yml`); `Probe`, `StateCostEager` and `StateCostLazy` are deleted;
+  - Kafka-fed handlers take raw bytes (`BytesSerde`, `accept="*/*"`), parse with `parse_event`, count a bad
+    record and return; they keep `ingress_check.log_apply`'s log in their own state, so the e2e and fault tests
+    keep comparing it with `==` against the offline fold;
+  - the harness `ems.experiments.stack`, the fixtures in `tests/stack_fixtures.py` and the e2e and fault tiers
+    exist; extend them rather than adding new ones;
+  - registration with `force: false` keeps a deployment's old handlers: adding handlers needs
+    `make register FORCE=true` on an idle stack, or a new URI;
+  - an unpaced backfill lets one of a household's streams run up to 167 quarter-hours ahead of another
+    (`docs/thesis/kafka-ingress.md`); buffers are sized for that, or the tests publish paced;
+  - the skew of prices against a household's other streams is measured at `Household` (stage 2 could not: prices
+    arrive under the market key).
 - **This stage decides** (each is OPEN until then):
   - how a correction reaches the ledger. Either the hour row is recomputed, and a correction that lands after
     its month closed is dropped and counted; or each quarter is settled only once it can no longer change, so
@@ -338,17 +377,17 @@ VERIFY on the pinned versions (stage in brackets):
 
 | # | Item | Why it matters |
 |---|---|---|
-| V1 (2) | Per-key order from one partition holds through the integration, also across a restart of the server, the SDK service and the ingress container | The model's only ordering assumption; documented, confirmed by test |
-| V2 (2) | What the integration does when the handler fails, the payload is invalid, or Restate is down; the docs do not say, and it exits after repeated failed reconnects | Restart policy; whether a bad record can block a partition |
-| V3 (2) | What the SDK does when a handler's input cannot be deserialised | Whether Kafka-fed handlers must take raw bytes |
-| V4 (2) | Pinning the integration image: the docs show only the `latest` tag | P12 needs an exact tag and digest |
+| V1 (2) | Per-key order from one partition holds through the integration, also across a restart of the server, the SDK service and the ingress container | **Resolved 2026-11-16:** holds. Every key's log equals the offline fold with 0 regressions, also after `kill -9` of each component mid-run (`tests/e2e/test_probe_backfill.py`, `tests/fault/test_probe_kills.py`) |
+| V2 (2) | What the integration does when the handler fails, the payload is invalid, or Restate is down; the docs do not say, and it exits after repeated failed reconnects | **Resolved 2026-11-16.** Invalid payload: the integration validates nothing and passes raw bytes; the handler counts it (`test_probe_bad_records.py`). Handler unavailable (SDK service down): records are still ingested and queue as invocations in Restate (`ingress-backlog-20261116T081316Z`); a handler that keeps raising is retried by Restate's policy (70 attempts, then pause) and holds only its own key. Restate down: the integration reconnects every 500 ms and does **not** exit, whatever `RESTATE_RETRY_MAX_ATTEMPTS` says, because each stream opens before it fails (AC-010-16, `PartitionSession.kt`); a process that exits is restarted by `restart: unless-stopped`. A record Restate rejects is skipped (`PartitionSession.kt`), hence the start order in 02 |
+| V3 (2) | What the SDK does when a handler's input cannot be deserialised | **Resolved 2026-11-15:** `restate-sdk` 1.5.2 raises `TerminalError("Unable to parse an input argument")` (`handler.py` 406), which would fail the invocation. Kafka-fed handlers therefore take raw bytes and parse themselves |
+| V4 (2) | Pinning the integration image: the docs show only the `latest` tag | **Resolved 2026-11-15:** GHCR carries dated tags; pinned `ghcr.io/restatedev/ingress-integration-kafka:0.1.1-20261109@sha256:20704c886ee4dcc4046bab1743dc424bb08b2317ce1bc6da55ce738345ce01b1` (linux/amd64 only; registry API) |
 | V5 (3) | Order of one-way messages between the same two objects across invocations | Undocumented; not relied on; the reorder counter measures it |
 | V6 (5) | State written before a send is visible to a shared read triggered by that message | Undocumented; matters for forecast reads |
-| V7 (2) | Cost of state shipped with every invocation; the lazy-state option of the pinned SDK | Buffer limits (risk A1) |
-| V8 (2) | Whether Kafka ingestion slows down when handlers fall behind | Where a backlog lives |
-| V9 (2) | The unit of `ctx.time()`; SDK and server compatibility for the chosen pins; memory of three JVM ingress containers beside Kafka and Restate | Live timers; the pins; Docker Desktop's memory |
-| V10 (2) | The server restarts cleanly after `kill -9` with VQueues on (risk A5) | The fault experiments |
-| V11 (2) | The integration's Kafka client works against broker 4.3.1 (ADR 0010 checked Restate's bundled client, which is no longer used) | The ingestion path |
+| V7 (2) | Cost of state shipped with every invocation; the lazy-state option of the pinned SDK | **Resolved 2026-11-16:** with eager state a call that touches one small key takes a median of 2, 3 and 9 ms for 1 kB, 100 kB and 1 MB of object state (299, 235 and 84 calls/s); lazy state (`state_preload=False`) keeps the median at 3–4 ms but showed one 39 s call in 500 at 1 MB, cause unknown (`ingress-state-cost-20261116T081221Z`) |
+| V8 (2) | Whether Kafka ingestion slows down when handlers fall behind | **Resolved 2026-11-16:** it does not. With the SDK service stopped the consumer lag of all groups fell to 0 within 7.4 s and 3,426 records waited in Restate as invocations; the backlog drained in 8.8 s after the service came back (`ingress-backlog-20261116T081316Z`) |
+| V9 (2) | The unit of `ctx.time()`; SDK and server compatibility for the chosen pins; memory of three JVM ingress containers beside Kafka and Restate | **Resolved:** `ctx.time()` is a journaled `time.time()`, float seconds since the epoch (`server_context.py` 889–891, 2026-11-15). Server 1.8.1-hotfix.2 and `restate-sdk` 1.5.2 negotiate service protocol 5–7 over HTTP/2 (registration response). Peak memory in an unpaced backfill: ingress containers 558, 475 and 288 MiB of 768; Kafka 797 MiB of 1 GiB; Restate 1,556 MiB of 2 GiB; no OOM kill (`ingress-skew-20261116T081120Z`) |
+| V10 (2) | The server restarts cleanly after `kill -9` with VQueues on (risk A5) | **Resolved 2026-11-16:** yes, healthy without a manual step, in the fault tier (AC-010-13) and in the spike's experiment B (healthy 0.5 s after restart, `spike-20261116T080544Z`) |
+| V11 (2) | The integration's Kafka client works against broker 4.3.1 (ADR 0010 checked Restate's bundled client, which is no longer used) | **Resolved 2026-11-15:** the image bundles `kafka-clients` 4.2.0 (`/NOTICE`, `/app/libs`), which consumed every test and measurement run against broker 4.3.1 |
 
 - OPEN (stage 3): how a correction reaches the ledger, the estimate for a missing reading, how the actor service
   obtains a run's parameters, the rule for a quarter-hour with no visible price. Details in the stage 3 brief.
