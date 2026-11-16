@@ -1,0 +1,9 @@
+# Test projects (spec 010): `docker compose -p ems-it-<prefix> -f infra/docker-compose.yml -f tests/compose.it.yml`
+# runs the stack's three ingress services, unchanged (image, restart policy, limits, healthcheck), as a project of
+# their own. EMS_INGRESS_PREFIX prefixes their topics and consumer groups. They join the stack's network, so
+# `kafka` and `restate` resolve to the stack's containers; only the ingress services are ever started (--no-deps).
+# Driven by src/ems/experiments/stack.py (IngressSet).
+networks:
+  default:
+    name: ems_default
+    external: true
