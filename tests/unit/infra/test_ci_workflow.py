@@ -16,7 +16,7 @@ import pytest
 from ruamel.yaml import YAML
 
 WORKFLOW = Path(".github") / "workflows" / "ci.yml"
-RUNNER = "ubuntu-26.04"
+RUNNER = "ubuntu-26.04-arm"
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
 
 

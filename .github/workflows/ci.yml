@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   ci:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     outputs:
       coverage: ${{ steps.coverage.outputs.total }}
@@ -44,7 +44,7 @@ jobs:
   badge:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       contents: write
