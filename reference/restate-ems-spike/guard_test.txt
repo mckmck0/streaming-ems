@@ -1,0 +1,1 @@
+new code, start/stop/start within one period -> ticks in 9 s: 6, gaps: [0.07, 2.01, 2.01, 2.01, 2.01]
