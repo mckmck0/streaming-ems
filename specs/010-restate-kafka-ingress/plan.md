@@ -55,7 +55,7 @@ task runs, and then written to the docs with source and date.
 | Healthchecks | `restate`: `curl` on the admin `/health` and the ingress health path, confirmed on the image before it is wired. Ingress containers: `["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9464"]` (the metrics port answers). It names bash explicitly because `CMD-SHELL` runs `/bin/sh`, which is dash on the image's Ubuntu base and has no `/dev/tcp` |
 | Test-scoped ingress | A second compose project per test module or job run: the stack's compose file plus `tests/compose.it.yml`, which joins the stack's network and resets `depends_on` for the three services. The same service definitions give the same restart policy. Topic prefix, group prefix and retry attempts come from interpolation variables with the stack's values as defaults |
 | Invocation time (AC-010-20) | From `sys_invocation`: `completed_at − running_at` per `touch` call, plus calls per second for the batch. The job sends each call with an `Idempotency-Key`, so completed calls stay queryable |
-| Workflow pins | `actions/checkout@3d3c42e…` (v7.0.1), `astral-sh/setup-uv@68559e9…` (v10.3.3) with `version: "0.13.8"`, `runs-on: ubuntu-26.04`. The lockfile is checked with uv 0.13.8 before the workflow lands |
+| Workflow pins | `actions/checkout@3d3c42e…` (v7.0.1), `astral-sh/setup-uv@68559e9…` (v10.3.3) with `version: "0.13.8"`, `runs-on: macos-26` (arm64). The lockfile is checked with uv 0.13.8 before the workflow lands. *Changed on the pull request: the first runs on `ubuntu-26.04` and `ubuntu-26.04-arm` failed three golden digests of the generator (specs 005, 008), which hold only on macOS arm64 (risk G12)* |
 | Fault tier coverage | The fault tier writes `logs/.coverage.fault` like the other tiers (AC-010-27 names every tier). A process killed with SIGKILL writes no data; that is accepted |
 | Dedup hazard | No test. 09 cites the docs and `PartitionSession.kt`; `make reset` wipes both volumes |
 | `force: false` with changed handlers | One check on the pinned stack in the registration task, for an added and for a removed handler; commands and output go into the pull request, the result into 02 and the stage 3 brief |
@@ -262,7 +262,7 @@ exit code, killed pids) to `ctl.log`.
 - `.github/workflows/ci.yml`:
   - triggers: `push` to `main`, `pull_request`; top-level `permissions: contents: read`; one concurrency group
     per ref, cancelling runs in progress for pull requests only;
-  - job `ci` on `ubuntu-26.04`: checkout (no persisted credentials), setup-uv with uv 0.13.8, `uv sync
+  - job `ci` on `macos-26` (arm64; see Workflow pins): checkout (no persisted credentials), setup-uv with uv 0.13.8, `uv sync
     --locked --all-groups`, `make ci`, `make report-coverage`; the total goes to the job summary and a job
     output;
   - job `badge`, only for a push to `main`, with `permissions: contents: write`: plain `git` builds a fresh

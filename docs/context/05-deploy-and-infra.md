@@ -27,7 +27,8 @@
 
 ### CI (spec 010)
 
-`.github/workflows/ci.yml` runs `make ci` on every push to `main` and every pull request, on `ubuntu-26.04` with
+`.github/workflows/ci.yml` runs `make ci` on every push to `main` and every pull request, on `macos-26` (arm64,
+like the author's machine; three golden digests of the generator differ on Linux, risk G12) with
 uv 0.13.8 (`astral-sh/setup-uv` v10.3.3, commit `68559e99cc807c1eb7e9238fd43a15bba460eec2`) after
 `actions/checkout` v7.0.1 (commit `3d3c42e5aac5ba805825da76410c181273ba90b1`). Default permissions are read-only.
 On `main` a second job, the only one with `contents: write`, force-pushes one orphan commit with `coverage.json`
@@ -101,7 +102,7 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
 | restate-sdk (spec 010) | 1.5.2, exact; no base dependencies | 2026-11-15 | pypi.org/project/restate-sdk |
 | hypercorn (spec 010) | 0.18.0, exact | 2025-11-08 | pypi.org/project/hypercorn |
 | coverage / pytest-cov (spec 010) | 7.17.3 / 7.1.0 | 2026-11-12 / 2026-03-21 | pypi.org |
-| uv in CI / setup-uv / checkout / runner (spec 010) | 0.13.8 / v10.3.3 / v7.0.1 / `ubuntu-26.04` | 2026-11-12 / 2026-10-28 / 2026-07-20 / GA | GitHub API, actions/runner-images |
+| uv in CI / setup-uv / checkout / runner (spec 010) | 0.13.8 / v10.3.3 / v7.0.1 / `macos-26` (arm64) | 2026-11-12 / 2026-10-28 / 2026-07-20 / GA | GitHub API, actions/runner-images |
 
 ### Restate (decided 2026-11-14, pinned in spec 010)
 

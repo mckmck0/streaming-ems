@@ -311,7 +311,8 @@ Tiers, coverage, CI and badges
 - A container reaches a host service bound to 127.0.0.1 through `host.docker.internal` on Docker Desktop.
   `plan.md` confirms it on the author's machine; if it does not hold, AC-010-07 is amended before the tasks.
 - The spike's SDK 1.0.5 runs against server 1.8 (the SDK's compatibility table says so).
-- The unit and property tiers pass on the Linux runner as they do on macOS.
+- The unit and property tiers pass on the Linux runner as they do on macOS. *Did not hold (2026-11-16): three
+  golden digests of the generator differ on Linux x86_64 and arm64, so CI runs on macOS arm64 (risk G12).*
 
 ## Open questions
 
