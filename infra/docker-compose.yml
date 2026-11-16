@@ -1,7 +1,36 @@
-# Local infrastructure (spec 001: Kafka; the dev-environment spec adds Restate here).
-# Run through the Makefile: make up | down | reset | topics | gen. Paths are relative to infra/.
+# Local infrastructure: Kafka (spec 001) and Restate with the Kafka ingress integration (spec 010).
+# Run through the Makefile: make up | register | down | reset | topics | gen. Paths are relative to infra/.
 # Pins and the reasons behind each setting: docs/context/05-deploy-and-infra.md.
 name: ems
+
+# Kafka ingress integration (spec 010): one container per target handler, in the `ingress` profile, so only
+# `make register` starts them (after the SDK service is registered) and `make down` removes them. Topic names and
+# group ids take ${EMS_INGRESS_PREFIX}, which test projects set (tests/compose.it.yml); the stack leaves it empty.
+x-ingress-env: &ingress-env
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+  KAFKA_AUTO_OFFSET_RESET: "earliest"        # the integration sets none; Kafka's `latest` would skip existing data
+  RESTATE_INGRESS_URL: "http://restate:8080"
+  RESTATE_RECORD_MAPPER_SERVICE: "Probe"
+  RESTATE_RETRY_MAX_ATTEMPTS: "${EMS_INGRESS_RETRY_MAX_ATTEMPTS:-15}"   # then the process exits; restart below
+  JDK_JAVA_OPTIONS: "-Xmx256m"
+
+x-ingress: &ingress
+  # ingress-integration-kafka 0.1.1, newest build (2026-11-09). linux/amd64 only: emulated on Apple Silicon.
+  image: ghcr.io/restatedev/ingress-integration-kafka:0.1.1-20261109@sha256:20704c886ee4dcc4046bab1743dc424bb08b2317ce1bc6da55ce738345ce01b1
+  platform: linux/amd64
+  profiles: ["ingress"]
+  labels:
+    ems.role: "ingress"                      # `make down` and `make reset` remove every container with this label
+  restart: unless-stopped
+  mem_limit: 768m
+  healthcheck:
+    # The metrics port (9464) answers once the JVM runs. bash, not CMD-SHELL: /bin/sh is dash, without /dev/tcp.
+    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9464"]
+    interval: 5s
+    timeout: 5s
+    retries: 24
+    start_period: 90s
+    start_interval: 2s
 
 services:
   kafka:
@@ -100,5 +129,58 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  restate:
+    # Restate 1.8.1-hotfix.2 (2026-11-02), the newest release. One node; the SDK service runs on the host
+    # (`make dev`, 127.0.0.1:9080) and is registered as host.docker.internal:9080 (`make register`).
+    image: restatedev/restate:1.8.1-hotfix.2-20261102@sha256:e3a11e7c694cfe0c134eca1652992c068bef0bcba3caeec9d2a3b3bc50daa62e
+    hostname: restate
+    environment:
+      RESTATE_NODE_NAME: "restate-1"         # fixed: the node finds its data under /restate-data/<node name>
+      RESTATE_CLUSTER_NAME: "ems"
+      RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE: "512 MiB"
+    ports:
+      - "127.0.0.1:8080:8080"                  # ingress
+      - "127.0.0.1:9070:9070"                  # admin API and UI
+    extra_hosts:
+      - "host.docker.internal:host-gateway"    # the SDK service on the host (needed on Linux engines)
+    volumes:
+      - restate-data:/restate-data
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:9070/health && curl -fsS -o /dev/null http://127.0.0.1:8080/restate/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      start_interval: 1s
+
+  ingress-meters:
+    <<: *ingress
+    environment:
+      <<: *ingress-env
+      KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.production.v1,${EMS_INGRESS_PREFIX:-}ems.consumption.v1"
+      KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-meters"
+      RESTATE_RECORD_MAPPER_HANDLER: "on_measurement"
+      RESTATE_KAFKA_CONSUMER_INSTANCES: "3"   # never more than the partitions read (2 topics x 3 in live/sim)
+
+  ingress-forecasts:
+    <<: *ingress
+    environment:
+      <<: *ingress-env
+      KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.weather.forecast.v1"
+      KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-forecasts"
+      RESTATE_RECORD_MAPPER_HANDLER: "on_forecast"
+      RESTATE_KAFKA_CONSUMER_INSTANCES: "3"
+
+  ingress-prices:
+    <<: *ingress
+    environment:
+      <<: *ingress-env
+      KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.price.v1"
+      KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-prices"
+      RESTATE_RECORD_MAPPER_HANDLER: "on_price"
+      RESTATE_KAFKA_CONSUMER_INSTANCES: "1"   # the price topic has one partition in live and sim
+
 volumes:
   kafka-data:
+  restate-data:
