@@ -1,6 +1,7 @@
 # CI (spec 010): `make ci` (lint, type-check, unit and property tests) on every push to main and every pull
 # request. The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine.
-# Actions are pinned by commit SHA, each the newest release when pinned (P12). Only the badge job can write, and
+# Actions are pinned by commit SHA, each the newest release when pinned (P12). macOS arm64, like the author's
+# machine: three golden digests of the generator (specs 005, 008) differ on Linux x86_64 and arm64 (risk G12). Only the badge job can write, and
 # only to the `badges` branch, which holds one commit with coverage.json for the README's coverage badge.
 name: ci
 
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   ci:
-    runs-on: ubuntu-26.04-arm
+    runs-on: macos-26
     timeout-minutes: 30
     outputs:
       coverage: ${{ steps.coverage.outputs.total }}
@@ -44,7 +45,7 @@ jobs:
   badge:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-26.04-arm
+    runs-on: macos-26
     timeout-minutes: 5
     permissions:
       contents: write
