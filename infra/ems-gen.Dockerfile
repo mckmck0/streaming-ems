@@ -1,6 +1,6 @@
 # ems-gen: the EMS data generator (spec 001). Build context is the repo root:
 #   docker build -f infra/ems-gen.Dockerfile .
-# Pins (two-week rule, see docs/context/05-deploy-and-infra.md): uv 0.12.21 (2026-09-29),
+# Pins (exact tag + digest, see docs/context/05-deploy-and-infra.md): uv 0.12.21 (2026-09-29),
 # python 3.13.15-slim-trixie (pushed 2026-09-25). Debian/glibc is required: confluent-kafka has no musl wheels.
 FROM ghcr.io/astral-sh/uv:0.12.21@sha256:a7aed3216253ee804de3e2d8afa5073baa1a177335345d43845cd4165e43b711 AS uv
 

@@ -23,13 +23,20 @@ ems-gen = "ems.ingest.cli:app"
 # Exact pins only where behaviour depends on the version: ruff must equal the ruff-pre-commit rev in
 # .pre-commit-config.yaml, and ty is pre-1.0. Everything else is pinned by uv.lock.
 dev = [
+    "coverage>=7.17.3",
     "hypothesis",
     "pre-commit",
     "pytest",
     "pytest-asyncio",
+    "pytest-cov>=7.1.0",
     "respx>=0.23.1",
     "ruff==0.16.10",
     "ty==0.0.84",
+]
+# Restate SDK service (spec 010). Exact pins: the service protocol and the HTTP/2 serving depend on them.
+actors = [
+    "hypercorn==0.18.0",
+    "restate-sdk==1.5.2",
 ]
 # Data generator (spec 001+). faker is pinned exactly because its locale data feeds a golden catalog test.
 ingest = [
@@ -54,9 +61,12 @@ requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv]
-# Every locked version must be at least two weeks old. Move this date deliberately, then `uv lock --upgrade`.
-exclude-newer = "2026-10-02T00:00:00Z"
-default-groups = ["dev", "ingest"]
+# New and bumped pins take the newest release (spec 010); uv.lock keeps every version exact.
+default-groups = ["dev", "ingest", "actors"]
+
+[tool.ty.src]
+# The reference spike is kept byte-identical (spec 010); ruff and pre-commit skip it too.
+exclude = ["reference"]
 
 [tool.ruff]
 target-version = "py313"
@@ -78,6 +88,17 @@ markers = [
     "e2e: replay compared bit-exactly with the offline reference",
     "fault: kill -9 of the SDK service or the server",
 ]
+
+[tool.coverage.run]
+# Each tier sets COVERAGE_FILE=logs/.coverage.<tier>; `make report-coverage` combines them (spec 010).
+# patch = subprocess also measures the SDK service the Restate tiers start as a child process.
+source = ["ems"]
+parallel = true
+patch = ["subprocess"]
+sigterm = true
+
+[tool.coverage.report]
+skip_empty = true
 
 [tool.ruff.lint.per-file-ignores]
 # data tables: one row per line reads better than wrapped rows
