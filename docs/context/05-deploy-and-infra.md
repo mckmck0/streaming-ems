@@ -31,9 +31,9 @@
 like the author's machine; three golden digests of the generator differ on Linux, risk G12) with
 uv 0.13.8 (`astral-sh/setup-uv` v10.3.3, commit `68559e99cc807c1eb7e9238fd43a15bba460eec2`) after
 `actions/checkout` v7.0.1 (commit `3d3c42e5aac5ba805825da76410c181273ba90b1`). Default permissions are read-only.
-On `main` a second job, the only one with `contents: write`, force-pushes one orphan commit with `coverage.json`
-(the unit and property tiers' total) to the `badges` branch, which the README's coverage badge reads through
-shields.io. The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine
+The job writes the unit and property tiers' coverage total to its summary; no job can write to the repository.
+There is no coverage badge: the repository ruleset lets no bot create a branch or push to `main`, and a
+personal-account repository cannot list GitHub Actions as a bypass actor (dropped 2026-11-20). The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine
 (risk H2). The lockfile passes `uv lock --check` with both uv 0.12.5 (local) and 0.13.8 (CI).
 
 ### Compose (`infra/docker-compose.yml`, spec 001)

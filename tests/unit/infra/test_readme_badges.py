@@ -1,6 +1,6 @@
 """README badges of spec 010.
 
-AC-010-30: the top of README.md shows badges for the CI status, the coverage, the required
+AC-010-30: the top of README.md shows badges for the CI status, the required
 Python version, uv, Ruff, ty, the Restate server version and the Kafka version.
 AC-010-31: the Restate and Kafka versions on the badges equal the image tags in
 infra/docker-compose.yml (the Restate tag without its rebuild date).
@@ -20,7 +20,6 @@ STATIC_BADGE = re.compile(r"^https://img\.shields\.io/badge/([^?#]+)")
 REBUILD_DATE = re.compile(r"-\d{8}$")
 BADGES = {
     "ci": "actions/workflows/ci.yml/badge.svg",
-    "coverage": "img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/badges/coverage.json",
     "python": "img.shields.io/python/required-version-toml",
     "uv": "astral-sh/uv/main/assets/badge",
     "ruff": "astral-sh/ruff/main/assets/badge",

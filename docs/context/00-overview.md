@@ -107,8 +107,8 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     compose profile that only `make register` starts and `make down` removes; they read from the earliest offset.
   - The probe lives in `src/ems/actors/`; its pure log function stays in the real Kafka-fed handlers from stage
     3. The skew between topics is measured per household in data time (quarter-hours of `available_at`).
-  - CI is GitHub Actions running `make ci` (this closes the OPEN CI platform); coverage per tier and README
-    badges; the integration, e2e and fault tiers run on the author's machine.
+  - CI is GitHub Actions running `make ci` (this closes the OPEN CI platform); coverage per tier (total in the CI job summary)
+    and README badges; the integration, e2e and fault tiers run on the author's machine.
   - The reference spike is tracked byte-identical under `reference/restate-ems-spike/`; the root copy moved to
     the gitignored `local/`. Its A, B and C pass unedited on the pinned server (`docs/thesis/spike-reproduction.md`).
   - Measured (`docs/thesis/kafka-ingress.md`): per-key order and exactly-once delivery hold through `kill -9` of
@@ -129,7 +129,7 @@ config/, mappings/, schemas/ generator and tariff config, live-source mappings, 
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka, Restate, Kafka ingress), Dockerfiles, spike/ctl.sh
 reference/                   restate-ems-spike/ (the reference spike, byte-identical)
-.github/workflows/           ci.yml (make ci; coverage badge on the badges branch)
+.github/workflows/           ci.yml (make ci; coverage total in the job summary)
 helm/ems/                    umbrella chart (optional spec)
 tests/                       unit/, property/, integration/, e2e/, fault/
 templates/                   bootstrap templates; frontend/ reserved
