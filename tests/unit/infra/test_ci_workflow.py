@@ -3,7 +3,7 @@
 AC-010-28: `make ci` on every push to `main` and every pull request, on a fixed runner image,
 every action pinned by commit SHA, read-only default permissions, uv pinned, no secret.
 AC-010-29: a `badge` job, after `ci` and only for a push to `main`, holds `contents: write` and
-pushes `coverage.json` to the orphan branch `badges` with plain git.
+commits `.github/badges/coverage.json` to main with plain git.
 """
 
 from __future__ import annotations
@@ -96,8 +96,8 @@ def test_ac_010_29_badge_job_holds_contents_write(workflow: dict[str, Any]) -> N
     assert _job(workflow, "badge").get("permissions") == {"contents": "write"}
 
 
-def test_ac_010_29_badge_job_force_pushes_orphan_branch(workflow: dict[str, Any]) -> None:
+def test_ac_010_29_badge_job_commits_coverage_to_main(workflow: dict[str, Any]) -> None:
     script = "\n".join(str(step.get("run", "")) for step in _steps(_job(workflow, "badge")))
-    assert "--orphan" in script
-    assert "coverage.json" in script
-    assert "push --force" in script
+    assert ".github/badges/coverage.json" in script
+    assert "push origin HEAD:main" in script
+    assert "--force" not in script

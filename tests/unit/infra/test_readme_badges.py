@@ -20,7 +20,7 @@ STATIC_BADGE = re.compile(r"^https://img\.shields\.io/badge/([^?#]+)")
 REBUILD_DATE = re.compile(r"-\d{8}$")
 BADGES = {
     "ci": "actions/workflows/ci.yml/badge.svg",
-    "coverage": "img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/badges/coverage.json",
+    "coverage": "img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/main/.github/badges/coverage.json",
     "python": "img.shields.io/python/required-version-toml",
     "uv": "astral-sh/uv/main/assets/badge",
     "ruff": "astral-sh/ruff/main/assets/badge",

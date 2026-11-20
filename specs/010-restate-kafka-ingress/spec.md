@@ -39,7 +39,7 @@ It also adds the e2e and fault test tiers, coverage, a CI workflow and README ba
 | Test isolation | Tests create topics under a fresh prefix and feed them through their own ingress containers (the stack's service definitions with the topic list and the group id overridden). They never write to the stack's topics |
 | Spike | Tracked byte-identical under `reference/restate-ems-spike/`: `README.md`, `ctl.sh`, `experiments.py`, `loadgen.py`, `rerun.py`, `requirements.txt`, `package.json`, `package-lock.json`, `ems_spike/__init__.py`, `ems_spike/model.py`, `ems_spike/restate_app.py`, `ems_spike/extra_app.py`, `tools/killport.py`, `results.json`, `results_run1.json`, `guard_test.txt`. No virtualenv, `node_modules`, server data or logs |
 | Reproducing A–C | Unedited spike files; the packages of the spike's `requirements.txt` in an isolated environment, frozen into the run's manifest; a fresh Restate instance of the pinned image, separate from the stack's; only the `ctl.sh` verbs supplied from outside `reference/`, with the `register` verb replacing `127.0.0.1` by `host.docker.internal`. If a spike file would have to change, the experiment counts as not reproduced and the stage stops for a decision |
-| CI and badges | GitHub Actions runs `make ci`. On `main` it writes the coverage number to a `badges` branch, which the README badge reads. This closes the OPEN "CI platform" |
+| CI and badges | GitHub Actions runs `make ci`. On `main` it commits the coverage number to `.github/badges/coverage.json`, which the README badge reads. This closes the OPEN "CI platform" |
 
 ## How each VERIFY item is resolved
 
@@ -251,8 +251,9 @@ Tiers, coverage, CI and badges
   `make ci` in GitHub Actions on a fixed runner image, with every action pinned by commit SHA, read-only
   default permissions and no secret besides the built-in token.
 - **AC-010-29**: WHEN that workflow succeeds on `main`, THE SYSTEM SHALL write the total line coverage of the
-  unit and property tiers to `coverage.json` on the `badges` branch, from a job that alone holds
-  `contents: write` and uses no third-party service.
+  unit and property tiers to `.github/badges/coverage.json` on `main`, from a job that alone holds
+  `contents: write` and uses no third-party service. *(Revised 2026-11-20: the first form, a `badges` branch, was
+  refused by the repository ruleset, which restricts branch creation.)*
 - **AC-010-30**: THE SYSTEM SHALL show at the top of `README.md` badges for the CI status, the coverage, the
   required Python version, uv, Ruff, ty, the Restate server version and the Kafka version.
 - **AC-010-31**: IF the Restate or Kafka version on a badge differs from the image tag in

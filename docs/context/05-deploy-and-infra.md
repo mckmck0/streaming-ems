@@ -31,9 +31,10 @@
 like the author's machine; three golden digests of the generator differ on Linux, risk G12) with
 uv 0.13.8 (`astral-sh/setup-uv` v10.3.3, commit `68559e99cc807c1eb7e9238fd43a15bba460eec2`) after
 `actions/checkout` v7.0.1 (commit `3d3c42e5aac5ba805825da76410c181273ba90b1`). Default permissions are read-only.
-On `main` a second job, the only one with `contents: write`, force-pushes one orphan commit with `coverage.json`
-(the unit and property tiers' total) to the `badges` branch, which the README's coverage badge reads through
-shields.io. The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine
+On `main` a second job, the only one with `contents: write`, commits `.github/badges/coverage.json` (the unit and
+property tiers' total) to `main` when the number changes, with `[skip ci]`; the README's coverage badge reads it
+through shields.io. The repository ruleset makes every branch take pull requests, so this push needs GitHub
+Actions on the ruleset's bypass list (a `badges` branch was refused: branch creation is restricted too). The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine
 (risk H2). The lockfile passes `uv lock --check` with both uv 0.12.5 (local) and 0.13.8 (CI).
 
 ### Compose (`infra/docker-compose.yml`, spec 001)

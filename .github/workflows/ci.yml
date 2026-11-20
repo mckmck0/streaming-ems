@@ -1,8 +1,9 @@
 # CI (spec 010): `make ci` (lint, type-check, unit and property tests) on every push to main and every pull
 # request. The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine.
 # Actions are pinned by commit SHA, each the newest release when pinned (P12). macOS arm64, like the author's
-# machine: three golden digests of the generator (specs 005, 008) differ on Linux x86_64 and arm64 (risk G12). Only the badge job can write, and
-# only to the `badges` branch, which holds one commit with coverage.json for the README's coverage badge.
+# machine: three golden digests of the generator (specs 005, 008) differ on Linux x86_64 and arm64 (risk G12).
+# Only the badge job can write: on main it commits .github/badges/coverage.json (read by the README's coverage
+# badge) when the number changes. Its push needs GitHub Actions on the ruleset's bypass list (main takes PRs).
 name: ci
 
 on:
@@ -52,8 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          fetch-depth: 1
-      - name: Force-push one orphan commit with coverage.json to the badges branch
+          ref: main
+      - name: Commit .github/badges/coverage.json to main when the number changes
         env:
           TOTAL: ${{ needs.ci.outputs.coverage }}
         run: |
@@ -65,13 +66,15 @@ jobs:
           elif [ "${TOTAL}" -ge 50 ]; then color=orange
           else color=red
           fi
+          mkdir -p .github/badges
           printf '{"schemaVersion": 1, "label": "coverage", "message": "%s%%", "color": "%s"}\n' \
-            "${TOTAL}" "${color}" > "${RUNNER_TEMP}/coverage.json"
-          git checkout --orphan badges
-          git rm -r --force --quiet .
-          cp "${RUNNER_TEMP}/coverage.json" coverage.json
-          git add coverage.json
+            "${TOTAL}" "${color}" > .github/badges/coverage.json
+          if git diff --quiet -- .github/badges/coverage.json && git ls-files --error-unmatch .github/badges/coverage.json >/dev/null 2>&1; then
+            echo "coverage unchanged at ${TOTAL}%"; exit 0
+          fi
+          git add .github/badges/coverage.json
           git -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "coverage ${TOTAL}% at ${GITHUB_SHA}"
-          git push --force origin HEAD:badges
+            commit --quiet -m "chore(infra): coverage badge ${TOTAL}% [skip ci]"
+          git pull --quiet --rebase origin main
+          git push origin HEAD:main

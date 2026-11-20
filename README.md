@@ -1,7 +1,7 @@
 # Streaming EMS
 
 [![ci](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/badges/coverage.json)](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/main/.github/badges/coverage.json)](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/mckmck0/streaming-ems/main/pyproject.toml)](pyproject.toml)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)

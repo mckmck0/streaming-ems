@@ -129,7 +129,7 @@ config/, mappings/, schemas/ generator and tariff config, live-source mappings, 
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka, Restate, Kafka ingress), Dockerfiles, spike/ctl.sh
 reference/                   restate-ems-spike/ (the reference spike, byte-identical)
-.github/workflows/           ci.yml (make ci; coverage badge on the badges branch)
+.github/workflows/           ci.yml (make ci; commits the coverage badge's JSON to main)
 helm/ems/                    umbrella chart (optional spec)
 tests/                       unit/, property/, integration/, e2e/, fault/
 templates/                   bootstrap templates; frontend/ reserved
