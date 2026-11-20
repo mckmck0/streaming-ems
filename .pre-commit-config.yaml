@@ -1,4 +1,4 @@
-# Pin every `rev` to a release at least two weeks old. The ruff-pre-commit rev must equal the ruff pin in
+# Pin every `rev` to an exact release tag, the newest when bumped. The ruff-pre-commit rev must equal the ruff pin in
 # pyproject.toml (ruff==0.16.10). The original template is in templates/.pre-commit-config.yaml.
 # reference/ (spike) and docs/bootstrap/ (frozen brief) are kept byte-identical.
 exclude: ^(reference|docs/bootstrap)/

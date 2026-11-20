@@ -55,12 +55,32 @@ missing runs, hash `75fc631fc194…`) are in `13-subsystem-ingest.md`.
   modelled; background sites use synthetic weather and forecasts uncorrelated with the window's real prices, so they
   serve scale and systems metrics, not energy results.
 
+### Kafka ingress and the reference spike (spec 010)
+
+Run with `make measure [MODE=skew|state-cost|backlog]` and `make spike` on commit `78e6ecd` (Apple M4, Docker
+Desktop 29.7.2, 7.75 GiB VM); each result directory stores its manifest (P14). Details and reading in
+`docs/thesis/kafka-ingress.md` and `docs/thesis/spike-reproduction.md`.
+
+- `ingress-skew-20261116T081120Z`: 100 households × 2 days (34,627 records) unpaced through the ingress into a
+  probe object; every key's log equal to the offline fold. 404 records/s server-side (85.6 s). Largest lead of one
+  of a household's streams over another, in quarter-hours: weather forecast over production median 160, max 167;
+  consumption over production median 127, max 130; production over consumption median 6, max 15. Peak memory:
+  Restate 1,556 MiB, Kafka 797 MiB, ingress containers 288–558 MiB; no OOM kill.
+- `ingress-state-cost-20261116T081221Z`: a one-key call costs a median of 2 / 3 / 9 ms with 1 kB / 100 kB / 1 MB
+  of eager object state (299 / 235 / 84 calls/s); lazy state 3 / 4 / 3 ms, with one 39 s outlier at 1 MB.
+- `ingress-backlog-20261116T081316Z`: with the SDK service stopped, the Kafka lag still fell to 0 within 7.4 s and
+  3,426 records waited in Restate as invocations; 8.8 s to drain after the service came back.
+- `spike-20261116T080544Z`: the spike's A, B and C, unedited, on Restate 1.8.1-hotfix.2 with its own
+  `restate-sdk` 1.0.5: 0 mismatches in A (150 states) and C (200), and in B after confirmed `kill -9` of the SDK
+  service and the server (14,400 events, 96 per strategy state).
+
 ## What to build
 
 - Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to
   Parquet, the run manifest and reports. Scale runs are published paced (`accelerated` mode), and the highest
   speed the system sustains is a result (risk A1).
-- Stage 3 delivers the first bit-exact comparison through Kafka (10 households × 1 day).
+- Stage 3 delivers the first bit-exact comparison of actor state through Kafka (10 households × 1 day); stage 2
+  compared the ingress log only.
 
 ## Prerequisites
 

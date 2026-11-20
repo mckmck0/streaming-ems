@@ -19,9 +19,6 @@ node_modules/
 .env
 .env.*
 
-# Restate spike as unpacked at the repo root (anchored, so a later reference/restate-ems-spike/ stays tracked)
-/restate-ems-spike/
-
 # Claude Code: personal and machine-local files (shared config in .claude/ is committed)
 .claude/settings.local.json
 .claude/worktrees/
@@ -33,6 +30,9 @@ CLAUDE.local.md
 
 # Raw experiment and benchmark results (reported numbers are copied into docs with their path)
 /experiments/results/
+
+# Test tier coverage data and SDK service logs (spec 010)
+/logs/
 
 # local dir
 /local/*

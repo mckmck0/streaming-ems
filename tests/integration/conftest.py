@@ -1,4 +1,8 @@
-"""Integration fixtures: the compose stack from `make up`, isolated per run by topic prefix."""
+"""Integration fixtures: the compose stack from `make up`, isolated per run by topic prefix.
+
+The Restate fixtures (spec 010) live in tests/stack_fixtures.py, shared with the e2e and fault
+tiers.
+"""
 
 from __future__ import annotations
 
@@ -8,25 +12,15 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from confluent_kafka.admin import AdminClient
 
 from ems.contracts.topics import TopicPlan, load_plan
 from ems.ingest.kafka.admin import KafkaTopicAdmin, ensure
-from ems.ingest.kafka.config import base_config
-from ems.settings import EmsSettings
+from tests.stack_fixtures import bootstrap, restate_session, run_id, stack_env
+
+__all__ = ["bootstrap", "restate_session", "run_id", "stack_env"]
 
 REPO = Path(__file__).resolve().parents[2]
 COMPOSE = ["docker", "compose", "-f", str(REPO / "infra" / "docker-compose.yml")]
-
-
-@pytest.fixture(scope="session")
-def bootstrap() -> str:
-    s = EmsSettings()
-    try:
-        AdminClient(base_config(s.kafka_bootstrap)).list_topics(timeout=10)
-    except Exception as exc:  # broker missing: these tests need real services
-        pytest.fail(f"Kafka not reachable at {s.kafka_bootstrap} ({exc}); run `make up` first")
-    return s.kafka_bootstrap
 
 
 @pytest.fixture

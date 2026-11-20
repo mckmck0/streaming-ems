@@ -11,12 +11,12 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-11-14)
+### Status of every piece (2026-11-16)
 
 | Piece | Status |
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
-| Canonical docs | 00, 01, 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 02–04 land with the actor and strategy stages |
+| Canonical docs | 00, 01, 02 (runtime and ingress; handlers with stage 3), 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 03–04 land with the strategy stages |
 | ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005), 0017 (time and ordering); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
@@ -27,8 +27,9 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
 | Historical backfill on real data: fetch once, build offline, replay; window 2026-04-02 … 06-30 fetched (spec 008) | Built |
 | Domain core: 2026 tariffs of four DSOs, hourly net-billing settlement with the deposit, price signal, actions, `Policy`, offline reference and stepper (spec 009) | Built |
-| Time and ordering model, actor skeleton design (stage 1: ADR 0017, `01-architecture.md`) | Designed, not built |
-| Restate environment, spike reproduction, actors, experiments, strategies, Selector (stages 2–6) | Not built; briefs in `01-architecture.md` |
+| Time and ordering model, actor skeleton design (stage 1: ADR 0017, `01-architecture.md`) | Designed; the actors are built in stage 3 |
+| Restate environment and Kafka into a Virtual Object: Restate 1.8.1-hotfix.2, the Kafka ingress integration, `make register`/`dev`, e2e and fault tiers, coverage, CI, a probe object, the spike reproduced (stage 2, spec 010) | Built |
+| Actors, experiments, strategies, Selector (stages 3–6) | Not built; briefs in `01-architecture.md` |
 | `frontend/` | Reserved, out of scope |
 
 ### Decisions so far (not yet in an ADR)
@@ -96,6 +97,25 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
   - The RCEm table is a run parameter read as config; a synthetic run computes its proxy table before the run.
   - The remaining work is six stages, one spec and one conversation each (table below).
 
+- 2026-11-15 (spec 010, stage 2): the Restate environment and Kafka into a Virtual Object.
+  - Version policy (user decision): a new or bumped pin takes the newest release, with no minimum age, because
+    security fixes arrive often; pins stay exact (uv.lock, image tag plus digest, action SHA). `exclude-newer`
+    is removed. Pins older than the policy are refreshed in a separate change (risk H4).
+  - Pins: Restate `1.8.1-hotfix.2`, the Kafka ingress integration `0.1.1` (newest build `20261109`),
+    `restate-sdk` 1.5.2, hypercorn 0.18.0.
+  - Kafka-fed handlers take raw bytes and count a bad record instead of raising. The ingress containers sit in a
+    compose profile that only `make register` starts and `make down` removes; they read from the earliest offset.
+  - The probe lives in `src/ems/actors/`; its pure log function stays in the real Kafka-fed handlers from stage
+    3. The skew between topics is measured per household in data time (quarter-hours of `available_at`).
+  - CI is GitHub Actions running `make ci` (this closes the OPEN CI platform); coverage per tier and README
+    badges; the integration, e2e and fault tiers run on the author's machine.
+  - The reference spike is tracked byte-identical under `reference/restate-ems-spike/`; the root copy moved to
+    the gitignored `local/`. Its A, B and C pass unedited on the pinned server (`docs/thesis/spike-reproduction.md`).
+  - Measured (`docs/thesis/kafka-ingress.md`): per-key order and exactly-once delivery hold through `kill -9` of
+    each component; an unpaced backfill lets a household's streams drift up to 167 quarter-hours apart; with the
+    handlers down a backlog moves into Restate, not Kafka. The ingress never exits while Restate is down (it
+    reconnects every 500 ms), and `force: false` registration keeps old handlers.
+
 ### Repo map (current and planned)
 
 ```
@@ -107,7 +127,9 @@ src/ems/                     contracts/ (wire models), ingest/ (generators), dom
                              strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
 config/, mappings/, schemas/ generator and tariff config, live-source mappings, exported JSON Schemas
 jobs/                        batch CLIs (no HTTP surface)
-infra/                       docker-compose.yml (Kafka now, Restate later), Dockerfiles
+infra/                       docker-compose.yml (Kafka, Restate, Kafka ingress), Dockerfiles, spike/ctl.sh
+reference/                   restate-ems-spike/ (the reference spike, byte-identical)
+.github/workflows/           ci.yml (make ci; coverage badge on the badges branch)
 helm/ems/                    umbrella chart (optional spec)
 tests/                       unit/, property/, integration/, e2e/, fault/
 templates/                   bootstrap templates; frontend/ reserved
@@ -135,7 +157,7 @@ conversation from its brief in `01-architecture.md`.
 | Stage | Scope | Done when |
 |---|---|---|
 | 1 Ordering decision (docs only, no spec) | ADR 0017, `01-architecture.md`, updates to 00, 05, 06, 08, 09 | Done 2026-11-14 |
-| 2 Restate environment and Kafka into a Virtual Object | Restate 1.8.1-hotfix.2 and the Kafka ingress integration in compose (one container per target handler), `make register` and `make dev`, the e2e and fault tiers, a probe object fed from the four topics, spike experiments A–C (the spike sits untracked at `restate-ems-spike/`; the stage moves it to `reference/restate-ems-spike/`). Merges the former "Kafka ingestion" and "Dev environment" rows | The stack is healthy and registration is idempotent. The probe sees each key's records in partition order, with none lost or doubled after `kill -9` of the server, the SDK service or an ingress container. The skew between topics during a backfill is recorded for the thesis. Spike A and C show 0 mismatches and B 0 duplicates. V1–V4 and V7–V11 of 01 are resolved with value, source and date |
+| 2 Restate environment and Kafka into a Virtual Object (spec 010; done 2026-11-15) | Restate 1.8.1-hotfix.2 and the Kafka ingress integration in compose (one container per target handler), `make register` and `make dev`, the e2e and fault tiers, a probe object fed from the four topics, spike experiments A–C (the spike sits untracked at `restate-ems-spike/`; the stage moves it to `reference/restate-ems-spike/`). Merges the former "Kafka ingestion" and "Dev environment" rows | The stack is healthy and registration is idempotent. The probe sees each key's records in partition order, with none lost or doubled after `kill -9` of the server, the SDK service or an ingress container. The skew between topics during a backfill is recorded for the thesis. Spike A and C show 0 mismatches and B 0 duplicates. V1–V4 and V7–V11 of 01 are resolved with value, source and date |
 | 3 Actor skeleton | The pure assembler (watermarks, join, dedup, late rule) with property tests, one mapping from events to `QuarterIn` shared with the offline reference, the actors of 01 with NoBattery and SelfConsumption | 10 households × 1 day through Kafka give strategy and `Meter` state equal to the offline side with `==`, also with the topics published in different orders, with `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (the run that produces corrections and drops). The parity check holds. Unmanaged sites keep O(1) state |
 | 4 Clocks and systems experiments | The live wall-clock deadline timer; adding a strategy from a data time `t0`; `kill -9` runs; scaling households × strategies at paced speeds; the export CLI and run manifest | Results stay identical under failures. Recovery latency by phase, sustained speed, events per second and decision latency are reported (P16) |
 | 5 Strategies and forecasts | Price rules, MPC with the offline oracle, forecasts with a persistence baseline | Per-strategy results against the reference |
@@ -156,6 +178,7 @@ Started only when every mandatory piece above is implemented, tested, validated 
 
 ## Open questions
 
-- OPEN (brief §13): research-contribution strategies, thesis language, CI platform, battery wear model.
+- OPEN (brief §13): research-contribution strategies, thesis language, battery wear model. (The CI platform
+  was settled by spec 010: GitHub Actions.)
 - OPEN only for the optional specs: GPU availability (LLM strategy); single-node Kafka on Kubernetes (Strimzi vs
   Redpanda) and Restate Operator vs plain Deployments (Helm).

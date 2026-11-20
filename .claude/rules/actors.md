@@ -5,9 +5,10 @@ paths:
 
 # Actor adapters (`src/ems/actors/`)
 
-Actors are thin Restate Virtual Objects (Python SDK, pinned in stage 2) over the domain core. The actors, their
-edges and the time and ordering model are in `docs/context/01-architecture.md` (ADR 0017). Before changing a
-handler, message, timer or state ownership, invoke the `ems-actor-contract` skill and update
+Actors are thin Restate Virtual Objects (`restate-sdk` 1.5.2, served by hypercorn) over the domain core. The
+actors, their edges and the time and ordering model are in `docs/context/01-architecture.md` (ADR 0017); the
+runtime, registration and Kafka ingress in `docs/context/02-subsystem-actors.md`. Before changing a handler,
+message, timer or state ownership, invoke the `ems-actor-contract` skill and update
 `docs/context/08-contracts.md`.
 
 - Handler shape: validate the message → call the domain → write only this actor's own state → send messages.
@@ -27,7 +28,8 @@ handler, message, timer or state ownership, invoke the `ems-actor-contract` skil
 - R4: idempotent ingress. Restate deduplicates redelivered Kafka records and a handler's own sends; the slot
   table in state drops an event published twice (`event_id` per stream and `t`). Kafka record key = household
   key. A handler fed from Kafka must not raise on bad data, because a retried record would block its key: it
-  counts the record and returns. Whether that needs raw-bytes input is VERIFY until stage 2 (V2, V3 in 01).
+  takes raw bytes (`BytesSerde`, `accept="*/*"`), parses inside, counts a bad record and returns (decided in
+  stage 2, `02-subsystem-actors.md`).
 - R6: self-rescheduling jobs carry a generation number and stale chains stop themselves.
 - R7: every message carries `schema_version`, `t` and a sim timestamp; receivers apply messages in `t` or
   sequence order, hold back early ones, and count every reordering instead of failing.

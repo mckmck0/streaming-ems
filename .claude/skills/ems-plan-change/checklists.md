@@ -25,7 +25,7 @@ which test or review shows it?
 | P9 | Are contract changes versioned and additive? (section 2) |
 | P10 | Do new batch jobs (training, backtests, oracle) stay CLIs without an HTTP surface? |
 | P11 | Are new settings in `settings.py` (pydantic-settings), required ones failing fast, with no secret defaults? |
-| P12 | Are new dependencies locked in `uv.lock` under the exclude-newer cutoff, and images or tools pinned by tag and digest, each at least two weeks old? |
+| P12 | Are new dependencies locked in `uv.lock`, images and tools pinned by tag and digest, actions by commit SHA, each the newest release when pinned? |
 | P13 | Is observability all-or-nothing (no partial tracing)? |
 | P14 | Does every experiment result store config, seed, data window, hardware and git commit? |
 | P15 | Do the `docs/context/` updates and ADRs land in the same change? |

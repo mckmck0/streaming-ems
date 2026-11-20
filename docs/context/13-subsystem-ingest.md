@@ -334,8 +334,8 @@ balance.
 
 ## What to build
 
-- Stages 2 and 3 (`01-architecture.md`): consume these topics into Restate through the Kafka ingress
-  integration, then join and order them per household (ADR 0017). Stage 3 adds the schedule constants (forecast
+- Stage 3 (`01-architecture.md`): join and order the topics per household (ADR 0017). Stage 2 (spec 010)
+  built the consumption into Restate through the Kafka ingress integration (`02-subsystem-actors.md`). Stage 3 adds the schedule constants (forecast
   run cadence, price publication window) to `ems.contracts.availability` with a test of the generator against
   them; stage 4 adds pacing for history replays.
 - Later, if needed: weather-cell keyed forecasts (G6), DSO standard profiles for C-tariff shapes.

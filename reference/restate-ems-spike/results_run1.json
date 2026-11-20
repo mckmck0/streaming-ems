@@ -1,0 +1,208 @@
+{
+  "A_baseline": {
+    "households": 50,
+    "events": 4800,
+    "strategies": [
+      "NoBattery",
+      "SelfConsumption",
+      "PriceAware"
+    ],
+    "ingest_s": 56.9,
+    "end_to_end_s": 82.2,
+    "events_per_s": 58.4,
+    "handler_invocations": 38400,
+    "invocations_per_s": 467.1,
+    "ingest_retries": 0,
+    "http_errors": 0,
+    "verification": {
+      "checked": 150,
+      "mismatches": 0,
+      "events_total": 14400,
+      "out_of_order": 0,
+      "late_joiners": 0,
+      "meter_vs_selfconsumption_mismatch": 0,
+      "examples": [],
+      "ems_decisions": 4800,
+      "ems_stale_decisions_pct": 98.8,
+      "ems_mean_lag_ms": 23269.3,
+      "ems_max_lag_ms": 34567.7
+    },
+    "mean_daily_cost_pln": {
+      "NoBattery": 6.958,
+      "SelfConsumption": -0.526,
+      "PriceAware": 2.271
+    }
+  },
+  "B_crash": {
+    "households": 50,
+    "events": 4800,
+    "strategies": [
+      "NoBattery",
+      "SelfConsumption",
+      "PriceAware"
+    ],
+    "ingest_s": 124.4,
+    "end_to_end_s": 138.5,
+    "events_per_s": 34.7,
+    "handler_invocations": 38400,
+    "invocations_per_s": 277.3,
+    "ingest_retries": 529,
+    "http_errors": 0,
+    "verification": {
+      "checked": 150,
+      "mismatches": 0,
+      "events_total": 14400,
+      "out_of_order": 0,
+      "late_joiners": 0,
+      "meter_vs_selfconsumption_mismatch": 0,
+      "examples": [],
+      "ems_decisions": 4800,
+      "ems_stale_decisions_pct": 99.0,
+      "ems_mean_lag_ms": 28397.0,
+      "ems_max_lag_ms": 103172.5
+    },
+    "mean_daily_cost_pln": {
+      "NoBattery": 6.916,
+      "SelfConsumption": -0.553,
+      "PriceAware": 2.241
+    },
+    "chaos": [
+      [
+        "kill -9 SDK service",
+        1452
+      ],
+      [
+        "kill -9 restate-server",
+        2895
+      ],
+      [
+        "server healthy again after s",
+        0.6
+      ]
+    ]
+  },
+  "C_dynamic_routing": {
+    "households": 50,
+    "events": 4800,
+    "strategies": [
+      "NoBattery",
+      "SelfConsumption",
+      "PriceAware",
+      "SelfConsumptionReserve"
+    ],
+    "ingest_s": 56.8,
+    "end_to_end_s": 82.7,
+    "events_per_s": 58.0,
+    "handler_invocations": 40250,
+    "invocations_per_s": 486.7,
+    "ingest_retries": 0,
+    "http_errors": 0,
+    "verification": {
+      "checked": 200,
+      "mismatches": 0,
+      "events_total": 16250,
+      "out_of_order": 0,
+      "late_joiners": 50,
+      "meter_vs_selfconsumption_mismatch": 0,
+      "examples": [],
+      "ems_decisions": 4800,
+      "ems_stale_decisions_pct": 99.0,
+      "ems_mean_lag_ms": 23311.5,
+      "ems_max_lag_ms": 34347.0
+    },
+    "mean_daily_cost_pln": {
+      "NoBattery": 7.147,
+      "SelfConsumption": -0.264,
+      "PriceAware": 2.435
+    },
+    "steps": [
+      [
+        "start + register deployment #2",
+        2401
+      ],
+      [
+        "registry configured",
+        2889,
+        {
+          "households": 50,
+          "strategies": [
+            "NoBattery",
+            "SelfConsumption",
+            "PriceAware",
+            "SelfConsumptionReserve"
+          ]
+        }
+      ]
+    ]
+  },
+  "D_durable_timers": {
+    "scheduled_at": 1791966547.4426837,
+    "due_at": 1791966567.4426837,
+    "downtime_s": 8.8,
+    "fired": [
+      {
+        "requested_delay_s": 6,
+        "fired_vs_due_s": 26.26
+      },
+      {
+        "requested_delay_s": 20,
+        "fired_vs_due_s": 12.24
+      }
+    ],
+    "refresh_ticks_before_kill": 3,
+    "refresh_ticks_after_restart": 1,
+    "max_gap_between_refresh_ticks_s": 33.1
+  },
+  "D2_durable_timers_capped_retry": {
+    "scheduled_at": 1791966651.6736867,
+    "due_at": 1791966671.6736867,
+    "downtime_s": 8.7,
+    "fired": [
+      {
+        "requested_delay_s": 6,
+        "fired_vs_due_s": 10.23
+      },
+      {
+        "requested_delay_s": 20,
+        "fired_vs_due_s": 0.03
+      }
+    ],
+    "refresh_ticks_before_kill": 7,
+    "refresh_ticks_after_restart": 1,
+    "max_gap_between_refresh_ticks_s": 64.9
+  },
+  "E_scale_200": {
+    "households": 200,
+    "events": 19200,
+    "strategies": [
+      "NoBattery",
+      "SelfConsumption",
+      "PriceAware"
+    ],
+    "ingest_s": 280.0,
+    "end_to_end_s": 314.9,
+    "events_per_s": 61.0,
+    "handler_invocations": 153600,
+    "invocations_per_s": 487.8,
+    "ingest_retries": 0,
+    "http_errors": 0,
+    "verification": {
+      "checked": 600,
+      "mismatches": 0,
+      "events_total": 57600,
+      "out_of_order": 0,
+      "late_joiners": 0,
+      "meter_vs_selfconsumption_mismatch": 0,
+      "examples": [],
+      "ems_decisions": 19200,
+      "ems_stale_decisions_pct": 99.0,
+      "ems_mean_lag_ms": 40981.6,
+      "ems_max_lag_ms": 101259.5
+    },
+    "mean_daily_cost_pln": {
+      "NoBattery": 7.326,
+      "SelfConsumption": -0.113,
+      "PriceAware": 2.604
+    }
+  }
+}

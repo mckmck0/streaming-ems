@@ -6,9 +6,9 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install format lint type-check test test-unit test-integration ci clean \
-        up down reset topics topics-describe gen gen-fast gen-backfill tail validate schemas \
-        gen-live record replay stats bench history
+.PHONY: help install format lint type-check test test-unit test-integration test-e2e test-fault \
+        report-coverage ci clean up down reset topics topics-describe gen gen-fast gen-backfill tail \
+        validate schemas gen-live record replay stats bench history register dev spike measure
 
 help:
 	@echo ""
@@ -18,12 +18,15 @@ help:
 	@echo "  format      ruff check --fix + ruff format. Run at the end of every code change"
 	@echo "  lint        uv lock --check + ruff check + ruff format --check"
 	@echo "  type-check  ty check"
-	@echo "  test        unit + property + integration tests (integration needs make up)"
+	@echo "  test        unit + integration + e2e tiers, then report-coverage"
 	@echo "  test-unit   unit and property tests (no infrastructure)"
-	@echo "  test-integration  integration tests against the compose stack (make up first)"
+	@echo "  test-integration / test-e2e / test-fault   tiers against the compose stack (starts it)"
+	@echo "  report-coverage   combine the tiers' coverage into logs/coverage.xml and print the total"
 	@echo "  ci          lint + type-check + test-unit"
 	@echo ""
-	@echo "  up / down   local Kafka stack (infra/docker-compose.yml); reset wipes its volume (asks)"
+	@echo "  up / down   Kafka and Restate (infra/docker-compose.yml); reset wipes both volumes (asks)"
+	@echo "  dev         serve the SDK service on 127.0.0.1:9080 (reloads on change)"
+	@echo "  register    register it with Restate (FORCE=true overwrites), then start the Kafka ingress"
 	@echo "  topics      ensure topics (PROFILE=live|sim|scale); topics-describe shows drift"
 	@echo "  gen         generator in compose (realtime); gen-fast (x96); gen-backfill DAYS=2 START=..."
 	@echo "  tail TOPIC=...  validate   inspect and validate topics; schemas re-exports JSON Schemas"
@@ -31,6 +34,8 @@ help:
 	@echo "  record NAME=...  replay NAME=... [BACKGROUND=1]   record live sources / publish a recording"
 	@echo "  stats       gaps, duplicates, late events per topic; bench  generation + producer benchmark"
 	@echo "  history NAME=... START=YYYY-MM-DD END=YYYY-MM-DD   fetch + build a real-data window"
+	@echo "  measure [MODE=skew|state-cost|backlog]   ingress measurements to experiments/results/"
+	@echo "  spike       reproduce the reference spike's experiments A, B, C on the pinned server"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
 
@@ -54,13 +59,31 @@ lint:
 type-check:
 	uv run ty check
 
+# Test tiers (markers from the test directory). Each writes its coverage data to logs/.coverage.<tier>;
+# the Restate tiers start their own SDK service on 127.0.0.1:9080 and leave the stack's ingestion closed.
+LOGS_DIR := logs
 test-unit:
-	uv run pytest -m "unit or property"
+	@mkdir -p $(LOGS_DIR)
+	COVERAGE_FILE=$(LOGS_DIR)/.coverage.unit uv run pytest -m "unit or property" --cov=ems --cov-report=
 
-test-integration:
-	uv run pytest -m integration
+test-integration: up
+	@mkdir -p $(LOGS_DIR)
+	COVERAGE_FILE=$(LOGS_DIR)/.coverage.integration uv run pytest -m integration --cov=ems --cov-report=
 
-test: test-unit test-integration
+test-e2e: up
+	@mkdir -p $(LOGS_DIR)
+	COVERAGE_FILE=$(LOGS_DIR)/.coverage.e2e uv run pytest -m e2e --cov=ems --cov-report=
+
+test-fault: up
+	@mkdir -p $(LOGS_DIR)
+	COVERAGE_FILE=$(LOGS_DIR)/.coverage.fault uv run pytest -m fault --cov=ems --cov-report=
+
+report-coverage:
+	uv run coverage combine --keep --data-file=$(LOGS_DIR)/.coverage $(LOGS_DIR)
+	uv run coverage xml --data-file=$(LOGS_DIR)/.coverage -o $(LOGS_DIR)/coverage.xml
+	uv run coverage report --data-file=$(LOGS_DIR)/.coverage
+
+test: test-unit test-integration test-e2e report-coverage
 
 ci: lint type-check test-unit
 	@echo ""
@@ -70,7 +93,7 @@ clean:
 	rm -rf .pytest_cache .ruff_cache .hypothesis build dist logs
 	find src -name __pycache__ -type d -prune -exec rm -rf {} +
 
-# ── Spec 001: data pipeline (Kafka stack, topics, generator) ──
+# ── Spec 001: data pipeline (Kafka stack, topics, generator); spec 010 adds Restate and the ingress ──
 COMPOSE  := docker compose -f infra/docker-compose.yml
 PROFILE  ?= live
 DAYS     ?= 2
@@ -78,14 +101,18 @@ START    ?= 2026-10-20T00:00:00Z
 TOPIC    ?= ems.production.v1
 up:
 	$(COMPOSE) up -d --wait
+# down and reset also remove every ingress container (label ems.role=ingress), test projects included, so
+# no ingress container can feed a server whose deployment it does not know.
 down:
-	$(COMPOSE) down
+	$(COMPOSE) --profile ingress down
+	@ids=$$(docker ps -aq --filter label=ems.role=ingress); [ -z "$$ids" ] || docker rm -f $$ids >/dev/null
 reset:
 	@if [ "$(CONFIRM)" != "yes" ]; then \
-	  read -r -p "This deletes the Kafka volume and all topic data. Type yes to continue: " ans; \
+	  read -r -p "This deletes the Kafka and Restate volumes (topics, registrations, object state). Type yes to continue: " ans; \
 	  [ "$$ans" = "yes" ] || { echo "aborted"; exit 1; }; \
 	fi
-	$(COMPOSE) down -v
+	$(COMPOSE) --profile ingress down -v
+	@ids=$$(docker ps -aq --filter label=ems.role=ingress); [ -z "$$ids" ] || docker rm -f $$ids >/dev/null
 topics:
 	uv run ems-gen topics ensure --profile $(PROFILE) --apply-config
 topics-describe:
@@ -126,6 +153,24 @@ bench:
 history:
 	uv run ems-gen history fetch --name $(NAME) --start $(START) --end $(END)
 	uv run ems-gen history build --name $(NAME)
+
+# ── Spec 010: Restate, the SDK service and the Kafka ingress ──
+# The defaults equal ems.settings (EMS_RESTATE_ADMIN_URL, EMS_SERVICE_URL). FORCE=true overwrites a deployment
+# at the same URI (needed when its handlers change; development only). curl -f stops before the ingress starts.
+RESTATE_ADMIN ?= $(or $(EMS_RESTATE_ADMIN_URL),http://127.0.0.1:9070)
+SERVICE_URL   ?= $(or $(EMS_SERVICE_URL),http://host.docker.internal:9080)
+FORCE ?= false
+MODE  ?= skew
+register:
+	curl -fsS -X POST "$(RESTATE_ADMIN)/deployments" -H "content-type: application/json" -d '{"uri": "$(SERVICE_URL)", "force": $(FORCE)}'
+	@echo
+	$(COMPOSE) --profile ingress up -d --wait ingress-meters ingress-forecasts ingress-prices
+dev:
+	uv run hypercorn ems.actors.app:app --bind 127.0.0.1:9080 --reload
+measure:   # LOCATIONS= and DAYS= override the mode's defaults (skew 100 x 2, backlog 20 x 1)
+	uv run python jobs/ingress_measure.py $(MODE) $(if $(LOCATIONS),--locations $(LOCATIONS),) $(if $(filter command line environment,$(origin DAYS)),--days $(DAYS),)
+spike:
+	uv run python jobs/spike_repro.py A B C
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)

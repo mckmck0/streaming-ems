@@ -27,6 +27,12 @@ class EmsSettings(BaseSettings):
     mappings_dir: Path = Path("mappings")
     data_dir: Path = Path("data")
     delivery_timeout_ms: int = Field(default=120_000, gt=0)
+    # Restate (spec 010): ingress and admin API as the host sees them, and the SDK service as the
+    # Restate container reaches it. The Makefile's RESTATE_ADMIN and SERVICE_URL default to the same
+    # values.
+    restate_ingress_url: str = "http://127.0.0.1:8080"
+    restate_admin_url: str = "http://127.0.0.1:9070"
+    service_url: str = "http://host.docker.internal:9080"
     open_meteo_api_key: SecretStr | None = None
     entsoe_token: SecretStr | None = None
 

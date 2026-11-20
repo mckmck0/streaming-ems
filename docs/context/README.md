@@ -6,14 +6,14 @@ These files are the current consensus for the EMS thesis project. Claude Code re
 Each doc describes its piece in four parts: **Current consensus** (decided or verified, with sources),
 **What to build** (deliverables and the backlog spec that owns them), **Prerequisites**, and **Open
 questions**. `OPEN` marks an undecided choice, `VERIFY` a fact that still has to be checked against an
-official source. Versions were checked on 2026-10-16; "at least two weeks old" then means released on or
-before 2026-10-02.
+official source. Each version records the date it was checked. New and bumped pins take the newest release
+(decided 2026-11-15, spec 010; until then they had to be at least two weeks old).
 
 | File | Covers |
 |---|---|
 | [00-overview.md](00-overview.md) | Purpose, scope, status of every piece, repo map, backlog, decisions so far |
 | [01-architecture.md](01-architecture.md) | Actors, keys, single-writer ownership, message diagram, time and ordering model, stage briefs |
-| [02-subsystem-actors.md](02-subsystem-actors.md) *(planned)* | Restate services and handlers, rules R1–R7, registration, Kafka ingress |
+| [02-subsystem-actors.md](02-subsystem-actors.md) | Restate runtime and SDK service, registration, Kafka ingress, rules R1–R7; actor handlers from stage 3 |
 | [03-subsystem-strategies-and-evaluation.md](03-subsystem-strategies-and-evaluation.md) *(planned)* | Policy contract, shadow vs live, Evaluator, Selector |
 | [04-subsystem-forecasting-and-optimization.md](04-subsystem-forecasting-and-optimization.md) *(planned)* | Forecasters, MILP/MPC, oracle, data sources |
 | [05-deploy-and-infra.md](05-deploy-and-infra.md) | uv project and tooling, Makefile, pre-commit, Compose, kind, Helm, CI, pinned versions |

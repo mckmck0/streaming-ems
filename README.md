@@ -1,5 +1,14 @@
 # Streaming EMS
 
+[![ci](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mckmck0/streaming-ems/badges/coverage.json)](https://github.com/mckmck0/streaming-ems/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/mckmck0/streaming-ems/main/pyproject.toml)](pyproject.toml)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
+[![Restate](https://img.shields.io/badge/Restate-1.8.1--hotfix.2-blue)](https://github.com/restatedev/restate)
+[![Kafka](https://img.shields.io/badge/Kafka-4.3.1-black)](https://kafka.apache.org)
+
 MSc thesis project: an energy management system for residential prosumers (PV + home battery + grid,
 Polish/EU market, 15-minute intervals) built on durable stateful actors (Restate Virtual Objects, Python
 SDK). The same live stream feeds many battery strategies, each on its own virtual battery, so they can be
@@ -16,7 +25,7 @@ compared counterfactually while one of them drives the real battery.
   - [Generate data](#generate-data)
     - [Real-data window](#real-data-window)
   - [Check the setup](#check-the-setup)
-  - [Start the engine (TBD)](#start-the-engine-tbd)
+  - [Start the engine](#start-the-engine)
   - [Stop and reset](#stop-and-reset)
   - [Troubleshooting](#troubleshooting)
 - [Data](#data)
@@ -46,10 +55,10 @@ compared counterfactually while one of them drives the real battery.
 
 ## About
 
-- **Status:** the data pipeline is built (specs 001 to 004): the generators, the Kafka stack and the wire
-  contract. The EMS engine itself (Restate actors, strategies, settlement) is **not built yet**; see
-  [Start the engine (TBD)](#start-the-engine-tbd) and the backlog in
-  [docs/context/00-overview.md](docs/context/00-overview.md).
+- **Status:** the data pipeline (specs 001 to 008), the domain core (spec 009) and the Restate environment
+  with the Kafka ingress (spec 010) are built. The EMS actors (households, battery, strategies, settlement in
+  actors) are **not built yet**: today the topics feed a probe object; see [Start the engine](#start-the-engine)
+  and the backlog in [docs/context/00-overview.md](docs/context/00-overview.md).
 - **Canonical docs:** [docs/context/README.md](docs/context/README.md) (index and status of every piece).
   Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
@@ -63,11 +72,12 @@ compared counterfactually while one of them drives the real battery.
 | Tool | Why | Notes |
 |---|---|---|
 | [uv](https://docs.astral.sh/uv/) | Python environment and dependencies | uv provides Python 3.13 or newer itself (`requires-python >= 3.13`). The generator image pins uv 0.12.21. |
-| Docker with Compose v2 | Kafka, Kafka UI and the containerised generator | Docker Desktop or Docker Engine. The Kafka container is limited to 1 GB of memory. |
+| Docker with Compose v2 | Kafka, Kafka UI, Restate, the Kafka ingress and the containerised generator | Docker Desktop or Docker Engine. Memory limits: Kafka 1 GB, Restate 2 GB, each of the three ingress containers 768 MB. The ingress image is linux/amd64 only and runs emulated on Apple Silicon. |
 | GNU Make | The only entry point for commands | The macOS default (3.81) works. |
 | Network access | Only for live sources | Synthetic data needs none. Live runs call PSE and Open-Meteo (and ENTSO-E with a token). |
 
-Host ports used, all bound to `127.0.0.1`: 9092 (Kafka) and 8088 (Kafka UI). Kafka runs as one broker.
+Host ports used, all bound to `127.0.0.1`: 9092 (Kafka), 8088 (Kafka UI), 8080 (Restate ingress), 9070 (Restate
+admin API and UI) and 9080 (the SDK service, `make dev`). Kafka runs as one broker, Restate as one node.
 
 ### Install
 
@@ -103,7 +113,7 @@ is on but the token is not exported, ENTSO-E is skipped without any message. Che
 ### Start Kafka
 
 ```bash
-make up             # Kafka (KRaft), one-shot topic creation, Kafka UI; waits until healthy
+make up             # Kafka (KRaft), one-shot topic creation, Kafka UI, Restate; waits until healthy
 ```
 
 - Kafka listens on `localhost:9092`. The read-only Kafka UI is at <http://127.0.0.1:8088>.
@@ -174,24 +184,40 @@ make ci                # lint, type-check and the unit and property tests; needs
 make test-integration  # tests against the real stack; run `make up` first
 ```
 
-### Start the engine (TBD)
+### Start the engine
 
-**Not available yet.** The EMS engine (Restate server, the Python service with the household, battery and
-strategy actors, the Kafka ingress that feeds it from the topics above) has not been built. Its design is in
-[docs/context/01-architecture.md](docs/context/01-architecture.md), and it is next in the backlog in
-[docs/context/00-overview.md](docs/context/00-overview.md): first Restate with the Kafka ingress, then the
-actors. This section will hold the start commands (the planned `make` targets for it are listed, commented
-out, at the bottom of the [Makefile](Makefile)).
+The engine is Restate (started by `make up`), the Python SDK service with the actors, and the Kafka ingress that
+feeds the actors from the topics above. Stage 2 (spec 010) built the environment; the only actor yet is a probe
+that checks every record arrives in partition order, once. The household, battery and strategy actors follow in
+stage 3.
 
-Until then, the generated topics are the engine's input. Everything an engine needs to consume them is in
-[Data](#data): the topics, keys, event format and the rules for consumers.
+```bash
+make up             # Kafka and Restate (once); the ingress does not start yet
+make dev            # the SDK service on 127.0.0.1:9080 (keep it running; reloads on change)
+make register       # in a second terminal: register it with Restate, then start the Kafka ingress
+```
+
+- `make register` is safe to repeat: an unchanged deployment keeps its id. After changing handlers, use
+  `make register FORCE=true` (development only: it overwrites the deployment).
+- The ingress starts reading at the earliest offset, so the first `make register` on a stack with data ingests
+  everything already in the four topics.
+- Restate's UI is at <http://127.0.0.1:9070>. A probe's state: `curl -s -X POST
+  http://127.0.0.1:8080/Probe/PL-LOC-000001/status` (keys are the record keys, `run_id:`-prefixed for scoped runs).
+- `make down` stops everything and removes the ingress containers; after `make up` run `make register` again to
+  reopen ingestion. The test tiers and `make measure` also close it (they need port 9080 and memory).
+- Tests against the stack: `make test-integration`, `make test-e2e`, `make test-fault` (each starts its own SDK
+  service, so stop `make dev` first); `make report-coverage` combines their coverage. Measurements for the thesis:
+  `make measure [MODE=skew|state-cost|backlog]`. The reference spike: `make spike` (after `make down`).
 
 ### Stop and reset
 
 ```bash
-make down              # stop the Kafka stack, keep the data volume (stop a `make gen` container separately, see above)
-make reset             # also delete the volume and all topic data (asks for confirmation)
+make down              # stop Kafka, Restate and the ingress, keep the volumes (stop a `make gen` container separately, see above)
+make reset             # also delete the Kafka and Restate volumes: topics, registrations, object state (asks)
 ```
+
+Never wipe only Kafka: Restate deduplicates ingested records by consumer group, topic, partition and offset, so
+records written to a recreated topic would look like ones it already has. `make reset` removes both volumes.
 
 ### Troubleshooting
 

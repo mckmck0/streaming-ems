@@ -52,7 +52,9 @@ source and `t`, but never writes it back. A new fact needs a row in the ownershi
 
 - Kind: exclusive (writes state; one invocation per key at a time) or shared (read-only, concurrent).
 - Thin: validate → domain call → write own state → send. Business logic lives in `src/ems/domain/`.
-- Inputs and outputs are versioned contract types from 08 (additive within a major version).
+- Inputs and outputs are versioned contract types from 08 (additive within a major version). A handler fed
+  from Kafka takes raw bytes (`BytesSerde`, `accept="*/*"`), parses inside, counts a bad record and returns:
+  the integration sends no content type, and a raising handler would be retried and block its key (02).
 - Timers: sim mode has no wall-clock timers. A scheduled action is data in state, fired when its step is
   processed, and a step is processed when the watermarks cover it. Live mode adds durable deadlines with
   `send_delay` and a generation number. Same domain code in both.
