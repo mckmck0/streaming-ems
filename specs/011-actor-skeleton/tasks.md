@@ -9,27 +9,27 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
 
 ## Phase 1: Domain
 
-- [ ] T01 [test] (AC-011-01) `tests/unit/domain/test_quarter_split.py`: the spec 009 body of `quarter()` kept
+- [x] T01 [test] (AC-011-01) `tests/unit/domain/test_quarter_split.py`: the spec 009 body of `quarter()` kept
   verbatim in the test, compared with `quarter()` for every action kind and both price bases; `prices`,
   `decide`, `apply` and `grid_kwh` composed by hand give the same result.
-- [ ] T02 (AC-011-01, -34) `reference.py`: `Prices`, `prices`, `decide`, `apply`, with `quarter()` as their
+- [x] T02 (AC-011-01, -34) `reference.py`: `Prices`, `prices`, `decide`, `apply`, with `quarter()` as their
   composition; `settlement.grid_kwh`; `actions.POLICIES` (§2).
-- [ ] T03 [test] (AC-011-02 … -05) `tests/unit/domain/test_corrections.py`: the three cases of `correct` (open
+- [x] T03 [test] (AC-011-02 … -05) `tests/unit/domain/test_corrections.py`: the three cases of `correct` (open
   hour, closed hour, a flow not kept), the lagged close across the October close with opening tranches, lag 0
   equal to `settle_quarter` at every step. `tests/property/test_corrections.py`: rows equal `hour_rows` over the
   final flows, months equal `settle_month` over the final rows, a lag only delays, `correct` never misses a
   flow when corrections keep `t + L + 1 ≤ at_step ≤ t + 2L`, at most `2L + 3` flows kept.
-- [ ] T04 (AC-011-02 … -05) `settlement.py`: `Correction`, `Flow`, `add_quarter`, `correct`, `due_month`,
+- [x] T04 (AC-011-02 … -05) `settlement.py`: `Correction`, `Flow`, `add_quarter`, `correct`, `due_month`,
   `close_month`, `settle_quarter` as their lag-0 composition; `stepper.py`: `settle_step`,
   `step(…, recent=(), corrections=(), lag=0)`, `StepOut.recent` (§2).
-- [ ] T05 [test] (AC-011-33) `tests/unit/domain/test_calendar.py` compares the holidays with a sorted tuple; a
+- [x] T05 [test] (AC-011-33) `tests/unit/domain/test_calendar.py` compares the holidays with a sorted tuple; a
   test that `National` rejects unsorted or repeated dates.
-- [ ] T06 (AC-011-33) `National.holidays` as a sorted `tuple[date, ...]` in `tariff.py`, `calendar.py` and
+- [x] T06 (AC-011-33) `National.holidays` as a sorted `tuple[date, ...]` in `tariff.py`, `calendar.py` and
   `src/ems/tariffs/config.py`.
-- [ ] T07 [test] (AC-011-14, -16, -20) `tests/unit/contracts/test_availability.py`: the generator's issue times
+- [x] T07 [test] (AC-011-14, -16, -20) `tests/unit/contracts/test_availability.py`: the generator's issue times
   are multiples of the cadence and its publications never precede the window; the window opens at 11:00Z on
   2026-03-29 and 12:00Z on 2026-10-25; unknown models and markets are refused.
-- [ ] T08 (AC-011-14, -16) `ems.contracts.availability`: `FORECAST_CADENCE_MIN`, `forecast_cadence`,
+- [x] T08 (AC-011-14, -16) `ems.contracts.availability`: `FORECAST_CADENCE_MIN`, `forecast_cadence`,
   `price_window_opens` (§3).
 
 ## Phase 2: Assembler

@@ -98,3 +98,7 @@ class NoBattery:
 class SelfConsumption:
     def decide(self, state: BatteryState, obs: Observation) -> Action:
         return Action(ActionKind.SELF_CONSUME)
+
+
+# The policies by name; the name is also the strategy's Virtual Object service (spec 011).
+POLICIES: dict[str, Policy] = {"NoBattery": NoBattery(), "SelfConsumption": SelfConsumption()}
