@@ -2,8 +2,7 @@
 # request. The integration, e2e and fault tiers need Docker, Kafka and Restate and run on the author's machine.
 # Actions are pinned by commit SHA, each the newest release when pinned (P12). macOS arm64, like the author's
 # machine: three golden digests of the generator (specs 005, 008) differ on Linux x86_64 and arm64 (risk G12).
-# Only the badge job can write: on main it commits .github/badges/coverage.json (read by the README's coverage
-# badge) when the number changes. Its push needs GitHub Actions on the ruleset's bypass list (main takes PRs).
+# The workflow only reads: the coverage total goes to the job summary (no badge; the ruleset lets no bot push).
 name: ci
 
 on:
@@ -22,8 +21,6 @@ jobs:
   ci:
     runs-on: macos-26
     timeout-minutes: 30
-    outputs:
-      coverage: ${{ steps.coverage.outputs.total }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -36,45 +33,7 @@ jobs:
       - name: make ci
         run: make ci
       - name: Coverage of the unit and property tiers
-        id: coverage
         run: |
           make report-coverage
           total=$(uv run coverage report --data-file=logs/.coverage --format=total)
-          echo "total=${total}" >> "$GITHUB_OUTPUT"
           echo "Line coverage of the unit and property tiers: ${total} %" >> "$GITHUB_STEP_SUMMARY"
-
-  badge:
-    needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-26
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: main
-      - name: Commit .github/badges/coverage.json to main when the number changes
-        env:
-          TOTAL: ${{ needs.ci.outputs.coverage }}
-        run: |
-          case "${TOTAL}" in ''|*[!0-9]*) echo "coverage total is not a whole number: '${TOTAL}'"; exit 1;; esac
-          if [ "${TOTAL}" -ge 90 ]; then color=brightgreen
-          elif [ "${TOTAL}" -ge 80 ]; then color=green
-          elif [ "${TOTAL}" -ge 70 ]; then color=yellowgreen
-          elif [ "${TOTAL}" -ge 60 ]; then color=yellow
-          elif [ "${TOTAL}" -ge 50 ]; then color=orange
-          else color=red
-          fi
-          mkdir -p .github/badges
-          printf '{"schemaVersion": 1, "label": "coverage", "message": "%s%%", "color": "%s"}\n' \
-            "${TOTAL}" "${color}" > .github/badges/coverage.json
-          if git diff --quiet -- .github/badges/coverage.json && git ls-files --error-unmatch .github/badges/coverage.json >/dev/null 2>&1; then
-            echo "coverage unchanged at ${TOTAL}%"; exit 0
-          fi
-          git add .github/badges/coverage.json
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "chore(infra): coverage badge ${TOTAL}% [skip ci]"
-          git pull --quiet --rebase origin main
-          git push origin HEAD:main

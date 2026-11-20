@@ -2,8 +2,7 @@
 
 AC-010-28: `make ci` on every push to `main` and every pull request, on a fixed runner image,
 every action pinned by commit SHA, read-only default permissions, uv pinned, no secret.
-AC-010-29: a `badge` job, after `ci` and only for a push to `main`, holds `contents: write` and
-commits `.github/badges/coverage.json` to main with plain git.
+AC-010-29: the `ci` job reports the coverage total in its job summary; there is no badge job.
 """
 
 from __future__ import annotations
@@ -47,7 +46,6 @@ def test_ac_010_28_default_permissions_read_only(workflow: dict[str, Any]) -> No
 
 def test_ac_010_28_jobs_on_fixed_runner(workflow: dict[str, Any]) -> None:
     _job(workflow, "ci")
-    _job(workflow, "badge")
     for name, job in workflow["jobs"].items():
         assert job.get("runs-on") == RUNNER, name
 
@@ -83,21 +81,11 @@ def test_ac_010_28_no_secrets(repo: Path) -> None:
     assert "secrets." not in (repo / WORKFLOW).read_text()
 
 
-def test_ac_010_29_badge_job_after_ci_on_push_to_main(workflow: dict[str, Any]) -> None:
-    badge = _job(workflow, "badge")
-    needs = badge.get("needs") or []
-    assert "ci" in ([needs] if isinstance(needs, str) else needs)
-    condition = str(badge.get("if", ""))
-    assert "push" in condition
-    assert "refs/heads/main" in condition
+def test_ac_010_29_ci_job_reports_coverage_in_the_summary(workflow: dict[str, Any]) -> None:
+    script = "\n".join(str(step.get("run", "")) for step in _steps(_job(workflow, "ci")))
+    assert "make report-coverage" in script
+    assert "GITHUB_STEP_SUMMARY" in script
 
 
-def test_ac_010_29_badge_job_holds_contents_write(workflow: dict[str, Any]) -> None:
-    assert _job(workflow, "badge").get("permissions") == {"contents": "write"}
-
-
-def test_ac_010_29_badge_job_commits_coverage_to_main(workflow: dict[str, Any]) -> None:
-    script = "\n".join(str(step.get("run", "")) for step in _steps(_job(workflow, "badge")))
-    assert ".github/badges/coverage.json" in script
-    assert "push origin HEAD:main" in script
-    assert "--force" not in script
+def test_ac_010_29_no_badge_job_and_no_write_permission(workflow: dict[str, Any]) -> None:
+    assert set(workflow["jobs"]) == {"ci"}
