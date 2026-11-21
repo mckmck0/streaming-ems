@@ -1,4 +1,5 @@
-"""AC-010-09, AC-010-10, AC-010-12: properties of the pure ingress log and leads (spec 010, §4).
+"""AC-010-09, AC-010-10, AC-010-12: properties of the pure ingress log and leads (spec 010, §4);
+AC-011-07, AC-011-26: the assembler's event mapping is total (spec 011).
 
 - AC-010-09: within a key, a topic's log entry depends only on that topic's records. Any
   interleaving of the key's topics therefore gives each topic the entry of folding it alone, and
@@ -9,6 +10,9 @@
   examples with one field replaced by any JSON value (dates at the end of the calendar included),
   never make them raise; a value counts as rejected (log) or skipped (leads) exactly when the v1
   parser or the availability rule refuses it.
+- AC-011-07, -26: ``mapping.parse``, ``reading``, ``curve`` and ``run`` never raise on the same
+  inputs; ``parse`` refuses whatever the v1 parser refuses, at most one of the three maps an event,
+  and what they return stays finite and within the mapping's bounds.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import functools
 import hashlib
 import itertools
 import json
+import math
+from datetime import UTC, datetime
 from typing import Any
 
 from hypothesis import example, given
@@ -26,7 +32,7 @@ from hypothesis import strategies as st
 from ems.actors import ingress_check as ic
 from ems.contracts.availability import available_at
 from ems.contracts.envelope import parse_event, to_json_bytes
-from ems.contracts.examples import golden_examples
+from ems.contracts.examples import GOLDEN_INGESTED_AT, forecast_event, golden_examples
 from ems.contracts.time import quarter_index
 
 type Meta = tuple[str, int, int]
@@ -248,3 +254,50 @@ def test_ac_010_10_examples_with_one_field_replaced_never_make_them_raise(raw: b
     else:
         stream, quarter = slot
         assert leads == {"newest": {stream: quarter}, "max": {}, "skipped": 0}
+
+
+# ── AC-011-07, AC-011-26 (spec 011): the assembler's mapping is total ─────────────────────────────
+
+WEATHER = {
+    k: v
+    for k, v in DOCS["weather_forecast.json"]["payload"]["steps"][0].items()
+    if k not in {"valid_start", "valid_end", "lead_time", "radiation_label"}
+}
+# A valid run usable at 9999-12-31T22:00Z: its next watermark (a cadence later) leaves the calendar.
+FAR_RUN = to_json_bytes(
+    forecast_event(
+        location_id="PL-LOC-000001",
+        issued_at=datetime(9999, 12, 31, 20, 0, tzinfo=UTC),
+        steps=[WEATHER],
+        ingested_at=GOLDEN_INGESTED_AT,
+    )
+)
+MAX_PRICE_PLN_PER_KWH = 100.0  # the mapping's bound of 1e5 PLN/MWh
+
+
+@given(raw=st.one_of(record_values, st.binary(), mutated_examples()))
+@example(raw=FAR_RUN)
+@example(raw=_replaced("weather_forecast.json", ("payload", "forecast_model"), "gfs_seamless"))
+@example(raw=_replaced("price.json", ("payload", "market"), "PL_SDAC"))
+@example(raw=_replaced("price.json", ("payload", "slots", 0, "price"), -1e300))
+@example(raw=_replaced("price.json", ("payload", "delivery_day"), "9999-12-31"))
+@example(raw=_replaced("consumption.json", ("payload", "measurements", 0, "value"), 1e300))
+@example(raw=_replaced("consumption.json", ("payload", "measurements", 1, "unit"), "Wh"))
+@example(raw=_replaced("production.json", ("interval_start",), "0001-01-01T00:00:00+01:00"))
+def test_ac_011_07_the_mapping_never_raises(raw: bytes) -> None:
+    from ems.assembler import mapping  # here, so the spec 010 tests above collect without it
+
+    event = mapping.parse(raw)
+    if not _parses(raw):
+        assert event is None
+    reading, curve, run = mapping.reading(event), mapping.curve(event), mapping.run(event)
+    assert sum(x is not None for x in (reading, curve, run)) <= 1
+    if reading is not None:
+        assert math.isfinite(reading.kwh) and reading.kwh >= 0.0 and reading.skipped >= 0
+    if curve is not None:
+        assert all(
+            math.isfinite(p) and abs(p) <= MAX_PRICE_PLN_PER_KWH for p in curve.rce_pln_per_kwh
+        )
+        assert curve.issued_step * 900 >= curve.issued_s
+    if run is not None:
+        assert run.usable_step <= run.next_covered

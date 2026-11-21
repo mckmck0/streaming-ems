@@ -34,42 +34,42 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
 
 ## Phase 2: Assembler
 
-- [ ] T09 [test] (AC-011-06) `tests/unit/assembler/test_purity.py` (import allow-list: standard library,
+- [x] T09 [test] (AC-011-06) `tests/unit/assembler/test_purity.py` (import allow-list: standard library,
   `ems.contracts`, `ems.domain`; no wall clock); `tests/unit/test_post_edit_hook.py` (a Restate import under
   `src/ems/assembler/` is flagged, as under `src/ems/domain/`).
-- [ ] T10 (AC-011-06) `src/ems/assembler/__init__.py`; the assembler pattern in `.claude/hooks/post-edit.sh`;
+- [x] T10 (AC-011-06) `src/ems/assembler/__init__.py`; the assembler pattern in `.claude/hooks/post-edit.sh`;
   `.claude/rules/assembler.md` (paths `src/ems/assembler/**`).
-- [ ] T11 [test] (AC-011-37) `tests/unit/assembler/test_params.py`: every check of `RunParams.__post_init__`;
+- [x] T11 [test] (AC-011-37) `tests/unit/assembler/test_params.py`: every check of `RunParams.__post_init__`;
   a round trip of a real `RunParams`.
-- [ ] T12 (AC-011-37) `assembler/params.py`: `RunParams` (§6).
-- [ ] T13 [test] (AC-011-07, -26) `tests/unit/assembler/test_mapping.py`: PV and load sums with `math.fsum`;
+- [x] T12 (AC-011-37) `assembler/params.py`: `RunParams` (§6).
+- [x] T13 [test] (AC-011-07, -26) `tests/unit/assembler/test_mapping.py`: PV and load sums with `math.fsum`;
   entries skipped by quantity, aggregation, unit and quality; PT1H and EUR curves; values beyond the bounds; an
   unknown model; DST curves. `tests/property/test_ingress_check.py` extended: `parse` and the mapping never
   raise on arbitrary bytes or mutated golden events.
-- [ ] T14 (AC-011-07) `assembler/mapping.py`: `parse`, `reading`, `curve`, `run` (§4).
-- [ ] T15 [test] (AC-011-08 … -13) `tests/unit/assembler/test_meter_stream.py`: the four late and missing cases
+- [x] T14 (AC-011-07) `assembler/mapping.py`: `parse`, `reading`, `curve`, `run` (§4).
+- [x] T15 [test] (AC-011-08 … -13) `tests/unit/assembler/test_meter_stream.py`: the four late and missing cases
   of 01 at their boundaries, a gap at the start, a jump after a gap, duplicate and conflict, before start and
   after end. `tests/property/test_meter_stream.py`: slots closed once and in order, an on-time reading never
   estimated, `at_step` in `[t + L + 1, t + 2L]`, a duplicate changes nothing, at most `2L` slots, pruning
   changes no output.
-- [ ] T16 (AC-011-08 … -13) `assembler/meter_stream.py`: `MeterStream`, `Closed`, `Late`, `meter_apply` (§4).
-- [ ] T17 [test] (AC-011-14 … -16) `tests/unit/assembler/test_sparse_streams.py`: visibility and watermarks on
+- [x] T16 (AC-011-08 … -13) `assembler/meter_stream.py`: `MeterStream`, `Closed`, `Late`, `meter_apply` (§4).
+- [x] T17 [test] (AC-011-14 … -16) `tests/unit/assembler/test_sparse_streams.py`: visibility and watermarks on
   schedule, a missing run, a late and an unscheduled run, a stale and a duplicate run, an older day, a
   republished day, `clamped` and `revised`.
-- [ ] T18 (AC-011-14 … -16) `assembler/sparse_streams.py`: `ForecastStream`, `PriceStream`, `Run`, `Curve`,
+- [x] T18 (AC-011-14 … -16) `assembler/sparse_streams.py`: `ForecastStream`, `PriceStream`, `Run`, `Curve`,
   `forecast_apply`, `price_apply` (§4).
-- [ ] T19 [test] (AC-011-17 … -22) `tests/unit/assembler/test_join.py`: release only on complete data; step
+- [x] T19 [test] (AC-011-17 … -22) `tests/unit/assembler/test_join.py`: release only on complete data; step
   content; a site without PV; corrections in order and removed; the price on 92- and 100-slot days; the
   replacement price across both DST days, up to two days back, then 0; pruning. `tests/property/
   test_interleaving.py`: any order-preserving merge of the four streams, any delivery order of updates and any
   subscription point give the steps and the final `Join` of a stream-by-stream fold; prefixes release
   prefixes; no step reads a curve or run not yet visible; nothing raises.
-- [ ] T20 (AC-011-17 … -22) `assembler/join.py`: `Join`, `MeterSide`, `Step`, `start`, `on_reading`,
+- [x] T20 (AC-011-17 … -22) `assembler/join.py`: `Join`, `MeterSide`, `Step`, `start`, `on_reading`,
   `on_curves`, `on_run`, the price rule and pruning (§4).
-- [ ] T21 [test] (AC-011-23) `tests/unit/assembler/test_offline.py`: a generated clean day inside one civil
+- [x] T21 [test] (AC-011-23) `tests/unit/assembler/test_offline.py`: a generated clean day inside one civil
   month folded offline releases every step and gives, per strategy, the `RefState` and quarter results of
   `reference.run` over inputs built by a plain per-slot lookup.
-- [ ] T22 (AC-011-23) `assembler/offline.py`: `fold` (§4).
+- [x] T22 (AC-011-23) `assembler/offline.py`: `fold` (§4).
 
 ## Phase 3: Actors
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # PostToolUse hook for Edit|Write (wired in .claude/settings.json).
 #
-# 1. Guard: a Restate import in src/ems/domain/ breaks ADR 0004 / principle 2. Exit 2 shows the
-#    message to Claude (the edit has already happened, so Claude must move the code).
+# 1. Guard: a Restate import in src/ems/domain/ or src/ems/assembler/ breaks ADR 0004 / principle 2.
+#    Exit 2 shows the message to Claude (the edit has already happened, so Claude must move the code).
 # 2. Format the edited .py file with the project's pinned ruff: `check --fix` before `format`
 #    (ruff's documented order). F401 is not auto-fixed here, so an import added in one edit survives
 #    until the edit that uses it; `make format` at the end of the change does the full fix.
@@ -22,9 +22,9 @@ cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
 
 status=0
 case "$file" in
-  */src/ems/domain/*)
+  */src/ems/domain/* | */src/ems/assembler/*)
     if grep -nE '^[[:space:]]*(import|from)[[:space:]]+restate([.[:space:]]|$)' "$file" >&2; then
-      echo "post-edit hook: Restate import in ${file#"$PWD"/} - the domain core must stay runtime-agnostic (ADR 0004, principle 2). Move the runtime code to src/ems/actors/." >&2
+      echo "post-edit hook: Restate import in ${file#"$PWD"/} - the domain core and the assembler must stay runtime-agnostic (ADR 0004, principle 2). Move the runtime code to src/ems/actors/." >&2
       status=2
     fi
     ;;
