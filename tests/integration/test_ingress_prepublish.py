@@ -1,5 +1,7 @@
-"""AC-010-11: while no ingress container runs nothing is consumed; once they start, each record is
-handled once.
+"""AC-010-11 on the actors (AC-011-47): while no ingress container runs nothing is consumed; once
+they start, each record is handled once.
+
+No household is configured: `Household`, `Weather` and `Tariff` only log and count the records.
 """
 
 from __future__ import annotations
@@ -42,4 +44,4 @@ def test_ac_010_11_records_wait_in_kafka_until_the_ingress_starts(
     closed_env.restate.wait_handled(run_id, len(records), timeout=300)
     time.sleep(2)  # anything delivered twice would show up now
     assert closed_env.restate.handled(run_id) == len(records)
-    assert closed_env.restate.probe_logs(run_id) == stack.offline_logs(records)
+    assert closed_env.restate.ingress_logs(run_id) == stack.offline_logs(records)

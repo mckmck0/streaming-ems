@@ -11,13 +11,13 @@ Exactly-once settlement under failures; hundreds of households. Research framing
 **Scope layers** (brief §3): the core (many strategies on one stream, closed feedback loop, entity decomposition
 with durable timers, fleet scale), one research contribution (OPEN: which strategies), and zero or one extra.
 
-### Status of every piece (2026-11-16)
+### Status of every piece (2026-11-21)
 
 | Piece | Status |
 |---|---|
 | Claude Code harness (`CLAUDE.md`, `.claude/`) | Built |
-| Canonical docs | 00, 01, 02 (runtime and ingress; handlers with stage 3), 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 03–04 land with the strategy stages |
-| ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005), 0017 (time and ordering); 0001–0009 are candidates from the brief, not yet written |
+| Canonical docs | 00, 01, 02 (runtime, ingress and the actor handlers), 05, 06, 07, 08, 09, 10, 11, 12, 13 written; 03–04 land with the strategy stages |
+| ADRs | 0010–0015 accepted (spec 001), 0016 (spec 005), 0017 (time and ordering), 0018–0019 (spec 011); 0001–0009 are candidates from the brief, not yet written |
 | Data pipeline core (spec 001: Kafka stack, contracts v1, `ems-gen`, synthetic household) | Built |
 | Live data, record and replay, hybrid mode (spec 002) | Built |
 | Scale, background batteries, faults, stats, benchmark (spec 003) | Built |
@@ -27,9 +27,10 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
 | Realistic generator statistics: run-consistent forecast errors, persistent peaky base load, hybrid truth (spec 007) | Built |
 | Historical backfill on real data: fetch once, build offline, replay; window 2026-04-02 … 06-30 fetched (spec 008) | Built |
 | Domain core: 2026 tariffs of four DSOs, hourly net-billing settlement with the deposit, price signal, actions, `Policy`, offline reference and stepper (spec 009) | Built |
-| Time and ordering model, actor skeleton design (stage 1: ADR 0017, `01-architecture.md`) | Designed; the actors are built in stage 3 |
+| Time and ordering model, actor skeleton design (stage 1: ADR 0017, `01-architecture.md`) | Built in stage 3 |
 | Restate environment and Kafka into a Virtual Object: Restate 1.8.1-hotfix.2, the Kafka ingress integration, `make register`/`dev`, e2e and fault tiers, coverage, CI, a probe object, the spike reproduced (stage 2, spec 010) | Built |
-| Actors, experiments, strategies, Selector (stages 3–6) | Not built; briefs in `01-architecture.md` |
+| Actor skeleton: the assembler, Household, Tariff, Weather, NoBattery, SelfConsumption, Ems, Battery, Meter; corrections of late readings; run configuration (stage 3, spec 011) | Built |
+| Clocks and systems experiments, strategies, Selector (stages 4–6) | Not built; briefs in `01-architecture.md` |
 | `frontend/` | Reserved, out of scope |
 
 ### Decisions so far (not yet in an ADR)
@@ -116,6 +117,29 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
     handlers down a backlog moves into Restate, not Kafka. The ingress never exits while Restate is down (it
     reconnects every 500 ms), and `force: false` registration keeps old handlers.
 
+- 2026-11-20 (spec 011, stage 3): the actor skeleton. Every decision with its alternatives is in
+  `specs/011-actor-skeleton/spec.md` (Decisions) and ADRs 0018 and 0019.
+  - Late and missing inputs (ADR 0018): allowed lateness, so a reading up to `2L` late re-fires its hour's row
+    and a month is settled `2L` quarter-hours after it ends; the estimate is the value the stream used for the
+    slot before; a quarter-hour without a visible price takes the statutory replacement (RES act art. 4b
+    ust. 10: the same quarter-hour of the nearest earlier day, at most two days back, else 0; first decided as
+    0, changed after the energy-domain review); a run of an unknown model is dropped like a missing run; the
+    first reading of a meter slot wins.
+  - Run parameters arrive as `configure` control messages before data flows (ADR 0019); an object never
+    configured only counts records, which keeps unmanaged sites O(1).
+  - Code structure: a pure `src/ems/assembler/` shared by the actors and the offline side; one file per actor
+    with its state, pure transitions and short handlers through `ems.actors.shell`; sends by service name.
+  - Serialisation: frozen dataclasses through one `TypeAdapter` serde; no set in any stored or sent type
+    (Restate's journal check, RT0016), so `National.holidays` became a sorted tuple.
+  - R7 reworded: messages carry `schema_version` and `t`, the simulated time; updates also `seq`. `Tariff`
+    numbers its curves once per market and sends a snapshot on subscribe.
+  - `quarter()` is `prices`, `decide`, `apply` and `grid_kwh`, so `Ems`, `Battery` and `Meter` run the
+    reference's own code.
+  - The e2e runs fix arrival order by starting the ingress containers one after another and use a test fault
+    config with raised rates; the clean run covers 2026-10-31 for 30 h, so October closes inside it.
+  - `Probe` and the state-cost objects are deleted; `make measure` keeps `skew` (now on configured households,
+    prices included) and `backlog`; `make register` checks the three ingress target handlers.
+
 ### Repo map (current and planned)
 
 ```
@@ -123,8 +147,9 @@ CLAUDE.md, .claude/          harness (rules, skills, agents, hooks)
 specs/NNN-*/                 feature specs (spec.md, plan.md, tasks.md)
 docs/context/                canonical docs (this folder); docs/adr/ decisions; docs/bootstrap/ frozen brief
 src/ems/                     contracts/ (wire models), ingest/ (generators), domain/ (battery, tariffs,
-                             settlement, actions, reference), tariffs/ (tariff config loader), actors/,
-                             strategies/, forecasting/, optimization/, sim/, experiments/, settings.py
+                             settlement, actions, reference), tariffs/ (tariff config loader), assembler/
+                             (ordering a household's streams), actors/, experiments/ (harness, run
+                             parameters), strategies/, forecasting/, optimization/, sim/, settings.py
 config/, mappings/, schemas/ generator and tariff config, live-source mappings, exported JSON Schemas
 jobs/                        batch CLIs (no HTTP surface)
 infra/                       docker-compose.yml (Kafka, Restate, Kafka ingress), Dockerfiles, spike/ctl.sh
@@ -158,7 +183,7 @@ conversation from its brief in `01-architecture.md`.
 |---|---|---|
 | 1 Ordering decision (docs only, no spec) | ADR 0017, `01-architecture.md`, updates to 00, 05, 06, 08, 09 | Done 2026-11-14 |
 | 2 Restate environment and Kafka into a Virtual Object (spec 010; done 2026-11-15) | Restate 1.8.1-hotfix.2 and the Kafka ingress integration in compose (one container per target handler), `make register` and `make dev`, the e2e and fault tiers, a probe object fed from the four topics, spike experiments A–C (the spike sits untracked at `restate-ems-spike/`; the stage moves it to `reference/restate-ems-spike/`). Merges the former "Kafka ingestion" and "Dev environment" rows | The stack is healthy and registration is idempotent. The probe sees each key's records in partition order, with none lost or doubled after `kill -9` of the server, the SDK service or an ingress container. The skew between topics during a backfill is recorded for the thesis. Spike A and C show 0 mismatches and B 0 duplicates. V1–V4 and V7–V11 of 01 are resolved with value, source and date |
-| 3 Actor skeleton | The pure assembler (watermarks, join, dedup, late rule) with property tests, one mapping from events to `QuarterIn` shared with the offline reference, the actors of 01 with NoBattery and SelfConsumption | 10 households × 1 day through Kafka give strategy and `Meter` state equal to the offline side with `==`, also with the topics published in different orders, with `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (the run that produces corrections and drops). The parity check holds. Unmanaged sites keep O(1) state |
+| 3 Actor skeleton (spec 011; done 2026-11-21) | The pure assembler (watermarks, join, dedup, late rule) with property tests, one mapping from events to `QuarterIn` shared with the offline reference, the actors of 01 with NoBattery and SelfConsumption | 10 households × 1 day through Kafka give strategy and `Meter` state equal to the offline side with `==`, also with the topics arriving in different orders, with `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (the run that produces corrections and drops). The parity check holds. Unmanaged sites keep O(1) state |
 | 4 Clocks and systems experiments | The live wall-clock deadline timer; adding a strategy from a data time `t0`; `kill -9` runs; scaling households × strategies at paced speeds; the export CLI and run manifest | Results stay identical under failures. Recovery latency by phase, sustained speed, events per second and decision latency are reported (P16) |
 | 5 Strategies and forecasts | Price rules, MPC with the offline oracle, forecasts with a persistence baseline | Per-strategy results against the reference |
 | 6 Adaptive Selector | Selector against the best fixed strategy (RQ3) | RQ3 results |

@@ -353,7 +353,7 @@ def _load_national(path: Path) -> tuple[National, NetBillingRules]:
         ),
         capacity_band_kwh=cfg.capacity_fee.bands.value,
         capacity_fee_pln_per_month=cfg.capacity_fee.rates.value,
-        holidays=frozenset(cfg.holidays.dates),
+        holidays=tuple(sorted(cfg.holidays.dates)),
         valid_until=month_of(cfg.valid_until),
     )
     rules = NetBillingRules(
@@ -372,7 +372,7 @@ class TariffBook:
     dsos: tuple[DsoTariffs, ...]
 
     @property
-    def holidays(self) -> frozenset[date]:
+    def holidays(self) -> tuple[date, ...]:
         return self.national.holidays
 
     def dso(self, name: str) -> DsoTariffs:

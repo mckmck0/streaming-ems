@@ -24,6 +24,8 @@ a new ADR that supersedes the old one, and `docs/context/` is updated in the sam
 | 0015 | [Wire contract v1 identity and run scope](0015-wire-contract-v1-identity.md) | Accepted |
 | 0016 | [PV prosumers only; wire contract v1 frozen](0016-pv-only-generator-and-v1-freeze.md) | Accepted |
 | 0017 | [Per-household event-time watermarks order the actors' inputs](0017-per-household-event-time-ordering.md) | Accepted |
+| 0018 | [Late and missing inputs: allowed lateness, estimates and the replacement price](0018-late-and-missing-inputs.md) | Accepted |
+| 0019 | [Run parameters arrive as control messages](0019-run-parameters-as-control-messages.md) | Accepted |
 
 ## Template
 

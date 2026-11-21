@@ -1,7 +1,13 @@
-"""AC-009-03: zones on tariff time (UTC+1 all year), seasons, day types and statutory holidays."""
+"""AC-009-03: zones on tariff time (UTC+1 all year), seasons, day types and statutory holidays.
+
+AC-011-33: the holidays are a sorted tuple of dates without repeats (no set in a stored type);
+``National`` refuses anything else.
+"""
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -149,7 +155,7 @@ def test_friday_to_saturday_edge_on_tariff_time() -> None:
     scheme = ZoneScheme(
         "peak", (ZoneRule("offpeak", (DayType.SATURDAY, DayType.SUNDAY), ((0, 24),)),)
     )
-    hol: frozenset[date] = frozenset()
+    hol: tuple[date, ...] = ()
     friday_2330_cest = _t(2026, 7, 17, 23, 30)  # 22:30 Friday on tariff time
     saturday_0030_cest = _t(2026, 7, 18, 0, 30)  # 23:30 Friday on tariff time
     saturday_0130_cest = _t(2026, 7, 18, 1, 30)  # 00:30 Saturday on tariff time
@@ -159,12 +165,55 @@ def test_friday_to_saturday_edge_on_tariff_time() -> None:
 
 
 def test_holidays_match_the_statutory_list(book: TariffBook) -> None:
-    assert book.holidays == frozenset(holidays.Poland(years=2026))
+    assert book.holidays == tuple(sorted(holidays.Poland(years=2026)))
     assert date(2026, 12, 24) in book.holidays
 
 
+def test_ac_011_33_holidays_are_a_tuple_with_no_set_inside(book: TariffBook) -> None:
+    assert type(book.national.holidays) is tuple
+    assert book.holidays is book.national.holidays
+    assert all(type(d) is date for d in book.holidays)
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        lambda hs: tuple(reversed(hs)),
+        lambda hs: (*hs[1:2], *hs[:1], *hs[2:]),  # the first two swapped
+        lambda hs: (*hs[:-2], hs[-1], hs[-2]),  # the last two swapped
+    ],
+    ids=["reversed", "first-two-swapped", "last-two-swapped"],
+)
+def test_ac_011_33_national_refuses_unsorted_holidays(
+    book: TariffBook, order: Callable[[tuple[date, ...]], tuple[date, ...]]
+) -> None:
+    with pytest.raises(ValueError):
+        dataclasses.replace(book.national, holidays=order(book.holidays))
+
+
+@pytest.mark.parametrize(
+    "repeat",
+    [
+        lambda hs: (hs[0], *hs),
+        lambda hs: (*hs, hs[-1]),
+        lambda hs: (*hs[:5], hs[4], *hs[5:]),
+    ],
+    ids=["first", "last", "middle"],
+)
+def test_ac_011_33_national_refuses_repeated_holidays(
+    book: TariffBook, repeat: Callable[[tuple[date, ...]], tuple[date, ...]]
+) -> None:
+    with pytest.raises(ValueError):
+        dataclasses.replace(book.national, holidays=repeat(book.holidays))
+
+
+def test_ac_011_33_national_accepts_a_sorted_tuple(book: TariffBook) -> None:
+    for hs in ((), book.holidays[:1], book.holidays[3:7], book.holidays):
+        assert dataclasses.replace(book.national, holidays=hs).holidays == hs
+
+
 def test_day_type_precedence() -> None:
-    hol = frozenset({date(2026, 11, 1)})  # a Sunday
+    hol = (date(2026, 11, 1),)  # a Sunday
     assert day_type(date(2026, 11, 1), hol) is DayType.HOLIDAY
     assert day_type(date(2026, 11, 8), hol) is DayType.SUNDAY
     assert day_type(date(2026, 11, 7), hol) is DayType.SATURDAY

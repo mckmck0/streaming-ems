@@ -11,7 +11,7 @@ it is checked; the per-plan questions are in `.claude/skills/ems-plan-change/che
 | # | Principle | Rule | How it is checked |
 |---|---|---|---|
 | P1 | **Spec first** | No feature code without an approved spec, plan and task list in `specs/NNN-feature/`; every change traces to a task. Typo, comment, formatting and behaviour-neutral doc fixes are exempt | Review: each commit cites a task id |
-| P2 | **Pure domain, thin actors** | `src/ems/domain/` is deterministic and has no I/O, clock, randomness source or runtime import. Actors parse, delegate to the domain, write only their own state, and send messages | Post-edit hook (Restate imports); unit and property tests; review |
+| P2 | **Pure domain, thin actors** | `src/ems/domain/` and `src/ems/assembler/` (since spec 011) are deterministic and have no I/O, clock, randomness source or runtime import. Actors parse, delegate to pure transitions, write only their own state, and send messages | Post-edit hook (Restate imports); import allow-list tests; unit and property tests; review |
 | P3 | **Single writer per fact** | Every fact has exactly one writing actor (ownership table in `01-architecture.md`); others keep tagged views | Review against the ownership table |
 | P4 | **No blocking cycles** | Exclusive handlers are reached only by one-way messages. Request-response targets shared (read-only) handlers only, and shared handlers call only shared handlers (R1, R2). This handler-level wording clarifies the brief's "every edge that can be part of a cycle" | Call graph in the plan's Actor contract section |
 | P5 | **Async-first handlers** | No blocking or CPU-heavy work on the event loop. Non-deterministic or external work is journaled (`ctx.run`, `ctx.time`, `ctx.random`) and offloaded to a bounded executor (R3) | ruff `ASYNC` rules; review |
@@ -27,8 +27,8 @@ it is checked; the per-plan questions are in `.claude/skills/ems-plan-change/che
 | P15 | **Docs and decisions land with the change** | Behaviour change → `docs/context/`; decision change → new ADR in `docs/adr/` | PR description contract (`CLAUDE.md`) |
 | P16 | **Measure the system, not just the energy** | Systems metrics (events/s, decision latency p50/p99, recovery latency by phase, exactly-once check, view staleness) next to energy metrics in every experiment | Experiment report review |
 
-The actor connection rules R1–R7 are summarised in the `ems-actor-contract` skill and will be specified in full
-in `02-subsystem-actors.md`.
+The actor connection rules R1–R7 are summarised in the `ems-actor-contract` skill; how they hold in the built
+actors is in `02-subsystem-actors.md` and `01-architecture.md`.
 
 ## What to build
 

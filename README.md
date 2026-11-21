@@ -54,10 +54,11 @@ compared counterfactually while one of them drives the real battery.
 
 ## About
 
-- **Status:** the data pipeline (specs 001 to 008), the domain core (spec 009) and the Restate environment
-  with the Kafka ingress (spec 010) are built. The EMS actors (households, battery, strategies, settlement in
-  actors) are **not built yet**: today the topics feed a probe object; see [Start the engine](#start-the-engine)
-  and the backlog in [docs/context/00-overview.md](docs/context/00-overview.md).
+- **Status:** the data pipeline (specs 001 to 008), the domain core (spec 009), the Restate environment with
+  the Kafka ingress (spec 010) and the actor skeleton (spec 011: households, tariff, weather, the NoBattery and
+  SelfConsumption strategies, the real battery loop and meter) are built. Clocks and systems experiments, further
+  strategies and the Selector follow; see [Start the engine](#start-the-engine) and the backlog in
+  [docs/context/00-overview.md](docs/context/00-overview.md).
 - **Canonical docs:** [docs/context/README.md](docs/context/README.md) (index and status of every piece).
   Prerequisites and pinned versions: [docs/context/05-deploy-and-infra.md](docs/context/05-deploy-and-infra.md).
 - **Working with Claude Code:** [CLAUDE.md](CLAUDE.md) and the harness in `.claude/` (skills, rules,
@@ -186,9 +187,10 @@ make test-integration  # tests against the real stack; run `make up` first
 ### Start the engine
 
 The engine is Restate (started by `make up`), the Python SDK service with the actors, and the Kafka ingress that
-feeds the actors from the topics above. Stage 2 (spec 010) built the environment; the only actor yet is a probe
-that checks every record arrives in partition order, once. The household, battery and strategy actors follow in
-stage 3.
+feeds the actors from the topics above: meters to `Household`, forecasts to `Weather`, prices to `Tariff`. A
+household the EMS manages is configured before its data flows (ADR 0019); every other site only has its records
+counted. Each household releases its quarter-hour steps in order and sends them to its strategies and to `Ems`,
+which drives the real `Battery`; `Meter` keeps the real bill.
 
 ```bash
 make up             # Kafka and Restate (once); the ingress does not start yet
@@ -197,16 +199,18 @@ make register       # in a second terminal: register it with Restate, then start
 ```
 
 - `make register` is safe to repeat: an unchanged deployment keeps its id. After changing handlers, use
-  `make register FORCE=true` (development only: it overwrites the deployment).
+  `make register FORCE=true` (development only: it overwrites the deployment). It refuses to open ingestion
+  while Restate lists no target handler of the ingress containers (a stale deployment).
 - The ingress starts reading at the earliest offset, so the first `make register` on a stack with data ingests
   everything already in the four topics.
-- Restate's UI is at <http://127.0.0.1:9070>. A probe's state: `curl -s -X POST
-  http://127.0.0.1:8080/Probe/PL-LOC-000001/status` (keys are the record keys, `run_id:`-prefixed for scoped runs).
+- Restate's UI is at <http://127.0.0.1:9070>. A household's state: `curl -s -X POST
+  http://127.0.0.1:8080/Household/PL-LOC-000001/status` (keys are the record keys, `run_id:`-prefixed for scoped
+  runs; an unconfigured household has no state, only its ingress log in Restate's `state` table).
 - `make down` stops everything and removes the ingress containers; after `make up` run `make register` again to
   reopen ingestion. The test tiers and `make measure` also close it (they need port 9080 and memory).
 - Tests against the stack: `make test-integration`, `make test-e2e`, `make test-fault` (each starts its own SDK
   service, so stop `make dev` first); `make report-coverage` combines their coverage. Measurements for the thesis:
-  `make measure [MODE=skew|state-cost|backlog]`. The reference spike: `make spike` (after `make down`).
+  `make measure [MODE=skew|backlog]`. The reference spike: `make spike` (after `make down`).
 
 ### Stop and reset
 

@@ -6,8 +6,12 @@ Tests and the jobs under jobs/ share it, so neither writes to the stack's own to
 docker and Kafka, so it needs the `ingest` group; nothing in it serves HTTP (P10).
 
 A test project is the stack's compose file plus tests/compose.it.yml in a compose project named
-`ems-it-*`, with topic names and consumer groups prefixed through `EMS_INGRESS_PREFIX`. Probe keys
-carry the run's `run_id`, so a run's progress and logs are read by `run_id`.
+`ems-it-*`, with topic names and consumer groups prefixed through `EMS_INGRESS_PREFIX`. Every object
+key carries the run's `run_id`, so a run's progress, state and invocations are read by `run_id`.
+
+Since spec 011 the ingress containers feed the actors: meters to `Household`, forecasts to
+`Weather`, prices to `Tariff`. A run is configured (`configure`) before it is published, and
+`wait_run` waits until the actors have handled every record and stepped as far as the offline side.
 """
 
 from __future__ import annotations
@@ -57,7 +61,19 @@ INGRESS_GROUPS = {
     "ingress-prices": "ems-ingress-prices",
 }
 INGRESS_SERVICES = tuple(INGRESS_TOPICS)
-PROBE_TOPICS = tuple(t for topics in INGRESS_TOPICS.values() for t in topics)
+TOPICS = tuple(t for topics in INGRESS_TOPICS.values() for t in topics)
+# The Virtual Object handler each ingress container feeds (`infra/docker-compose.yml`).
+INGRESS_TARGETS: dict[str, tuple[str, str]] = {
+    "ingress-meters": ("Household", "on_measurement"),
+    "ingress-forecasts": ("Weather", "on_forecast"),
+    "ingress-prices": ("Tariff", "on_price"),
+}
+KAFKA_FED = tuple(service for service, _ in INGRESS_TARGETS.values())
+TOPIC_SERVICE = {t: INGRESS_TARGETS[svc][0] for svc, ts in INGRESS_TOPICS.items() for t in ts}
+# Where each actor keeps the inbox of its step messages: its `expected` is the next step.
+STEP_INBOX = {"Ems": "acks", "Battery": "commands", "Meter": "flows"}  # strategies: "steps"
+CONFIGURED = ("Household", "Weather", "Ems", "Battery", "Meter")  # plus each strategy of the run
+STRICT_ATTEMPTS = 4  # failed attempts after which a strict wait calls an invocation failed
 _NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -264,7 +280,7 @@ class Restate:
         content = None
         if body is not None:
             headers["content-type"] = "application/json"
-            content = json.dumps(body).encode()
+            content = body if isinstance(body, bytes) else json.dumps(body).encode()
         if idempotency_key is not None:
             headers["idempotency-key"] = idempotency_key
         url = f"{self.ingress}/{service}/{quote(key, safe='')}/{handler}/send"
@@ -276,56 +292,179 @@ class Restate:
         resp.raise_for_status()
         return resp.json() if resp.content else None
 
-    def handled(self, run_id: str) -> int:
-        """Records the probe has handled for a run: the sum of the state key ``n`` over the run's
-        keys.
+    def services(self) -> dict[str, set[str]]:
+        """The handlers Restate lists for each registered service."""
+        resp = self._http.get(f"{self.admin}/services")
+        resp.raise_for_status()
+        return {
+            svc["name"]: {h["name"] for h in svc.get("handlers", [])}
+            for svc in resp.json().get("services", [])
+        }
+
+    def ensure_registered(self, expected: Mapping[str, set[str]]) -> dict[str, Any]:
+        """Register the SDK service; if Restate still lists another handler set for one of the
+        ``expected`` services (an older deployment at the same URI, which ``force: false`` keeps),
+        register again with ``force: true`` and fail unless the sets then match. Only on an idle
+        stack: the caller has closed ingestion.
+        """
+        deployment = self.register(force=False)
+        if self._stale(expected):
+            deployment = self.register(force=True)
+            stale = self._stale(expected)
+            if stale:
+                raise RuntimeError(f"registered handlers still differ: {stale}")
+        return deployment
+
+    def _stale(self, expected: Mapping[str, set[str]]) -> dict[str, set[str]]:
+        listed = self.services()
+        return {
+            name: handlers for name, handlers in expected.items() if listed.get(name) != handlers
+        }
+
+    def handled(self, run_id: str, services: Sequence[str] = KAFKA_FED) -> int:
+        """Records the Kafka-fed objects have handled for a run: the sum of their state key ``n``.
 
         ``value_utf8`` is a Utf8 column holding JSON, so the values are summed here, not in SQL.
         """
         rows = self.query(
-            "SELECT value_utf8 FROM state WHERE service_name = 'Probe' AND key = 'n' "
-            f"AND starts_with(service_key, '{_check_name(run_id)}:')"
+            f"SELECT value_utf8 FROM state WHERE service_name IN ({_sql_names(services)}) "
+            f"AND key = 'n' AND starts_with(service_key, '{_check_name(run_id)}:')"
         )
         return sum(int(row["value_utf8"]) for row in rows)
 
     def wait_handled(
-        self, run_id: str, expected: int, timeout: float = 900.0, poll: float = 0.5
+        self,
+        run_id: str,
+        expected: int,
+        timeout: float = 900.0,
+        poll: float = 0.5,
+        services: Sequence[str] = KAFKA_FED,
     ) -> float:
-        """Wait until the probe has handled ``expected`` records of the run (transient errors
-        retried).
+        """Wait until the Kafka-fed objects have handled ``expected`` records of the run (transient
+        errors retried).
         """
         start = time.monotonic()
         seen = -1
         while True:
             with contextlib.suppress(httpx.HTTPError):
-                seen = self.handled(run_id)
+                seen = self.handled(run_id, services)
             if seen >= expected:
                 return time.monotonic() - start
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"{seen} of {expected} records handled after {timeout:.0f} s")
             time.sleep(poll)
 
-    def probe_states(self, run_id: str) -> dict[str, dict[str, Any]]:
-        """``{key: {"log": …, "leads": …, "n": …}}`` for every probe key of the run."""
+    def states(self, run_id: str, service: str) -> dict[str, dict[str, str]]:
+        """``{key: {state key: JSON text}}`` for every object of ``service`` in the run."""
         rows = self.query(
-            "SELECT service_key, key, value_utf8 FROM state WHERE service_name = 'Probe' "
+            "SELECT service_key, key, value_utf8 FROM state "
+            f"WHERE service_name = '{_check_name(service)}' "
             f"AND starts_with(service_key, '{_check_name(run_id)}:')"
         )
-        out: dict[str, dict[str, Any]] = defaultdict(dict)
+        out: dict[str, dict[str, str]] = defaultdict(dict)
         for row in rows:
-            out[row["service_key"]][row["key"]] = json.loads(row["value_utf8"])
+            out[row["service_key"]][row["key"]] = row["value_utf8"]
         return dict(out)
 
-    def probe_logs(self, run_id: str) -> dict[str, dict[str, Any]]:
-        return {key: state["log"] for key, state in self.probe_states(run_id).items()}
+    def ingress_logs(self, run_id: str) -> dict[tuple[str, str], dict[str, Any]]:
+        """The ingress log of every Kafka-fed object of the run, by (service, key)."""
+        return {
+            (service, key): json.loads(values["log"])
+            for service in KAFKA_FED
+            for key, values in self.states(run_id, service).items()
+            if "log" in values
+        }
 
     def invocations(self, run_id: str) -> list[dict[str, Any]]:
-        """Probe invocations of the run: handler, status and how they were invoked."""
+        """Every invocation of the run's objects: target, status, result, last failure, attempts."""
         return self.query(
-            "SELECT target_service_key, target_handler_name, status, invoked_by "
-            "FROM sys_invocation WHERE target_service_name = 'Probe' "
-            f"AND starts_with(target_service_key, '{_check_name(run_id)}:')"
+            "SELECT target_service_name, target_service_key, target_handler_name, status, "
+            "invoked_by, completion_result, last_failure, retry_count FROM sys_invocation "
+            f"WHERE starts_with(target_service_key, '{_check_name(run_id)}:')"
         )
+
+    def configure(self, params: Mapping[str, Any]) -> None:
+        """Send ``configure`` to every object of each managed household (ADR 0019), with an
+        idempotency key, so a repeated call changes nothing.
+        """
+        from ems.actors.serde import serde_for
+        from ems.assembler.params import RunParams
+
+        serde = serde_for(RunParams)
+        for key, p in params.items():
+            body = serde.serialize(p)
+            for service in (*CONFIGURED, *p.strategies):
+                idempotency_key = f"{key}:{service}:configure"
+                self.send(service, key, "configure", body, idempotency_key=idempotency_key)
+
+    def wait_run(
+        self,
+        run_id: str,
+        records: int,
+        ends: Mapping[str, Mapping[str, int]],
+        *,
+        strict: bool = True,
+        timeout: float = 900.0,
+        poll: float = 0.5,
+    ) -> float:
+        """Wait until every record of the run is handled and each object in ``ends`` (service ->
+        key -> next step) expects that step: the end the offline side computed. Fails at once on a
+        failed or paused invocation and, when ``strict``, on any invocation with a failed attempt
+        (a fault test passes ``strict=False``: the attempts a kill interrupts are retried).
+        """
+        start = time.monotonic()
+        while True:
+            with contextlib.suppress(httpx.HTTPError):
+                failures = self.failures(run_id, strict=strict)
+                if failures:
+                    raise RuntimeError(f"failed invocations in run {run_id}: {failures[:5]}")
+                if self.handled(run_id) >= records and self._at_end(run_id, ends):
+                    return time.monotonic() - start
+            if time.monotonic() - start > timeout:
+                raise TimeoutError(f"run {run_id} did not finish within {timeout:.0f} s")
+            time.sleep(poll)
+
+    def failures(self, run_id: str, *, strict: bool = True) -> list[dict[str, Any]]:
+        return [row for row in self.invocations(run_id) if failed(row, strict=strict)]
+
+    def _at_end(self, run_id: str, ends: Mapping[str, Mapping[str, int]]) -> bool:
+        for service, by_key in ends.items():
+            got = self.states(run_id, service)
+            for key, end in by_key.items():
+                state = got.get(key, {}).get("state")
+                if state is None or next_step(service, json.loads(state)) != end:
+                    return False
+        return True
+
+
+def registered_handlers() -> dict[str, set[str]]:
+    """The handlers of every service of the SDK app, as Restate should list them."""
+    from ems.actors.app import SERVICES
+
+    return {svc.name: set(svc.handlers) for svc in SERVICES}
+
+
+def failed(row: Mapping[str, Any], *, strict: bool = True) -> bool:
+    """An invocation that will not complete on its own, or, when ``strict``, one that keeps failing.
+
+    A transport error between Restate and the SDK service (an HTTP/2 stream closed) fails one
+    attempt and the retry succeeds; a handler that raises fails every attempt. So strict mode waits
+    for ``STRICT_ATTEMPTS`` failed attempts before it calls an invocation failed (seen in spec 011's
+    e2e runs). The fault tier passes ``strict=False``: a kill can fail many attempts in a row.
+    """
+    if row.get("status") == "paused" or row.get("completion_result") == "failure":
+        return True
+    keeps_failing = int(row.get("retry_count") or 0) >= STRICT_ATTEMPTS
+    return strict and bool(row.get("last_failure")) and keeps_failing
+
+
+def next_step(service: str, state: Mapping[str, Any]) -> int | None:
+    """The next step an object expects, from its stored state (``Inbox.expected``)."""
+    return state[STEP_INBOX.get(service, "steps")]["expected"]
+
+
+def _sql_names(names: Sequence[str]) -> str:
+    return ", ".join(f"'{_check_name(n)}'" for n in names)
 
 
 # ── docker and compose ────────────────────────────────────────────────────────────────────────────
@@ -462,7 +601,7 @@ class IngressSet:
 
     @property
     def topics(self) -> tuple[str, ...]:
-        return tuple(self.prefix + t for t in PROBE_TOPICS)
+        return tuple(self.prefix + t for t in TOPICS)
 
     def group(self, service: str) -> str:
         return self.prefix + INGRESS_GROUPS[service]
@@ -482,8 +621,8 @@ class IngressSet:
             timeout=timeout,
         )
 
-    def up(self, *, wait: bool = True) -> None:
-        self._compose("up", "-d", "--no-deps", *(["--wait"] if wait else []), *INGRESS_SERVICES)
+    def up(self, *, wait: bool = True, services: Sequence[str] = INGRESS_SERVICES) -> None:
+        self._compose("up", "-d", "--no-deps", *(["--wait"] if wait else []), *services)
 
     def down(self) -> None:
         self._compose("down", "--remove-orphans", "--timeout", "10", check=False)
@@ -564,9 +703,10 @@ def publish_backfill(
     data_dir: Path,
     start: str = "2026-10-20T00:00:00Z",
     faults: bool = False,
+    config: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """`ems-gen run --mode backfill` into the prefixed topics (sim profile), keys scoped by
-    ``run_id``.
+    ``run_id``; ``config`` replaces `config/generator.yaml` (the fault fixture of the tests).
     """
     cmd = [
         str(Path(sys.executable).with_name("ems-gen")),
@@ -584,6 +724,8 @@ def publish_backfill(
     ]
     if faults:
         cmd.append("--faults")
+    if config is not None:
+        cmd += ["--config", str(config)]
     env = {
         **os.environ,
         "EMS_KAFKA_BOOTSTRAP": settings.kafka_bootstrap,
@@ -601,12 +743,12 @@ def publish_backfill(
 
 
 def read_run(settings: EmsSettings, prefix: str, run_id: str) -> list[Record]:
-    """Every record of the run in the four prefixed probe topics, in partition order."""
+    """Every record of the run in the four prefixed topics, in partition order."""
     from ems.ingest.tools.reader import read_topic
 
     scope = f"{_check_name(run_id)}:"
     out: list[Record] = []
-    for topic in (prefix + t for t in PROBE_TOPICS):
+    for topic in (prefix + t for t in TOPICS):
         for rec in read_topic(settings.kafka_bootstrap, topic):
             if rec.key is not None and rec.key.startswith(scope):
                 out.append(
@@ -615,12 +757,66 @@ def read_run(settings: EmsSettings, prefix: str, run_id: str) -> list[Record]:
     return out
 
 
-def offline_logs(records: Iterable[Record]) -> dict[str, dict[str, Any]]:
-    """The probe log of every key, folded offline with the same pure function the handlers use."""
-    by_key: dict[str, list[tuple[ingress_check.Meta | None, bytes]]] = defaultdict(list)
+def offline_logs(records: Iterable[Record]) -> dict[tuple[str, str], dict[str, Any]]:
+    """The ingress log of every (service, key), folded offline with the function the handlers use.
+
+    `Household` and `Weather` share a location's key, so the topic decides the service.
+    """
+    by_key: dict[tuple[str, str], list[tuple[ingress_check.Meta | None, bytes]]] = defaultdict(list)
     for rec in records:
-        by_key[rec.key].append((rec.meta, rec.value))
+        by_key[(service_of(rec.meta[0]), rec.key)].append((rec.meta, rec.value))
     return {key: ingress_check.fold_log(items) for key, items in by_key.items()}
+
+
+def service_of(topic: str) -> str:
+    """The Kafka-fed service of a topic, with or without a test prefix."""
+    for name, service in TOPIC_SERVICE.items():
+        if topic.endswith(name):
+            return service
+    raise ValueError(f"no service reads topic {topic!r}")
+
+
+def records_by_stream(records: Iterable[Record], key: str) -> dict[str, list[bytes]]:
+    """The raw values of one key, per stream, in partition order: the offline side's input."""
+    out: dict[str, list[bytes]] = defaultdict(list)
+    for rec in records:
+        if rec.key == key:
+            for t, name in _STREAM_OF_TOPIC.items():
+                if rec.meta[0].endswith(t):
+                    out[name].append(rec.value)
+    return out
+
+
+_STREAM_OF_TOPIC = {topic: stream.value for stream, topic in STREAM_TOPICS.items()}
+
+
+def offline_run(params: Mapping[str, Any], records: Sequence[Record]) -> dict[str, Any]:
+    """The offline side of a configured run: each managed household's streams folded through the
+    assembler, ``{household_key: Offline}``.
+    """
+    from ems.assembler.offline import fold
+
+    out: dict[str, Any] = {}
+    for key, p in params.items():
+        own = records_by_stream(records, key)
+        market = records_by_stream(records, p.market_key)
+        out[key] = fold(
+            p,
+            own.get(Stream.PRODUCTION.value, []),
+            own.get(Stream.CONSUMPTION.value, []),
+            own.get(Stream.WEATHER_FORECAST.value, []),
+            market.get(Stream.PRICE.value, []),
+        )
+    return out
+
+
+def run_ends(params: Mapping[str, Any], offline: Mapping[str, Any]) -> dict[str, dict[str, int]]:
+    """``{service: {key: next step}}``: where each stepping object stands at the end of a run."""
+    ends: dict[str, dict[str, int]] = defaultdict(dict)
+    for key, p in params.items():
+        for service in (*p.strategies, "Ems", "Battery", "Meter"):
+            ends[service][key] = offline[key].join.next
+    return dict(ends)
 
 
 def group_progress(settings: EmsSettings, group: str, topics: Sequence[str]) -> tuple[int, int]:
@@ -679,7 +875,7 @@ class StackEnv:
         close_stack_ingestion()
         self.plan = ensure_topics(self.settings, self.prefix)
         self.sdk.start()
-        self.deployment = self.restate.register(force=False)
+        self.deployment = self.restate.ensure_registered(registered_handlers())
         if start_ingress:
             self.ingress.up()
         return self

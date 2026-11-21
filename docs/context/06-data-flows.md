@@ -44,8 +44,10 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 ### Faults (spec 003)
 
 With faults on, a duplicate is the identical record published twice, a late record keeps its event time and id
-but arrives up to `late_max` after newer intervals of its key, and a missing record never arrives. Downstream
-consumers must deduplicate by `event_id` and tolerate out-of-order intervals per key.
+but arrives up to `late_max` after its own emission time (so a late meter reading is overtaken by at most 7 newer
+intervals of its key at the default `PT2H`), and a missing record never arrives. Missing and late hit meters and
+forecasts; duplicates hit every stream, prices included; value mutations (stuck values, register resets, quality
+flags) keep the `event_id`. Downstream consumers must deduplicate and tolerate out-of-order intervals per key.
 
 ### EMS: time and ordering (ADR 0017; designed, built from stage 3)
 
@@ -65,12 +67,16 @@ at its own speed. So each household orders its own inputs by event time; the ful
   waits for that stream's next record; a missing forecast run makes the household wait for the run after it.
 - **Join.** Step `q` needs the production and consumption records of `q` (consumption only for a site without
   PV), the price of `q`, and the forecast run visible at its start (`08-contracts.md`, availability rule).
-- **Late and missing readings.** A step waits `L` slots (default 8) of the reading's own stream, then runs on
-  an estimate flagged `estimated`. A reading up to `2L` late corrects the settlement of its hour and never a
-  decision, the executed battery power or the SoC; later ones are dropped and counted. With the default `L`
-  equal to the generator's `late_max`, every late reading of a `--faults` run is waited for; corrections and
-  drops appear only at a smaller `L`.
-- **Duplicates** are dropped by slot (stream, `t`) and `event_id` in actor state.
+- **Late and missing readings** (ADR 0018). A step waits `L` slots (default 8) of the reading's own stream,
+  then runs on an estimate flagged `estimated`: the value the stream used for the slot before. A reading up to
+  `2L` late re-fires the settlement of its hour and never changes a decision, the executed battery power or the
+  SoC; later ones are dropped and counted. A civil month is settled `2L` quarter-hours after it ends, so no
+  correction inside that window is lost. With the default `L` equal to the generator's `late_max`, every late
+  reading of a `--faults` run is waited for; corrections and drops appear only at a smaller `L`.
+- **A quarter-hour without a visible price** uses the statutory replacement: the same local quarter-hour of the
+  nearest earlier day with a visible curve, at most two days back, else 0, flagged `price_replaced`.
+- **Duplicates.** The first reading of a meter slot wins; a forecast run not newer than the newest one and a price
+  curve already held are dropped; all are counted.
 - **The real loop.** `Ems` decides step `t` only after `Battery` acknowledged `t−1`, so the decision uses the
   real SoC and never a stale view.
 - **Live mode** runs the same rules; one durable wall-clock timer per household raises the watermarks to "now
@@ -82,8 +88,8 @@ at its own speed. So each household orders its own inputs by event time; the ful
 
 ## What to build
 
-- The assembler and the actors (stage 3), the live timer and pacing for history replays (stage 4); briefs in
-  `01-architecture.md`.
+- The live timer and pacing for history replays (stage 4); briefs in `01-architecture.md`. The assembler and the
+  actors are built (stage 3, spec 011).
 
 ## Prerequisites
 

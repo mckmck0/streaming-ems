@@ -32,9 +32,10 @@ skill, they win; say so.
   deadlines are delayed messages.
 - **R6, generations.** Self-rescheduling jobs carry a generation number; a tick from an old generation
   stops its chain.
-- **R7, envelope.** Every message carries `schema_version`, `t` and a sim timestamp. Order between actors
-  is not assumed: receivers apply messages in `t` or sequence order, hold back early ones, and count every
-  reordering instead of failing.
+- **R7, envelope.** Every message carries `schema_version` and `t`, the simulated time (stream updates also
+  carry `seq`; spec 011 dropped the separate sim timestamp). Order between actors is not assumed: receivers
+  apply messages in `t` or sequence order, hold back early ones, and count every reordering instead of failing
+  (`ems.actors.reorder`).
 
 ## Time and ordering (ADR 0017, full model in 01)
 
