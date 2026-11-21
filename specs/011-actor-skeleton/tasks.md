@@ -154,4 +154,4 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
   `13`; `docs/thesis/kafka-ingress.md`.
 - [x] T43 [docs] (SC-001) `README.md`, `CLAUDE.md`, `.claude/rules/actors.md`, the `ems-actor-contract`,
   `ems-plan-change` and `ems-context` skills.
-- [ ] T44 (SC-002) `make format`, `make ci`; the `ems-pr` skill opens the pull request with the tier outputs.
+- [x] T44 (SC-002) `make format`, `make ci`; the `ems-pr` skill opens the pull request with the tier outputs.
