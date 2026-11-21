@@ -5,7 +5,8 @@ Notes for the thesis (spec 010, AC-010-17 … -21). The measurements come from t
 29.7.2 (7.75 GiB VM). Every file stores its config, seed, window, images, package versions, hardware and commit:
 
 - skew: `experiments/results/ingress-skew-20261116T081120Z/results.json`;
-- state cost: `experiments/results/ingress-state-cost-20261116T081221Z/results.json`;
+- state cost: `experiments/results/ingress-state-cost-20261116T081221Z/results.json` (its objects and mode were
+  removed in spec 011; reproducing it needs the spec 010 commit `78e6ecd`);
 - backlog: `experiments/results/ingress-backlog-20261116T081316Z/results.json`.
 
 The stack: Restate 1.8.1-hotfix.2 (one node), the Kafka ingress integration 0.1.1 (three containers, linux/amd64
@@ -16,8 +17,8 @@ emulated on Apple Silicon), Kafka 4.3.1 (one broker), one SDK process (`restate-
 The order and exactly-once claims rest on tests, not on these files. Each test compares, with `==`, the probe's
 log for every record key and topic (count, last offset, a SHA-256 chain over the offsets, regressions, rejected
 records) with the same pure function folded over the records read back from Kafka:
-- `tests/e2e/test_probe_backfill.py`: 10 households over one day;
-- `tests/fault/test_probe_kills.py`: 120 households over two days, killed with `kill -9` at 30 % of the run (the
+- `tests/e2e/test_probe_backfill.py` (`test_ingress_backfill.py` since spec 011): 10 households over one day;
+- `tests/fault/test_probe_kills.py` (`test_ingress_kills.py` since spec 011): 120 households over two days, killed with `kill -9` at 30 % of the run (the
   Restate server, the SDK service, an ingress container), each kill proved mid-run from data that survives it;
   and a Restate outage longer than the ingress containers' reconnect budget;
 - `tests/integration/`: bad records, records published before ingestion opened, each topic to its handler.

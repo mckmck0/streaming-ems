@@ -2,9 +2,10 @@
 
 ## Current consensus
 
-Built in stage 2 (spec 010): the Restate environment, registration and the Kafka ingress, feeding one probe
-object. The actors of `01-architecture.md` (Household, Tariff, Weather, Ems, Battery, Meter, the strategies) and
-their handlers come with stage 3, which adds them to this doc. The ordering model is ADR 0017.
+Built in stage 2 (spec 010): the Restate environment, registration and the Kafka ingress. Built in stage 3
+(spec 011): the actors of `01-architecture.md` (Household, Tariff, Weather, NoBattery, SelfConsumption, Ems,
+Battery, Meter) and their handlers, below. The ordering model is ADR 0017; late and missing inputs ADR 0018; run
+parameters ADR 0019.
 
 ### Runtime and SDK service
 
@@ -29,6 +30,17 @@ their handlers come with stage 3, which adds them to this doc. The ordering mode
 - An unchanged deployment answers 201 the first time and 200 after, with the same deployment id; Restate stores
   the URI with a trailing slash. A failed discovery (no service at the URI) or an unreachable admin API makes
   `make register` exit non-zero before any ingress container starts.
+- **Stale registrations (spec 011).** Removing a service means removing its deployment, and a deployment at the
+  same URI keeps its old handlers under `force: false` (below), so a re-pointed ingress container could find no
+  target handler and the integration would skip every record (risk K12). `make register` therefore checks, after
+  the POST, that Restate lists `Household/on_measurement`, `Weather/on_forecast` and `Tariff/on_price`
+  (`GET /services/<service>/handlers/<handler>`, 404 when missing) and stops before any ingress container starts;
+  `make register FORCE=true` replaces the deployment in development. The test harness
+  (`Restate.ensure_registered`) compares the handlers Restate lists for the eight services with those of
+  `ems.actors.app` and, on an idle stack, registers again with `force: true`. Checked on 2026-11-21 on the
+  pinned server: on a volume holding the spec 010 deployment, `make register` exited 2 before any ingress
+  container started; the harness's `force: true` registration kept the deployment id and replaced its whole
+  service set, so `Probe` and the state-cost objects were no longer listed.
 - **Changed handlers at the same URI.** With `force: false`, Restate answers 200 and keeps the deployment's old
   handlers, without discovering again: an added handler is not registered and a removed one stays advertised
   (checked 2026-11-15 on 1.8.1-hotfix.2 with a throwaway `ForceCheck` object at `host.docker.internal:9091`:
@@ -46,9 +58,12 @@ their handlers come with stage 3, which adds them to this doc. The ordering mode
 
   | Container | Topics | Consumer group | Handler | Consumers |
   |---|---|---|---|---|
-  | `ingress-meters` | `ems.production.v1`, `ems.consumption.v1` | `ems-ingress-meters` | `Probe.on_measurement` | 3 |
-  | `ingress-forecasts` | `ems.weather.forecast.v1` | `ems-ingress-forecasts` | `Probe.on_forecast` | 3 |
-  | `ingress-prices` | `ems.price.v1` | `ems-ingress-prices` | `Probe.on_price` | 1 |
+  | `ingress-meters` | `ems.production.v1`, `ems.consumption.v1` | `ems-ingress-meters` | `Household.on_measurement` | 3 |
+  | `ingress-forecasts` | `ems.weather.forecast.v1` | `ems-ingress-forecasts` | `Weather.on_forecast` | 3 |
+  | `ingress-prices` | `ems.price.v1` | `ems-ingress-prices` | `Tariff.on_price` | 1 |
+
+  Each container sets its own `RESTATE_RECORD_MAPPER_SERVICE` and `_HANDLER` (spec 011; until then all three
+  targeted `Probe`).
 
 - Settings that matter: `KAFKA_AUTO_OFFSET_RESET=earliest` (the integration sets none, and Kafka's default
   `latest` would skip what a new group finds in a topic); consumer instances never more than the partitions
@@ -77,20 +92,47 @@ their handlers come with stage 3, which adds them to this doc. The ordering mode
   that is not valid JSON or breaks the v1 contract, and return. A handler that raised would be retried by Restate
   and hold its key (the SDK turns an input it cannot deserialise into a `TerminalError`, `handler.py`).
 
-### The probe (stage 2 only)
+### The actors (stage 3, spec 011)
 
-`Probe` (key: the record key) has one exclusive handler per ingress container and a shared `status`. Each record
-updates, through the pure functions of `ems.actors.ingress_check`:
-- `log`: per topic the record count, last offset, a SHA-256 chain over (partition, offset), regressions and
-  partition changes, plus the key's rejected count. It does not depend on how the key's topics interleave, so the
-  tests compare it with `==` against the same fold computed offline from the records read back from Kafka;
-- `leads`: the newest `available_at` handled per stream and the largest lead of each stream over each other, in
-  quarter-hours (the skew measurement; it depends on the interleaving and is never compared);
-- `n`: records handled, written last, so a progress query never counts a record whose log is not written.
+**One shape for every handler.** An actor file holds its state dataclass and its pure transitions
+`(params, state, message) -> (state, sends)`, which import no Restate, and short handlers that call
+`ems.actors.shell`: read own state, call the transition, write own state, send. Sends are `Send(service,
+handler, key, message)` values delivered with `ctx.generic_send`, addressed by service name, so a household routes
+steps to the strategies named in its parameters and no actor file imports another. Why: every transition can be
+tested without a server (and as an in-memory network with any delivery order, `tests/network.py`), and the
+handlers stay a few lines each.
 
-Two measurement-only objects, `StateCostEager` and `StateCostLazy` (`state_preload=False`; the SDK marks
-`enable_lazy_state` deprecated), measure the cost of shipping object state (V7). Stage 3 removes all three and
-keeps `ingress_check.log_apply` in the real Kafka-fed handlers.
+| Actor | Key | Exclusive handlers | Shared handler (returns `state`) |
+|---|---|---|---|
+| `Household` | `[run_id:]location_id` | `configure`, `on_measurement` (Kafka), `on_prices`, `on_forecast` | `status` |
+| `Tariff` | `[run_id:]market_key` | `on_price` (Kafka), `subscribe` | `status` |
+| `Weather` | `[run_id:]location_id` | `configure`, `on_forecast` (Kafka) | `status` |
+| `NoBattery`, `SelfConsumption` | `[run_id:]location_id` | `configure`, `on_step` | `summary` |
+| `Ems` | `[run_id:]location_id` | `configure`, `on_step`, `on_ack` | `status` |
+| `Battery` | `[run_id:]location_id` | `configure`, `apply` | `state` |
+| `Meter` | `[run_id:]location_id` | `configure`, `on_flows` | `bill` |
+
+- **State keys.** `params` (the `RunParams` of `configure`), `state` (one frozen dataclass), and on Kafka-fed
+  objects `log` (the ingress log of `ingress_check.log_step`, compared with the offline fold), `n` (records
+  handled, written last) and `n_at_configure` (records that arrived before `configure`; the harness checks 0).
+- **Serialisation.** State, parameters and messages are frozen dataclasses encoded by one serde over
+  `pydantic.TypeAdapter` (`ems.actors.serde`): floats round-trip bit for bit. No stored or sent type contains a
+  set: Restate compares a retried handler's writes with its journal (RT0016), and a set's JSON order depends on
+  the hash seed (`National.holidays` became a sorted tuple for this). Tests check both.
+- **Configuration** (ADR 0019). `configure` stores the parameters once; an equal second call changes nothing,
+  other parameters or another key fail the call without a retry (`TerminalError`). An internal message at an
+  unconfigured object fails the same way, and the key goes on with its next invocation.
+- **Kafka-fed handlers** take raw bytes (`BytesSerde`, `accept="*/*"`), parse once, update `log`, run the
+  transition only on a configured object (`Tariff`, keyed by market, starts from a default state), and never
+  raise on the content of a record: the mapping (`ems.assembler.mapping`) turns what it cannot use into a
+  counter.
+- **Ordering between actors.** Every receiver applies messages through `ems.actors.reorder`: steps, commands,
+  acknowledgements and flows by `t`, price and forecast updates by `seq`; early ones are held, stale ones
+  dropped, both counted outside the compared state.
+- **Unmanaged sites** are never configured: their `Household` and `Weather` keep only `log` and `n`.
+
+The stage 2 `Probe` and the measurement-only `StateCostEager` and `StateCostLazy` were deleted in stage 3; their
+results stay in `docs/thesis/kafka-ingress.md` (reproducing the state-cost numbers needs the spec 010 commit).
 
 ### Test projects and jobs
 
@@ -100,22 +142,36 @@ and groups prefixed through `EMS_INGRESS_PREFIX`. Tests, `make measure` and `mak
 stack's topics. A Restate tier or job stops the stack's own ingress containers and leaves ingestion closed;
 `make register` opens it again.
 
-### How R1–R7 hold in stage 2
+Since stage 3 a run is configured before it is published (`Restate.configure` with the records of
+`ems.experiments.runs.managed_params`), and `Restate.wait_run` returns once every record is handled and every
+strategy, `Ems`, `Battery` and `Meter` expects the step after the last one the offline side released
+(`offline_run`, `run_ends`). It fails at once on a failed or paused invocation and, unless a fault test asks
+otherwise, on an invocation still failing after four attempts: the first e2e runs on the pinned stack showed
+HTTP/2 transport errors between Restate and the SDK service (`h2 pool connection error: stream closed because of
+a broken pipe`) on single attempts, which Restate retried with success (risk K14). `make measure` has two modes: `skew` (configured households: leads per stream
+pair, prices included, and the re-order counters of every receiving service) and `backlog`.
 
-- R1, R2: no object calls another. Exclusive handlers are reached by Kafka or by one-way HTTP sends; only the
-  shared `status` and `count` are called request-response, from tests and jobs.
-- R3, R5: handlers make no external call, read no clock and never wait.
-- R4: Restate's offset dedup at the ingress; job calls through the HTTP ingress carry an `Idempotency-Key`.
-- R6, R7: no timer and no message between actors yet.
+### How R1–R7 hold (stage 3)
+
+- R1, R2: every edge between actors is a one-way `generic_send`, including the two cycles (Household and Tariff;
+  Ems and Battery). Request-response is used only from outside (tests, jobs) to the shared handlers. A test
+  scans `src/ems/actors/` for `object_call`, `service_call` and `generic_call`.
+- R3, R5: handlers make no external call, read no clock and never wait: waiting is buffering in state until the
+  watermarks pass. Stored bytes are deterministic (no sets), so a retry matches its journal.
+- R4: Restate's offset dedup at the ingress; the slot table and the sparse streams drop a record published twice;
+  `configure` carries an `Idempotency-Key`; a handler's own sends are deduplicated by Restate.
+- R6: no timer and no self-rescheduling chain yet (the live deadline is stage 4).
+- R7: every message carries `schema_version` and `t` (the simulated time), updates also `seq`; receivers apply
+  them in order through `ems.actors.reorder`.
 
 ## What to build
 
-- Stage 3: the handlers of the actors in `01-architecture.md`; the ingress containers point at `Household`,
-  `Weather` and `Tariff` instead of `Probe`.
+- Built: stage 3 (spec 011). Stage 4 adds the live deadline (`Household.on_deadline`) and adding a strategy at
+  run time (`Household.set_strategies`).
 
 ## Prerequisites
 
-- Spec 010 (this environment); spec 009 (the domain core the stage 3 handlers call).
+- Spec 010 (this environment); spec 009 (the domain core the handlers call); spec 011 (the actors).
 
 ## Open questions
 

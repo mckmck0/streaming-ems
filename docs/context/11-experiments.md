@@ -18,7 +18,10 @@
 Every energy result reports three cost numbers per household and strategy, from the offline reference or actor
 state:
 - `bill_pln`: Σ monthly `payable_pln` − Σ refunds, the primary cost. A refund is booked in its tranche's expiry
-  month (paid in the next). Bill metrics use windows of whole civil months.
+  month (paid in the next). Bill metrics use windows of whole civil months plus `2L` quarter-hours: the actors
+  settle a month `2L` quarter-hours after it ends, so late readings can still correct it (ADR 0018, risk A8).
+- Every energy result reports, per household, its estimated slots, corrections, readings dropped as too old and
+  quarter-hours priced by the statutory replacement (`price_replaced`); they are identical for every strategy.
 - `deposit_closing_pln`: the deposit left at the window's end, shown beside the bill and never netted (valuing it
   needs an assumption about the future).
 - `ledger_net_cost_pln`: Σ hourly (energy + distribution cost − 1.23 × export value). Additive, so it suits
@@ -74,17 +77,25 @@ Desktop 29.7.2, 7.75 GiB VM); each result directory stores its manifest (P14). D
   `restate-sdk` 1.0.5: 0 mismatches in A (150 states) and C (200), and in B after confirmed `kill -9` of the SDK
   service and the server (14,400 events, 96 per strategy state).
 
+### Actors through Kafka (spec 011)
+
+The first comparison of actor state with the offline side through Kafka is a test tier, not an experiment
+(`tests/e2e/test_actor_backfill.py`): 10 households (three EMS-managed), five runs (clean across the end of
+October, two arrival orders, faults at `L` = 8 and `L` = 2). In each, the household join and every strategy equal
+the offline fold with `==`, and the real `Battery` and `Meter` equal the SelfConsumption strategy. `make measure
+MODE=skew` now runs on configured households and reports the price leads and the re-order counters (V5 in 01).
+
 ## What to build
 
 - Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to
   Parquet, the run manifest and reports. Scale runs are published paced (`accelerated` mode), and the highest
   speed the system sustains is a result (risk A1).
-- Stage 3 delivers the first bit-exact comparison of actor state through Kafka (10 households × 1 day); stage 2
-  compared the ingress log only.
+- Stage 3 delivered the first bit-exact comparison of actor state through Kafka (above); stage 2 compared the
+  ingress log only.
 
 ## Prerequisites
 
-- Actors (stage 3). The domain core and the cost metric exist (spec 009).
+- Actors (stage 3, built). The domain core and the cost metric exist (spec 009).
 
 ## Open questions
 

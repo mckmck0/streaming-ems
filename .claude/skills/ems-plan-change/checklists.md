@@ -41,7 +41,8 @@ Source: `docs/context/08-contracts.md`.
 - Within a major version changes are additive only. Renaming or removing a field means a new version (and
   a new Kafka topic), an ADR, coordinated updates of all producers and consumers, and refreshed golden
   examples in the replay tests.
-- Every message and Kafka record carries `schema_version`, `t` and a sim timestamp. No idempotency key is
+- Every message and Kafka record carries `schema_version` and `t` (the simulated time; stream updates also carry
+  `seq`). No idempotency key is
   taken from a Kafka record: duplicates are dropped by slot and `event_id` in actor state (01); control calls
   through HTTP ingress carry an `Idempotency-Key`.
 - Kafka record key = household key (`[run_id:]location_id`), so per-household order holds within a partition.

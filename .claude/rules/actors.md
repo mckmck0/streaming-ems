@@ -12,11 +12,16 @@ message, timer or state ownership, invoke the `ems-actor-contract` skill and upd
 `docs/context/08-contracts.md`.
 
 - Handler shape: validate the message → call the domain → write only this actor's own state → send messages.
-  No business logic in handlers.
+  No business logic in handlers. Since spec 011 every handler goes through `ems.actors.shell`: an actor file
+  holds its state dataclass and pure transitions `(params, state, message) -> (state, sends)` (no Restate), and
+  short handlers; sends are `Send` values delivered by service name.
+- State and messages are frozen dataclasses encoded by `ems.actors.serde`; never a `set` in a stored or sent type
+  (a retried handler must write the same bytes, or Restate fails it with RT0016).
 - Single writer per fact (ownership table in `docs/context/01-architecture.md`). Copies of facts owned by
   other actors are views: tag them with their source and `t`, and never write them back.
 - R1/R2: request-response (`ctx.object_call`) only to shared (read-only) handlers (`kind="shared"`); every
-  edge that can close a cycle through exclusive handlers is a one-way `ctx.object_send`.
+  edge that can close a cycle through exclusive handlers is a one-way send (`ctx.generic_send`, by service
+  name, through `ems.actors.shell`).
 - R3: everything non-deterministic or external goes through the journal: `ctx.run_typed` / `ctx.run` for
   HTTP, model inference and solver calls, `ctx.time()`, `ctx.random()` and `ctx.uuid()` for time and randomness.
 - Async-first: no blocking call on the event loop. Offload CPU-bound or blocking work inside `ctx.run` to a
@@ -31,7 +36,8 @@ message, timer or state ownership, invoke the `ems-actor-contract` skill and upd
   takes raw bytes (`BytesSerde`, `accept="*/*"`), parses inside, counts a bad record and returns (decided in
   stage 2, `02-subsystem-actors.md`).
 - R6: self-rescheduling jobs carry a generation number and stale chains stop themselves.
-- R7: every message carries `schema_version`, `t` and a sim timestamp; receivers apply messages in `t` or
-  sequence order, hold back early ones, and count every reordering instead of failing.
+- R7: every message carries `schema_version` and `t` (`t` is the simulated time; stream updates also carry
+  `seq`); receivers apply messages in `t` or sequence order through `ems.actors.reorder`, hold back early ones,
+  and count every reordering instead of failing.
 - Messages are versioned and additive within a major version; breaking changes need a new version, an ADR
   and refreshed golden replay examples.

@@ -50,6 +50,7 @@ line says otherwise.
 | Quantities | The hourly vector-balanced net through the meter, Eb_h = Σ grid_q over the hour; import_h = max(Eb_h, 0), export_h = max(−Eb_h, 0), each split evenly over the hour's quarter-hours. Whether balancing stays hourly while meter data are quarter-hourly is VERIFY (D16) | art. 4 ust. 2b; art. 4b ust. 11 |
 | Distribution-fee basis | Every energy-dependent DSO fee (variable network, quality, OZE, cogeneration) is charged on the positive hourly Eb; there is no raw quarter-hour import basis. Ust. 4c applies the Eb⁺ basis to the fees of ust. 4a, those "których wysokość, zgodnie z taryfą operatora systemu dystrybucyjnego … zależą od ilości energii elektrycznej pobranej"; the OZE and cogeneration fees are part of the DSO tariff (Prawo energetyczne art. 45 ust. 7; PGE 7.11–7.12, Enea 7.8–7.9, Energa 9.3–9.4, Tauron 7.5–7.6) | art. 4 ust. 4a, 4c pkt 1 (Dz.U. 2021 poz. 2376 art. 1 pkt 4 lit. g); tariffs: Tauron 3.1.47, Energa 4.1.39, Enea 3.1.40, PGE 3.1.46; Dz.U. 2026 poz. 1182 § 15 ust. 6 |
 | Valuation | value = max(P, 0) · export, P = RCE of the quarter-hour (quarter-hourly since 2025-10-01) or the month's RCEm | art. 4b ust. 1–2 |
+| No RCE for a period | When RCE cannot be determined for a period t, the value of period t on the nearest preceding day for which it was determined applies. The actors use this replacement for a quarter-hour whose curve is not yet visible at its start, at most two days back, else 0, flagged `price_replaced` (ADR 0018). Where PSE published late, the legal bill would use the published price; the model cannot, because a step reads only what was visible at its start (risk A12). PSE published two days only on the day itself in 2025-10-01 … 2026-11-21 | art. 4b ust. 10 (read 2026-11-20 in Dz.U. 2021 poz. 2376; unchanged by Dz.U. 2024 poz. 1847) |
 | Negative prices | Floored at 0 "z zastrzeżeniem ust. 17 i 18": a prosumer who refuses the seller's clause of ust. 12 may be valued at the negative price. **Assumption:** every EMS site accepted the clause (D10) | art. 4b ust. 2 pkt 2, ust. 12, 17–18 |
 | RCEm | Σ E_t · max(RCE_t, 0) / Σ E_t, E = feed-in of prosumers at DSOs with ≥ 200,000 customers. PSE OIRE publishes it on the 11th of the next month (https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej). A correction that moves it by more than 2 % is re-published until the end of the 12th month, and sellers re-settle (correction rule: likely) | art. 4b ust. 6–7; Prawo energetyczne art. 11y |
 | Deposit tranche | 1.23 × the month's export value, for every cohort since 2025-02-01; assigned to the prosumer account in the next month; usable for 12 months from assignment, oldest first. A month's tranche never offsets that month | art. 4c ust. 4–5, 7; 1.23 from 2025-02-01 under Dz.U. 2024 poz. 1847 art. 31 |
@@ -110,7 +111,8 @@ line says otherwise.
 - **Zone scheme** = a default zone plus rules (zone, day types, optional season as a half-open month-day range,
   hour windows `[start, end)`; `end ≤ start` wraps midnight within the date). The first matching rule wins. Day
   type precedence: statutory holiday > Sunday > Saturday > weekday; holidays are listed in `national.yaml`
-  (equal to `holidays.Poland(years=2026)`). Zone names: G11 `all`; G12 `day`/`night`; G12w `peak`/`offpeak`.
+  (equal to `holidays.Poland(years=2026)`) and kept as a sorted tuple, never a set (actor state must encode to
+  the same bytes in every process, spec 011). Zone names: G11 `all`; G12 `day`/`night`; G12w `peak`/`offpeak`.
 - **Purchase price per quarter-hour** (gross PLN/kWh; `tariff.buy_price`):
   `energy = (1 + VAT)·(seller price[zone] + excise)`, which the deposit may offset;
   `dist = (1 + VAT)·(variable network fee[zone] + quality fee + OZE fee + cogeneration fee)`, always paid.
@@ -202,7 +204,26 @@ bill differs (D2):
   100-slot day and the October close (with an expiring tranche and an RCEm variant) its results equal `run`'s
   with `==`.
 - Each quarter keeps the signal price the policy saw and the export price the ledger used, so an RCEm month never
-  values export at the lagged price. Results record the operator, seller and quality-fee ids, the RCEm entries
+  values export at the lagged price.
+- **One quarter-hour is four pieces** (spec 011), so the actors run the reference's own code: `prices` (buy price,
+  basis, signal and export price; `Ems` and `Meter`), `decide` (the policy; `Ems`), `apply` (resolve and clamp;
+  `Battery`) and `settlement.grid_kwh` (load − PV + p·Δt; `Meter`). `quarter()` composes them and returns the
+  same bits as before (a test keeps the spec 009 body).
+- **Late readings** (allowed lateness, ADR 0018). `settle_quarter` is now `add_quarter` (append a quarter, write
+  the hour's row on its fourth quarter), then `close_month` when `due_month(acc, 0)`. `correct` applies a late
+  reading: it recomputes the quarter's grid energy from the corrected PV or load and the battery power that was
+  executed, and replaces the open hour's entry or the hour's row. `stepper.settle_step` runs, per step, the
+  step's corrections, then the quarter, then closes a month once `lag` quarter-hours have passed after its end,
+  with that month's own fixed charges and price basis, and keeps the flows (`Flow`: PV, load, executed power and
+  the settlement input) from the hour of `acc.t − lag` on. Strategies and `Meter` use `lag = 2L`; a correction
+  always arrives at most `2L` steps after its quarter, so its hour's row is still open. With `lag` 0 and no
+  corrections everything equals spec 009. `step(…, recent, corrections, lag)` returns the kept flows beside the
+  `RefState` (`StepOut.recent`), so `RefState` still equals `reference.run`'s.
+- **The estimate** for a missing reading is the value its stream used for the slot before (0 before the first
+  reading), flagged `estimated`; if the reading never arrives the estimate stays in the ledger. A corrected quarter
+  keeps the battery power resolved on the estimate, so the mode-action invariants above hold for the step's
+  inputs, not for the corrected flows (risk D6): NoBattery is corrected exactly, SelfConsumption keeps the
+  estimate's error as grid exchange. Results record the operator, seller and quality-fee ids, the RCEm entries
   used (source and publication date) and the cohort (P14).
 - Notes for the actor stages (design in `01-architecture.md`, ADR 0017):
   - `Tariff` stays keyed by market (ADR 0012) and pushes price curves to households as one-way messages; per-site
@@ -211,9 +232,7 @@ bill differs (D2):
     strategy runs `stepper.step` on its virtual battery. A mode action resolves where q's measurement arrives, so
     the command to `Battery` carries the `Action`. State per object: the open hour (≤ 3 quarters), the open
     month's rows (≤ 745) and the tranches (≤ 13).
-  - Both functions close an hour on its fourth quarter and reject an out-of-order `t`. A late reading that
-    corrects the settlement of an hour already closed (ADR 0017) therefore needs a domain addition; OPEN until
-    stage 3, which also splits `reference.quarter` into its decide and apply halves for `Ems` and `Battery`.
+  - Corrections and the split of `reference.quarter` are built (spec 011, above).
   - The RCEm table is a run parameter read as config, by the actors and the offline reference alike: PSE values
     for a real-data run, the proxy table for a synthetic run. Both sides therefore value a month's export with
     the same entry, and results compare with `==`.
@@ -238,8 +257,8 @@ fuse ≤ 63 A, otherwise C21 (not settled). Metering points (PPE) are 18-digit G
 ## What to build
 
 - Built by spec 009: tariffs, settlement, price signal, actions, `Policy`, offline reference and stepper.
-- Next: stage 3 (the actor skeleton) calls `settle_quarter` and `stepper.step` and adds the correction of late
-  readings (notes above); stage 4's export reports the cost metric of `11-experiments.md`.
+- Built by spec 011: the split of `quarter()`, corrections of late readings and the month close with a lag.
+- Next: stage 4's export reports the cost metric of `11-experiments.md`.
 
 ## Prerequisites
 

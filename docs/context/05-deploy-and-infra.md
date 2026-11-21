@@ -117,6 +117,10 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
 - Configuration in compose, all confirmed with `restate-server --dump-config`: `RESTATE_NODE_NAME=restate-1`,
   `RESTATE_CLUSTER_NAME=ems`, `RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE="512 MiB"` (shown as `512.0 MiB`). The server's
   default retry policy (500 ms, ×2, at most 1 min, 70 attempts, then pause) is left as it is.
+- Registration guard (spec 011): after the POST, `make register` checks with `curl -fsS` that Restate lists the
+  three ingress targets (`Household/on_measurement`, `Weather/on_forecast`, `Tariff/on_price`) and stops before
+  any ingress container starts if one is missing, because a deployment at the same URI keeps its old handlers
+  under `force: false` (risk K13). Each ingress container sets its own `RESTATE_RECORD_MAPPER_SERVICE`.
 
 ## What to build
 

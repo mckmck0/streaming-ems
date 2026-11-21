@@ -76,8 +76,9 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   so the JSON value stays self-contained (K6). Restate deduplicates a redelivered record by consumer group,
   topic, partition and offset. Restate's in-server Kafka subscriptions are documented as old and due for removal
   and are not used.
-- Dedup by slot (stream, `t`) in object state: an identical `event_id` is ignored, different content for the same
-  slot is a revision. No idempotency key is taken from a record.
+- Dedup by slot (stream, `t`) in object state: the first reading of a meter slot wins; a second one is counted
+  (`duplicate` for the same `event_id`, `conflict` for another). A price curve revision follows the visibility
+  rule; a forecast run whose issue time was seen is stale (ADR 0018). No idempotency key is taken from a record.
 - Join production and consumption per `(location, t)` by the watermark rules of ADR 0017; there is no cross-topic
   ordering. Actors order by the event's own `t` and `available_at`, never by the Kafka record timestamp, so
   CreateTime = event time stays the timestamp policy (this closes the former open question).
@@ -88,24 +89,50 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
   Open-Meteo availability delay plus Open-Meteo's recommended 10-minute wait, rounded up to a quarter-hour: when a
   run was publicly usable (a live poller can only be later). It was a flat 90 min before spec 008, up to 27 min early
   for real ICON-D2 runs.
-- Schedule constants for the watermarks of the sparse streams (ADR 0017) join the same module in stage 3: the run
-  cadence per `forecast_model` and the opening of the price publication window (13:00 local on D−1). They are
-  code, not wire contract, and the generator is tested against them.
-- One pure function maps measurement events to the domain inputs (per quarter-hour PV and load energy and RCE; the
-  policy's `Observation` is a domain type defined in `12-domain-model.md`, not a wire message) and is shared with
-  the offline reference. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place,
+- Schedule constants for the watermarks of the sparse streams (ADR 0017), in the same module since stage 3:
+  `FORECAST_CADENCE_MIN` (180 min for `synthetic`, `icon_d2` and `dmi_harmonie_arome_europe`; DWD, DMI and
+  Open-Meteo, read 2026-11-20) with `forecast_cadence(model)`, and `PRICE_WINDOW_OPENS` (`PL:RCE`: 13:00
+  Europe/Warsaw on D−1) with `price_window_opens(market, day)`. They are code, not wire contract, and the generator
+  is tested against them. A consumer counts and drops a forecast run whose model has no delay or cadence (ADR
+  0018), and a price curve that is not `PLN/MWh` at PT15M.
+- One pure mapping, `ems.assembler.mapping`, turns events into the domain inputs and is shared with the offline
+  side: PV energy is the `pv` generation entries; load is the `math.fsum` of the `load`, `heat_pump` and
+  `ev_charger` consumption entries; an entry counts only as `active_energy`, `interval_sum`, `kWh` and not
+  `missing`; values beyond 10⁴ kWh or ±10⁵ PLN/MWh are refused. The policy's `Observation` is a domain type
+  defined in `12-domain-model.md`, not a wire message. Prices convert PLN/MWh → PLN/kWh (÷ 1000) in exactly one place,
   `ems.domain.units.pln_per_mwh_to_pln_per_kwh`. Tariff, RCEm and catalog config (`config/tariffs/`,
   `Site.net_billing`) are not part of the wire contract (spec 009).
 - Run scoping: with `run_id` set, keys are `run_id:location_id` (fresh Virtual Object state per run). Actors read
   `run_id` from the event, never from the key (market keys contain `:`).
-- Messages between actors are internal Restate messages, not wire contract: versioned models that carry
-  `schema_version`, `t` and the sim timestamp (R7). Any new Kafka topic or event is wire contract (ADR 0016).
+- Messages between actors are internal Restate messages, not wire contract (below). Any new Kafka topic or event
+  is wire contract (ADR 0016).
+
+### Internal actor messages v1.0.0 (spec 011)
+
+Frozen dataclasses encoded as JSON by `ems.actors.serde`; source of truth `src/ems/actors/messages.py`,
+`ems.assembler.join.Step` and `ems.assembler.params.RunParams`. Every message carries `schema_version` and `t`
+(R7): the step it belongs to or, for a stream update, the stream's watermark. `t` is the simulated time; there is
+no separate timestamp. Within version 1 changes are additive: a new field is optional with a default. A unit test
+pins the field names of every message and of the types nested in it.
+
+| Message | From → to | Fields |
+|---|---|---|
+| `Step` | Household → each strategy, Ems | `t`, `pv_kwh`, `load_kwh`, `rce_pln_per_kwh`, `pv_estimated`, `load_estimated`, `price_replaced`, `forecast_issue_s` (or null), `corrections: [Correction{stream, t, kwh}]` |
+| `PriceUpdate` | Tariff → Household | `t` (watermark), `seq`, `snapshot`, `curves: [Curve{seq, t0, day, rce_pln_per_kwh: [...], issued_s, visible_step}]` |
+| `ForecastUpdate` | Weather → Household | `t` (watermark), `seq`, `run: Run{seq, issue_s, visible_step}` |
+| `Subscribe` | Household → Tariff | `t` (first step), `household_key` |
+| `Apply` | Ems → Battery | `t`, `action: Action{kind, level, p_kw}`, `pv_kwh`, `load_kwh`, `rce_pln_per_kwh`, `corrections` |
+| `Ack` | Battery → Ems | `t`, `soc_kwh` |
+| `Flows` | Battery → Meter | `t`, `pv_kwh`, `load_kwh`, `p_kw`, `rce_pln_per_kwh`, `corrections` |
+| `RunParams` (control, ADR 0019) | operator → each object of a managed household | `run_id`, `location_id`, `household_key`, `market_key`, `first_step`, `end_step`, `late_slots`, `strategies`, `live`, `has_pv`, `initial_soc_kwh`, `model` (the `SiteModel`), `rcem` (the `RcemTable`); no `t`, its time is `first_step` |
+
+Units: energy kWh, power kW (> 0 charges), prices PLN/kWh, times in steps (UTC quarter-hours) or unix seconds
+(`issued_s`, `issue_s`).
 
 ## What to build
 
-- The internal actor messages of `01-architecture.md` (`Step`, `PriceUpdate`, `ForecastUpdate`, `Subscribe`,
-  `Apply`, `Ack`, `Flows`) with stage 3; the result Parquet and run summary with stage 4; ranking and selection
-  with stage 6.
+- The result Parquet and run summary with stage 4; ranking and selection with stage 6. (The internal actor
+  messages are built: spec 011.)
 - Results leave Restate through an export CLI that reads Virtual Object state after a run and writes the result
   Parquet and run summary (spec 006 decision). There is no Kafka result (egress) topic in v1.
 
@@ -116,5 +143,5 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 ## Open questions
 
 - OPEN (spec 003): forecast volume at 100k sites (tens of GB/day); a weather-cell key may be added additively.
-- OPEN (stage 3): consumer behaviour for a `forecast_model` missing from the availability table (producers
-  refuse it); for example the most conservative delay plus a counter.
+- Closed (stage 3, ADR 0018): a consumer counts and drops a run whose `forecast_model` is missing from the
+  availability table, as if the run were missing.

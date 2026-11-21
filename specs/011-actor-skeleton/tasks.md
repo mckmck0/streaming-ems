@@ -146,12 +146,12 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
 
 ## Phase 6: Docs and pull request
 
-- [ ] T40 [docs] (SC-001) `docs/adr/0018-late-and-missing-inputs.md`, `docs/adr/0019-run-parameters-as-control-messages.md`,
+- [x] T40 [docs] (SC-001) `docs/adr/0018-late-and-missing-inputs.md`, `docs/adr/0019-run-parameters-as-control-messages.md`,
   the index in `docs/adr/README.md`.
-- [ ] T41 [docs] (SC-001) `docs/context/01-architecture.md`, `02-subsystem-actors.md`, `08-contracts.md`,
+- [x] T41 [docs] (SC-001) `docs/context/01-architecture.md`, `02-subsystem-actors.md`, `08-contracts.md`,
   `12-domain-model.md` as listed in the plan's Docs and ADRs.
-- [ ] T42 [docs] (SC-001, SC-003) `docs/context/00-overview.md` (stage 3 done), `05`, `06`, `07`, `09`, `11`,
+- [x] T42 [docs] (SC-001, SC-003) `docs/context/00-overview.md` (stage 3 done), `05`, `06`, `07`, `09`, `11`,
   `13`; `docs/thesis/kafka-ingress.md`.
-- [ ] T43 [docs] (SC-001) `README.md`, `CLAUDE.md`, `.claude/rules/actors.md`, the `ems-actor-contract`,
+- [x] T43 [docs] (SC-001) `README.md`, `CLAUDE.md`, `.claude/rules/actors.md`, the `ems-actor-contract`,
   `ems-plan-change` and `ems-context` skills.
 - [ ] T44 (SC-002) `make format`, `make ci`; the `ems-pr` skill opens the pull request with the tier outputs.
