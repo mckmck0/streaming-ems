@@ -73,18 +73,18 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
 
 ## Phase 3: Actors
 
-- [ ] T23 [test] (AC-011-30) `tests/unit/actors/test_reorder.py` and `tests/property/test_reorder.py`: any
+- [x] T23 [test] (AC-011-30) `tests/unit/actors/test_reorder.py` and `tests/property/test_reorder.py`: any
   permutation of numbered messages comes out in order, once; early ones held; stale ones counted; `begin`
   releases what is held; the counters are outside `==`.
-- [ ] T24 (AC-011-30) `actors/reorder.py`: `Inbox`, `in_order`, `begin` (§5).
-- [ ] T25 [test] (AC-011-32, -33) `tests/unit/actors/test_messages.py` (field names of every message and of
+- [x] T24 (AC-011-30) `actors/reorder.py`: `Inbox`, `in_order`, `begin` (§5).
+- [x] T25 [test] (AC-011-32, -33) `tests/unit/actors/test_messages.py` (field names of every message and of
   `Curve`, `Run`, `Correction`, `Action`; `schema_version` and `t` on every message, `seq` on updates);
   `tests/unit/actors/test_serde.py` and `tests/property/test_serde.py` (every stored type round-trips with
   bit-identical floats; no set in any stored or sent type, found by walking the type hints);
   `tests/unit/actors/test_byte_determinism.py`, part 1 (values encoded in two subprocesses with different hash
   seeds give identical bytes).
-- [ ] T26 (AC-011-32, -33) `actors/messages.py`, `actors/serde.py` (§5; Actor contract, Messages).
-- [ ] T27 [test] (AC-011-24, -26 … -31, -33 … -36) `tests/unit/actors/test_transitions.py`: start states; the
+- [x] T26 (AC-011-32, -33) `actors/messages.py`, `actors/serde.py` (§5; Actor contract, Messages).
+- [x] T27 [test] (AC-011-24, -26 … -31, -33 … -36) `tests/unit/actors/test_transitions.py`: start states; the
   `configure` checks (equal, different, wrong key); `Tariff` without parameters; the snapshot and a known
   subscriber; unusable runs and curves; `Ems` decides `t` only after the acknowledgement of `t − 1`; `Battery`
   clamps and counts; `Meter` settles. `tests/unit/actors/test_byte_determinism.py`, part 2 (a fixed trace of
@@ -95,7 +95,7 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
   events. `tests/network.py` and `tests/property/test_network.py`: all transitions as an in-memory network with
   an arbitrary delivery order end with strategy states equal to the offline fold and `Battery` and `Meter`
   equal to SelfConsumption.
-- [ ] T28 (AC-011-24, -26 … -31, -34 … -36) `actors/shell.py`; `household.py`, `tariff.py`, `weather.py`,
+- [x] T28 (AC-011-24, -26 … -31, -34 … -36) `actors/shell.py`; `household.py`, `tariff.py`, `weather.py`,
   `strategy.py`, `ems.py`, `battery.py`, `meter.py`; `app.py` with the eight services beside the stage 2
   objects; `ingress_check.py` gains public `parse`, `log_step` and `lead_step` (§5).
 
