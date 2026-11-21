@@ -3,10 +3,16 @@
 This module owns port 9080 and the stack's own ingress containers while it runs, and its tests run
 in file order. It stops and starts the stack twice (a few minutes). At the end the stack is up, its
 ingestion is closed again and `make dev` is stopped.
+
+Since spec 011 (AC-011-47) the service listed after `make register` is `Household`, and the object
+whose state must survive `make down` and `make up` is an unconfigured `Household`: one record-shaped
+call without Kafka coordinates is counted as rejected in its ingress log, and its `log` and `n` are
+read by SQL before and after.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -108,7 +114,7 @@ def test_ac_010_03_register_registers_then_starts_the_ingress(
     ids = _deployment_ids(restate)
     assert len(ids) == 1
     services = next(d["services"] for d in restate.deployments() if d["id"] == ids[0])
-    assert "Probe" in {s["name"] for s in services}
+    assert "Household" in {s["name"] for s in services}
     for service in stack.INGRESS_SERVICES:
         cid = stack.container_of(service)
         assert cid is not None and stack.container_state(cid)["Running"], service
@@ -135,14 +141,23 @@ def test_ac_010_05_register_fails_without_service_or_admin(
     assert _running_ingress() == []
 
 
+def _household(restate: stack.Restate, run: str, key: str) -> dict[str, str]:
+    return restate.states(run, "Household").get(key, {})
+
+
 def test_ac_010_06_down_and_up_keep_registration_and_state(
     dev_server: subprocess.Popen[bytes], restate: stack.Restate
 ) -> None:
-    key = f"life{uuid.uuid4().hex[:8]}"
-    restate.send("StateCostEager", key, "touch", idempotency_key=f"{key}:touch")
+    run = f"life{uuid.uuid4().hex[:8]}"
+    key = f"{run}:PL-LOC-999001"
+    # A bad body through the HTTP ingress: no Kafka coordinates, so it is logged as rejected.
+    restate.send("Household", key, "on_measurement", b"not json {", idempotency_key=f"{key}:m")
     stack.wait_for(
-        lambda: restate.call("StateCostEager", key, "count") == 1, 60, "touch not handled"
+        lambda: _household(restate, run, key).get("n") == "1", 60, "on_measurement not handled"
     )
+    before = _household(restate, run, key)
+    assert set(before) == {"log", "n"}  # not configured: the log and the counter only
+    assert json.loads(before["log"])["rejected"] == 1
     ids = _deployment_ids(restate)
 
     down = make("down")
@@ -153,4 +168,4 @@ def test_ac_010_06_down_and_up_keep_registration_and_state(
     restate.wait_healthy()
 
     assert _deployment_ids(restate) == ids
-    assert restate.call("StateCostEager", key, "count") == 1
+    assert _household(restate, run, key) == before

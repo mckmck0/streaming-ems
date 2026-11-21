@@ -34,7 +34,7 @@ help:
 	@echo "  record NAME=...  replay NAME=... [BACKGROUND=1]   record live sources / publish a recording"
 	@echo "  stats       gaps, duplicates, late events per topic; bench  generation + producer benchmark"
 	@echo "  history NAME=... START=YYYY-MM-DD END=YYYY-MM-DD   fetch + build a real-data window"
-	@echo "  measure [MODE=skew|state-cost|backlog]   ingress measurements to experiments/results/"
+	@echo "  measure [MODE=skew|backlog]   ingress measurements to experiments/results/"
 	@echo "  spike       reproduce the reference spike's experiments A, B, C on the pinned server"
 	@echo "  clean       remove caches and build artefacts"
 	@echo ""
@@ -156,7 +156,9 @@ history:
 
 # ── Spec 010: Restate, the SDK service and the Kafka ingress ──
 # The defaults equal ems.settings (EMS_RESTATE_ADMIN_URL, EMS_SERVICE_URL). FORCE=true overwrites a deployment
-# at the same URI (needed when its handlers change; development only). curl -f stops before the ingress starts.
+# at the same URI (needed when its handlers change; development only). curl -f stops before the ingress starts,
+# also when Restate does not list a target handler of the ingress containers (spec 011: a stale deployment
+# with force: false keeps its old handlers, and the integration would skip every record).
 RESTATE_ADMIN ?= $(or $(EMS_RESTATE_ADMIN_URL),http://127.0.0.1:9070)
 SERVICE_URL   ?= $(or $(EMS_SERVICE_URL),http://host.docker.internal:9080)
 FORCE ?= false
@@ -164,6 +166,10 @@ MODE  ?= skew
 register:
 	curl -fsS -X POST "$(RESTATE_ADMIN)/deployments" -H "content-type: application/json" -d '{"uri": "$(SERVICE_URL)", "force": $(FORCE)}'
 	@echo
+	@for target in Household/handlers/on_measurement Weather/handlers/on_forecast Tariff/handlers/on_price; do \
+	  curl -fsS -o /dev/null "$(RESTATE_ADMIN)/services/$$target" \
+	    || { echo "Restate lists no $$target: a stale deployment? make register FORCE=true (dev only)"; exit 1; }; \
+	done
 	$(COMPOSE) --profile ingress up -d --wait ingress-meters ingress-forecasts ingress-prices
 dev:
 	uv run hypercorn ems.actors.app:app --bind 127.0.0.1:9080 --reload
@@ -206,10 +212,6 @@ spike:
 # 	curl -fsS -X POST $(RESTATE_ADMIN)/deployments \
 # 	  -H "content-type: application/json" \
 # 	  -d '{"uri": "$(SERVICE_URL)", "force": $(FORCE)}'
-
-# ── Spec: actor skeleton (run the Restate SDK services locally) ──
-# dev:
-# 	uv run hypercorn ems.actors.app:app --bind 0.0.0.0:9080 --reload
 
 # ── Spec: experiment harness ──
 # exp:

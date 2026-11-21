@@ -1,8 +1,7 @@
 """The SDK service: every Virtual Object of the EMS, served by hypercorn (`make dev`).
 
 Stage 3 (spec 011): the actors of `01-architecture.md`, one service per strategy of ``POLICIES``.
-Until the ingress containers are re-pointed (spec 011, phase 4) the stage 2 objects stay beside
-them.
+The ingress containers feed ``Household``, ``Weather`` and ``Tariff``.
 """
 
 from __future__ import annotations
@@ -13,8 +12,6 @@ from ems.actors.battery import battery
 from ems.actors.ems import ems
 from ems.actors.household import household
 from ems.actors.meter import meter
-from ems.actors.probe import probe
-from ems.actors.statecost import state_cost_eager, state_cost_lazy
 from ems.actors.strategy import strategy_object
 from ems.actors.tariff import tariff
 from ems.actors.weather import weather
@@ -30,4 +27,4 @@ SERVICES = (
     meter,
 )
 
-app = restate.app(services=[*SERVICES, probe, state_cost_eager, state_cost_lazy])
+app = restate.app(services=list(SERVICES))

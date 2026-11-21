@@ -101,23 +101,23 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
 
 ## Phase 4: Switch from the probe to the actors
 
-- [ ] T29 [test] (AC-011-25, -37, -44 … -46) `tests/unit/experiments/test_runs.py` (managed sites of the
+- [x] T29 [test] (AC-011-25, -37, -44 … -46) `tests/unit/experiments/test_runs.py` (managed sites of the
   10-household catalog, failures before sending); `tests/unit/test_stack_harness.py` (`wait_run` strict and
   lenient on canned `sys_invocation` rows; `ensure_registered` on canned service lists; grouping of ingress
   logs by service); `tests/unit/infra/test_compose_restate.py` (one target service per container);
   `tests/unit/infra/test_makefile_targets.py` (the handler checks in `register`, the `measure` modes); a test
   that `tests/fixtures/generator.faults.yaml` differs from `config/generator.yaml` only in its three rates;
   `tests/unit/test_ingress_measure_job.py`.
-- [ ] T30 (AC-011-37) `src/ems/experiments/runs.py`: `managed_params` (§6).
-- [ ] T31 (AC-011-44, -45, -47) `src/ems/experiments/stack.py` as in §7; `tests/stack_fixtures.py`: the helper
+- [x] T30 (AC-011-37) `src/ems/experiments/runs.py`: `managed_params` (§6).
+- [x] T31 (AC-011-44, -45, -47) `src/ems/experiments/stack.py` as in §7; `tests/stack_fixtures.py`: the helper
   that configures, publishes, waits and returns decoded states with the offline result, and writes the records
   and parameters under `logs/tests/` on a failed comparison.
-- [ ] T32 (AC-011-25, -44) `infra/docker-compose.yml` (targets per container); `Makefile` (handler checks in
+- [x] T32 (AC-011-25, -44) `infra/docker-compose.yml` (targets per container); `Makefile` (handler checks in
   `register`, `measure` modes, the stale planned lines removed); `tests/fixtures/generator.faults.yaml` (§8).
-- [ ] T33 (AC-011-24, -46) Delete `actors/probe.py` and `actors/statecost.py` and their app entries;
+- [x] T33 (AC-011-24, -46) Delete `actors/probe.py` and `actors/statecost.py` and their app entries;
   `jobs/ingress_measure.py`: `skew` and `backlog` on the actors, `state-cost` removed, the manifest records
   `late_slots`, the strategies and the live strategy (§9).
-- [ ] T34 [test] (AC-011-47) Re-home the spec 010 stack tests on the actors, with no household configured:
+- [x] T34 [test] (AC-011-47) Re-home the spec 010 stack tests on the actors, with no household configured:
   `test_ingress_delivery.py`, `test_ingress_bad_records.py`, `test_ingress_prepublish.py`,
   `test_stack_lifecycle.py` (the service listed and the object whose state must survive is a `Household`),
   `tests/e2e/test_ingress_backfill.py`, `tests/fault/test_ingress_kills.py`; AC-010 ids kept in the names.

@@ -1,5 +1,8 @@
-"""AC-010-10: a record that is not JSON or breaks the v1 contract is counted and does not block its
-key.
+"""AC-010-10 on the actors (AC-011-26, -47): a record that is not JSON or breaks the v1 contract is
+counted and does not block its key.
+
+The records go to the production topic, so they reach `Household.on_measurement` of a household
+that is not configured.
 """
 
 from __future__ import annotations
@@ -50,10 +53,10 @@ def test_ac_010_10_bad_records_are_counted_and_later_records_follow(
     assert producer.flush(30) == 0
 
     stack_env.restate.wait_handled(run_id, len(values), timeout=180)
-    log = stack_env.restate.probe_logs(run_id)[key]
+    log = stack_env.restate.ingress_logs(run_id)[("Household", key)]
     assert log["rejected"] == 2
     entry = log["topics"][topic]
     assert (entry["n"], entry["regressions"], entry["partition_changes"]) == (4, 0, 0)
     assert all(inv["status"] == "completed" for inv in stack_env.restate.invocations(run_id))
     records = stack.read_run(stack_env.settings, stack_env.prefix, run_id)
-    assert stack.offline_logs(records) == {key: log}
+    assert stack.offline_logs(records) == {("Household", key): log}
