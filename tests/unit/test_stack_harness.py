@@ -283,14 +283,25 @@ def _row(**fields: Any) -> dict[str, Any]:
         "invoked_by": "ingress",
         "completion_result": "success",
         "last_failure": None,
+        "retry_count": 1,
     }
     return base | fields
 
 
+# A transport error between Restate and the SDK service (an HTTP/2 stream closed) fails one attempt
+# and the retry succeeds; a handler that raises fails every attempt. Strict mode fails on the second
+# kind only: an invocation still failing after STRICT_ATTEMPTS attempts (AC-011-45, revised).
 PAUSED = _row(status="paused", completion_result=None, last_failure="RT0016 journal mismatch")
 FAILED = _row(completion_result="failure", target_handler_name="on_step", target_service_name="Ems")
-RETRYING = _row(status="backing-off", completion_result=None, last_failure="ConnectionReset")
-RETRIED_THEN_DONE = _row(last_failure="ConnectionReset")
+H2 = "[500 Internal] h2 pool connection error: stream closed because of a broken pipe"
+RETRYING = _row(status="backing-off", completion_result=None, last_failure=H2, retry_count=2)
+KEEPS_FAILING = _row(
+    status="backing-off",
+    completion_result=None,
+    last_failure="[500 Internal] ValueError: quarter-hour 9 out of order",
+    retry_count=stack.STRICT_ATTEMPTS,
+)
+RETRIED_THEN_DONE = _row(last_failure=H2, retry_count=2)
 CLEAN = _row()
 RUNNING = _row(status="running", completion_result=None)
 
@@ -302,9 +313,11 @@ RUNNING = _row(status="running", completion_result=None)
         (PAUSED, False, True),
         (FAILED, True, True),
         (FAILED, False, True),
-        (RETRYING, True, True),
+        (RETRYING, True, False),
         (RETRYING, False, False),
-        (RETRIED_THEN_DONE, True, True),
+        (KEEPS_FAILING, True, True),
+        (KEEPS_FAILING, False, False),
+        (RETRIED_THEN_DONE, True, False),
         (RETRIED_THEN_DONE, False, False),
         (CLEAN, True, False),
         (CLEAN, False, False),
@@ -390,8 +403,8 @@ def test_ac_011_45_wait_run_returns_when_records_are_handled_and_every_object_is
     assert r.wait_run(RUN_ID, RECORDS, ENDS, timeout=-1.0) >= 0.0
 
 
-@pytest.mark.parametrize("row", [PAUSED, FAILED, RETRYING, RETRIED_THEN_DONE])
-def test_ac_011_45_wait_run_strict_fails_at_once_on_a_failed_attempt(
+@pytest.mark.parametrize("row", [PAUSED, FAILED, KEEPS_FAILING])
+def test_ac_011_45_wait_run_strict_fails_at_once_on_an_invocation_that_keeps_failing(
     canned: list[CannedRestate], row: dict[str, Any]
 ) -> None:
     r = _restate(canned, rows=[CLEAN, row], handled=RECORDS, states=AT_END)
@@ -408,13 +421,22 @@ def test_ac_011_45_wait_run_lenient_fails_at_once_on_a_failed_or_paused_invocati
         r.wait_run(RUN_ID, RECORDS, ENDS, strict=False, timeout=-1.0)
 
 
-@pytest.mark.parametrize("row", [RETRYING, RETRIED_THEN_DONE])
+@pytest.mark.parametrize("row", [RETRYING, RETRIED_THEN_DONE, KEEPS_FAILING])
 def test_ac_011_45_wait_run_lenient_accepts_retried_attempts(
     canned: list[CannedRestate], row: dict[str, Any]
 ) -> None:
     """The fault tier: the attempts a kill interrupts are retried and recorded as failures."""
     r = _restate(canned, rows=[CLEAN, row], handled=RECORDS, states=AT_END)
     assert r.wait_run(RUN_ID, RECORDS, ENDS, strict=False, timeout=-1.0) >= 0.0
+
+
+@pytest.mark.parametrize("row", [RETRYING, RETRIED_THEN_DONE])
+def test_ac_011_45_wait_run_strict_accepts_a_transient_failed_attempt(
+    canned: list[CannedRestate], row: dict[str, Any]
+) -> None:
+    """A transport error between Restate and the SDK service is retried and succeeds."""
+    r = _restate(canned, rows=[CLEAN, row], handled=RECORDS, states=AT_END)
+    assert r.wait_run(RUN_ID, RECORDS, ENDS, timeout=-1.0) >= 0.0
 
 
 def test_ac_011_45_wait_run_waits_for_every_published_record(
@@ -446,8 +468,8 @@ def test_ac_011_45_wait_run_waits_for_an_object_without_state(
 
 
 def test_ac_011_45_failures_lists_the_failed_rows(canned: list[CannedRestate]) -> None:
-    r = _restate(canned, rows=[CLEAN, PAUSED, RETRYING, FAILED, RUNNING])
-    assert r.failures(RUN_ID) == [PAUSED, RETRYING, FAILED]
+    r = _restate(canned, rows=[CLEAN, PAUSED, RETRYING, KEEPS_FAILING, FAILED, RUNNING])
+    assert r.failures(RUN_ID) == [PAUSED, KEEPS_FAILING, FAILED]
     assert r.failures(RUN_ID, strict=False) == [PAUSED, FAILED]
 
 

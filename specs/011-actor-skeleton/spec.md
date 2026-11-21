@@ -342,10 +342,15 @@ Harness and environment
   deployment before it opens ingestion and SHALL fail if they still differ. *(First form: `make register`
   compared the whole service set. The three target handlers are what protects ingestion, and they can be
   checked with `curl` alone.)*
-- **AC-011-45**: WHEN a test waits for a configured run, THE SYSTEM SHALL return only when every published record
-  has been handled and every managed strategy, `Ems`, `Battery` and `Meter` expects the step after the last one
-  the offline side released; it SHALL fail at once when an invocation of the run has failed or is paused, and,
-  outside the fault tier, when one has recorded a failed attempt.
+- **AC-011-45** (revised 2026-11-21, see below): WHEN a test waits for a configured run, THE SYSTEM SHALL return
+  only when every published record has been handled and every managed strategy, `Ems`, `Battery` and `Meter`
+  expects the step after the last one the offline side released; it SHALL fail at once when an invocation of the
+  run has failed or is paused, and, outside the fault tier, when one is still failing after four attempts.
+
+  *Revision.* The criterion first said "when one has recorded a failed attempt". The first e2e run on the pinned
+  stack showed transport errors between Restate and the SDK service (`h2 pool connection error: stream closed
+  because of a broken pipe`) on single attempts, which Restate retried with success; the SDK log held no handler
+  exception. A handler that raises fails every attempt, so four failed attempts separate the two.
 - **AC-011-46**: WHEN `make measure MODE=skew` runs, THE SYSTEM SHALL report per managed household the largest
   lead between its streams, prices included, and the re-order counters of every receiving actor;
   `MODE=backlog` SHALL work against the real services, and no `state-cost` mode SHALL exist.

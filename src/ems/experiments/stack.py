@@ -73,6 +73,7 @@ TOPIC_SERVICE = {t: INGRESS_TARGETS[svc][0] for svc, ts in INGRESS_TOPICS.items(
 # Where each actor keeps the inbox of its step messages: its `expected` is the next step.
 STEP_INBOX = {"Ems": "acks", "Battery": "commands", "Meter": "flows"}  # strategies: "steps"
 CONFIGURED = ("Household", "Weather", "Ems", "Battery", "Meter")  # plus each strategy of the run
+STRICT_ATTEMPTS = 4  # failed attempts after which a strict wait calls an invocation failed
 _NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -375,10 +376,10 @@ class Restate:
         }
 
     def invocations(self, run_id: str) -> list[dict[str, Any]]:
-        """Every invocation of the run's objects: target, status, result and last failure."""
+        """Every invocation of the run's objects: target, status, result, last failure, attempts."""
         return self.query(
             "SELECT target_service_name, target_service_key, target_handler_name, status, "
-            "invoked_by, completion_result, last_failure FROM sys_invocation "
+            "invoked_by, completion_result, last_failure, retry_count FROM sys_invocation "
             f"WHERE starts_with(target_service_key, '{_check_name(run_id)}:')"
         )
 
@@ -444,10 +445,17 @@ def registered_handlers() -> dict[str, set[str]]:
 
 
 def failed(row: Mapping[str, Any], *, strict: bool = True) -> bool:
-    """An invocation that will not complete on its own (or, when ``strict``, any failed attempt)."""
+    """An invocation that will not complete on its own, or, when ``strict``, one that keeps failing.
+
+    A transport error between Restate and the SDK service (an HTTP/2 stream closed) fails one
+    attempt and the retry succeeds; a handler that raises fails every attempt. So strict mode waits
+    for ``STRICT_ATTEMPTS`` failed attempts before it calls an invocation failed (seen in spec 011's
+    e2e runs). The fault tier passes ``strict=False``: a kill can fail many attempts in a row.
+    """
     if row.get("status") == "paused" or row.get("completion_result") == "failure":
         return True
-    return strict and bool(row.get("last_failure"))
+    keeps_failing = int(row.get("retry_count") or 0) >= STRICT_ATTEMPTS
+    return strict and bool(row.get("last_failure")) and keeps_failing
 
 
 def next_step(service: str, state: Mapping[str, Any]) -> int | None:
