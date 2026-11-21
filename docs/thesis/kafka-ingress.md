@@ -100,3 +100,21 @@ key (risk A6), and Kafka's lag says nothing about how far the actors are behind.
   one before it. Its restart policy covers a process that exits for other reasons.
 - Registering the same URI again with `force: false` answers 200 and keeps the old handlers, even when handlers
   were added or removed; only `force: true` discovers the service again (`02-subsystem-actors.md`).
+
+## With the actors (spec 011)
+
+`make measure MODE=skew` on commit `92d0f0c` with a clean tree, same machine and stack
+(`experiments/results/ingress-skew-20261121T005630Z/results.json`): the same backfill of 100 households over two
+days from 2026-10-20 (34,627 records), with the 35 EMS-managed households configured before publishing, so every
+record also drives the actors.
+
+- Every key's ingress log equals the offline fold, with 0 rejected records and 0 regressions.
+- 257.8 records per second between the first invocation's creation and the last one's completion (134.3 s),
+  against 404 with the probe: each released step now also runs two strategies, `Ems`, `Battery` and `Meter`.
+- Leads per managed household, now with prices (median / 95th percentile / max, quarter-hours): prices over
+  consumption 122 / 122 / 122, over production 122 / 122 / 122, over forecasts 97 / 109 / 109; forecasts over
+  production 169 / 169 / 169 and over consumption 123 / 124 / 124; consumption over prices 51 / 51 / 51.
+- Re-ordering between actors (V5): every receiving service counted 0 messages that arrived early and 0 stale.
+  Restate documents no order across invocations, so the hold-back stays; the in-memory network test covers it.
+- Peak memory: Restate 1,833 MiB of its 2 GiB limit (1,556 with the probe), Kafka 838 MiB, ingress containers
+  284–565 MiB; no container was OOM-killed.

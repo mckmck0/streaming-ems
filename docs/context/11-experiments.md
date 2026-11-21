@@ -85,6 +85,18 @@ October, two arrival orders, faults at `L` = 8 and `L` = 2). In each, the househ
 the offline fold with `==`, and the real `Battery` and `Meter` equal the SelfConsumption strategy. `make measure
 MODE=skew` now runs on configured households and reports the price leads and the re-order counters (V5 in 01).
 
+- `ingress-skew-20261121T005630Z` (commit `92d0f0c`, clean tree): 100 households × 2 days unpaced, 35 of them
+  managed and configured, 34,627 records; every ingress log equal to the offline fold, 0 rejected, 0
+  regressions. 257.8 records/s server-side (134.3 s), against 404 records/s with the stage 2 probe: each step now
+  also runs two strategies, `Ems`, `Battery` and `Meter`. Largest lead of prices over a household's other
+  streams: median 122 quarter-hours over consumption and production, 97 over forecasts; of forecasts over
+  production 169. Re-order counters 0 for every receiving service (V5). Peak memory: Restate 1,833 MiB of
+  2 GiB, Kafka 838 MiB, ingress containers 284–565 MiB; no OOM kill.
+- `ingress-backlog-20261121T005744Z` (code of commit `92d0f0c`; the tree had uncommitted doc edits only): 20
+  households × 1 day published with the SDK service stopped and no household configured. The Kafka lag fell to
+  0 within 8.6 s; 3,385 invocations waited `pending` and 41 `ready` (one at the head of each key's queue: 20
+  `Household`, 20 `Weather`, 1 `Tariff`); the backlog drained 10.4 s after the service came back.
+
 ## What to build
 
 - Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to

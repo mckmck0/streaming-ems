@@ -140,7 +140,7 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md). Spec, plan and this list a
   `make test-e2e`, `make test-fault` green. *The first e2e run showed HTTP/2 transport errors between Restate and
   the SDK service on single attempts, retried with success; the strict wait now fails only on an invocation
   still failing after four attempts (AC-011-45 revised).*
-- [ ] T39 (AC-011-44, -46) By hand, output kept for the pull request: `make register` on a volume that still
+- [x] T39 (AC-011-44, -46) By hand, output kept for the pull request: `make register` on a volume that still
   holds the spec 010 deployment refuses before ingestion; `make measure MODE=skew` (records V5) and
   `MODE=backlog`.
 
