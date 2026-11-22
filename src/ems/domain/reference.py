@@ -4,6 +4,11 @@ actors will; the two are compared bit for bit (AC-009-20).
 
 Chunks start and end on UTC hours. Run [a, c) or [a, b) then [b, c) with the returned state: the
 results are identical (AC-009-18).
+
+One quarter-hour is four pieces, so that the actors run the reference's own code (spec 011):
+``prices`` (what the quarter costs and pays), ``decide`` (the policy, in ``Ems``), ``apply`` (the
+battery, in ``Battery``) and ``settlement.grid_kwh`` (the meter, in ``Meter``). ``quarter`` composes
+them.
 """
 
 from __future__ import annotations
@@ -29,8 +34,10 @@ from ems.domain.settlement import (
     MonthSettlement,
     SettleAcc,
     SettleIn,
+    Signal,
     Tranche,
     check_opening,
+    grid_kwh,
     hour_rows,
     price_signal,
     settle_month,
@@ -124,27 +131,69 @@ def rcem_used(rcem: RcemTable, t: int) -> tuple[RcemEntry, Publication, RcemEntr
     return signal_entry, signal_pub, rcem.entry(civil_month(t))
 
 
+@dataclass(frozen=True)
+class Prices:
+    """What one quarter-hour costs and pays a site."""
+
+    buy: BuyPrice
+    basis: PriceBasis
+    signal: Signal  # what the policy sees (lagged RCEm for an RCEm month)
+    export_price_pln_per_kwh: float  # what the ledger uses (RCE_q or the month's own RCEm)
+
+
+def prices(model: SiteModel, rcem: RcemTable, t: int, rce_pln_per_kwh: float) -> Prices:
+    buy = buy_price(model.tariff, t)
+    basis = basis_for(model.cohort, civil_month(t))
+    if basis is PriceBasis.RCE:
+        signal_p = export_p = rce_pln_per_kwh
+    else:
+        _entry, pub, own = rcem_used(rcem, t)
+        signal_p = pub.value_pln_per_kwh
+        export_p = own.billing_value
+    return Prices(buy, basis, price_signal(buy, signal_p, model.rules), export_p)
+
+
+def decide(
+    policy: Policy, pr: Prices, t: int, soc_kwh: float, last_pv_kwh: float, last_load_kwh: float
+) -> Action:
+    """The policy's action for ``t``, from what is known at its start."""
+    obs = Observation(
+        t, pr.signal.buy_pln_per_kwh, pr.signal.sell_pln_per_kwh, last_pv_kwh, last_load_kwh
+    )
+    return policy.decide(BatteryState(soc_kwh), obs)
+
+
+def apply(
+    battery: BatteryParams, soc_kwh: float, action: Action, pv_kwh: float, load_kwh: float
+) -> tuple[float, float, float]:
+    """``(p_cmd_kw, p_kw, soc_kwh)``: the command, the power the battery executes after clamping,
+    and the SoC at the end of the quarter-hour.
+    """
+    cmd = resolve(action, pv_kwh, load_kwh, battery.p_max_kw)
+    soc, p = step_params(soc_kwh, cmd, DT_H, battery)
+    return cmd, p, soc
+
+
 def quarter(
     model: SiteModel, policy: Policy, rcem: RcemTable, state: RefState, q: QuarterIn
 ) -> QuarterOut:
     """The physics of one quarter-hour, shared by ``run`` and ``stepper.step``."""
-    buy = buy_price(model.tariff, q.t)
-    basis = basis_for(model.cohort, civil_month(q.t))
-    if basis is PriceBasis.RCE:
-        signal_p = export_p = q.rce_pln_per_kwh
-    else:
-        _entry, pub, own = rcem_used(rcem, q.t)
-        signal_p = pub.value_pln_per_kwh
-        export_p = own.billing_value
-    signal = price_signal(buy, signal_p, model.rules)
-    obs = Observation(
-        q.t, signal.buy_pln_per_kwh, signal.sell_pln_per_kwh, state.last_pv_kwh, state.last_load_kwh
+    pr = prices(model, rcem, q.t, q.rce_pln_per_kwh)
+    action = decide(policy, pr, q.t, state.soc_kwh, state.last_pv_kwh, state.last_load_kwh)
+    cmd, p, soc = apply(model.battery, state.soc_kwh, action, q.pv_kwh, q.load_kwh)
+    grid = grid_kwh(q.pv_kwh, q.load_kwh, p)
+    return QuarterOut(
+        q.t,
+        action,
+        cmd,
+        p,
+        soc,
+        grid,
+        pr.buy,
+        pr.basis,
+        pr.signal.sell_pln_per_kwh,
+        pr.export_price_pln_per_kwh,
     )
-    action = policy.decide(BatteryState(state.soc_kwh), obs)
-    cmd = resolve(action, q.pv_kwh, q.load_kwh, model.battery.p_max_kw)
-    soc, p = step_params(state.soc_kwh, cmd, DT_H, model.battery)
-    grid = (q.load_kwh - q.pv_kwh) + p * DT_H
-    return QuarterOut(q.t, action, cmd, p, soc, grid, buy, basis, signal.sell_pln_per_kwh, export_p)
 
 
 def settle_in(out: QuarterOut) -> SettleIn:

@@ -1,19 +1,17 @@
-"""Ingress measurements for the thesis (spec 010, AC-010-17 … -21): `make measure
-[MODE=skew|state-cost|backlog]`.
+"""Ingress measurements for the thesis (spec 010, AC-010-17 … -21; spec 011, AC-011-46): `make
+measure [MODE=skew|backlog]`.
 
 Each run takes a fresh run_id and topic prefix, closes the stack's ingestion, starts its own SDK
 service and, where needed, its own ingress containers (src/ems/experiments/stack.py), and writes
 experiments/results/ingress-<mode>-<UTC>/results.json with its config, seed, data window, hardware,
 image references, package versions and git commit (P14).
 
-- skew (default): an unpaced backfill. Per key the largest lead of each stream over each other
-  stream, in quarter-hours of data time (the probe's ``leads``), their median, 95th percentile
-  (nearest rank) and maximum across keys; records handled per second; the exactly-once check against
-  the offline fold; the peak memory of every container and whether any was OOM-killed.
-- state-cost: one-way ``touch`` calls that read and write one small key, on objects whose state is
-  padded to 1 kB, 100 kB and 1 MB, with eager state (default) and lazy state
-  (``state_preload=False``). Invocation times come from Restate's ``sys_invocation`` (``completed_at
-  - running_at``, millisecond resolution).
+- skew (default): an unpaced backfill with every EMS-managed household configured. Per managed
+  household the largest lead of each of its streams over each other one, prices included, in
+  quarter-hours of data time (``HouseholdState.leads``), their median, 95th percentile (nearest
+  rank) and maximum across households; per receiving service the messages that arrived early
+  (``reordered``) or stale (V5); records handled per second; the exactly-once check of the ingress
+  logs against the offline fold; the peak memory of every container and whether any was OOM-killed.
 - backlog: a backfill published while the SDK service is stopped. Consumer lag per ingress group and
   the run's invocations by status, sampled every second, until the service is back and every record
   is handled.
@@ -37,7 +35,6 @@ from ruamel.yaml import YAML
 
 REPO = Path(__file__).resolve().parents[1]
 START = "2026-10-20T00:00:00Z"
-SIZES = (1_000, 100_000, 1_000_000)
 
 app = typer.Typer(add_completion=False)
 
@@ -71,24 +68,14 @@ def summarize_leads(leads_by_key: Mapping[str, Mapping[str, int]]) -> dict[str, 
     }
 
 
-def _times(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Duration statistics in milliseconds from sys_invocation rows with running_at and
-    completed_at.
-    """
-    starts = [_ts(r["running_at"]) for r in rows if r.get("running_at") and r.get("completed_at")]
-    ends = [_ts(r["completed_at"]) for r in rows if r.get("running_at") and r.get("completed_at")]
-    durations = [(e - s) * 1000 for s, e in zip(starts, ends, strict=True)]
-    if not durations:
-        return {"calls": 0}
-    span = max(ends) - min(starts)
-    return {
-        "calls": len(durations),
-        "mean_ms": statistics.fmean(durations),
-        "median_ms": statistics.median(durations),
-        "p99_ms": nearest_rank(durations, 0.99),
-        "max_ms": max(durations),
-        "calls_per_s": len(durations) / span if span > 0 else None,
-    }
+def reorder_counts(state: Mapping[str, Any]) -> tuple[int, int]:
+    """``(reordered, stale)`` summed over the inboxes in one object's stored state."""
+    reordered = stale = 0
+    for value in state.values():
+        if isinstance(value, Mapping) and {"expected", "held", "reordered", "stale"} <= set(value):
+            reordered += int(value["reordered"])
+            stale += int(value["stale"])
+    return reordered, stale
 
 
 def _ts(value: Any) -> float:
@@ -122,47 +109,68 @@ def _env(tag: str, out: Path) -> Any:
 
 
 def run_skew(out: Path, locations: int, days: float, faults: bool) -> dict[str, Any]:
-    from ems.experiments.stack import MemorySampler, offline_logs, oom_killed
+    from ems.experiments.runs import managed_params
+    from ems.experiments.stack import (
+        MemorySampler,
+        offline_logs,
+        offline_run,
+        oom_killed,
+        run_ends,
+    )
 
     env = _env("ms", out)
     run_id = f"m{uuid.uuid4().hex[:10]}"
+    start = datetime.fromisoformat(START.replace("Z", "+00:00"))
+    params = managed_params(run_id=run_id, start=start, days=days, locations=locations)
     sampler = MemorySampler()
     env.open()
     sampler.start()
     try:
+        env.restate.configure(params)
         started = time.monotonic()
         records = env.publish(run_id, locations=locations, days=days, start=START, faults=faults)
         published = time.monotonic() - started
-        env.restate.wait_handled(run_id, len(records), timeout=3600)
+        ends = run_ends(params, offline_run(params, records))
+        env.restate.wait_run(run_id, len(records), ends, timeout=3600)
         wall = time.monotonic() - started
         span = env.restate.query(
             "SELECT min(created_at) AS first, max(completed_at) AS last FROM sys_invocation "
-            f"WHERE target_service_name = 'Probe' AND starts_with(target_service_key, '{run_id}:')"
+            f"WHERE starts_with(target_service_key, '{run_id}:')"
         )[0]
-        states = env.restate.probe_states(run_id)
-        exact = {k: s["log"] for k, s in states.items()} == offline_logs(records)
+        logs = env.restate.ingress_logs(run_id)
+        exact = logs == offline_logs(records)
+        states = {
+            service: {key: json.loads(v["state"]) for key, v in by_key.items() if "state" in v}
+            for service in sorted(ends.keys() | {"Household"})
+            for by_key in [env.restate.states(run_id, service)]
+        }
     finally:
         sampler.stop()
         oom = oom_killed(sampler.peaks)  # before close removes the test project's containers
         env.close()
     server_s = _ts(span["last"]) - _ts(span["first"])
-    leads = {key: state["leads"]["max"] for key, state in states.items() if "leads" in state}
+    leads = {key: state["leads"]["max"] for key, state in states["Household"].items()}
+    reorders = {
+        service: [reorder_counts(state) for state in by_key.values()]
+        for service, by_key in states.items()
+    }
     return {
         "run_id": run_id,
         "records": len(records),
-        "keys": len(states),
+        "managed_households": len(params),
         "publish_wall_s": round(published, 2),
         "handled_wall_s": round(wall, 2),
         "server_span_s": round(server_s, 3),
         "records_per_s": round(len(records) / server_s, 1) if server_s > 0 else None,
         "exactly_once": exact,
-        "rejected": sum(s["log"]["rejected"] for s in states.values()),
+        "rejected": sum(log["rejected"] for log in logs.values()),
         "regressions": sum(
-            t["regressions"] for s in states.values() for t in s["log"]["topics"].values()
+            t["regressions"] for log in logs.values() for t in log["topics"].values()
         ),
         "leads": summarize_leads(leads),
         "leads_by_key": leads,
-        "skipped_by_key": {k: s["leads"]["skipped"] for k, s in states.items() if "leads" in s},
+        "reordered": {svc: sum(r for r, _ in counts) for svc, counts in sorted(reorders.items())},
+        "stale": {svc: sum(st for _, st in counts) for svc, counts in sorted(reorders.items())},
         "memory": {
             name: {
                 "peak_bytes": peak,
@@ -172,34 +180,6 @@ def run_skew(out: Path, locations: int, days: float, faults: bool) -> dict[str, 
             for name, peak in sorted(sampler.peaks.items())
         },
     }
-
-
-def run_state_cost(out: Path, calls: int) -> dict[str, Any]:
-    env = _env("sc", out)
-    run_id = f"s{uuid.uuid4().hex[:10]}"
-    env.open(start_ingress=False)
-    results: dict[str, Any] = {"run_id": run_id, "calls_per_size": calls}
-    try:
-        for service in ("StateCostEager", "StateCostLazy"):
-            for size in SIZES:
-                key = f"{run_id}:{size}"
-                env.restate.send(service, key, "pad", size, idempotency_key=f"{key}:pad")
-                for i in range(calls):
-                    env.restate.send(service, key, "touch", idempotency_key=f"{key}:touch:{i}")
-                deadline = time.monotonic() + 600
-                while env.restate.call(service, key, "count") < calls:
-                    if time.monotonic() > deadline:
-                        raise TimeoutError(f"{service} {size}: touches not done after 600 s")
-                    time.sleep(0.5)
-                rows = env.restate.query(
-                    "SELECT running_at, completed_at FROM sys_invocation "
-                    f"WHERE target_service_name = '{service}' AND target_service_key = '{key}' "
-                    "AND target_handler_name = 'touch'"
-                )
-                results[f"{service}/{size}"] = {"state_bytes": size, **_times(rows)}
-    finally:
-        env.close()
-    return results
 
 
 def run_backlog(out: Path, locations: int, days: float, stable_s: float = 30.0) -> dict[str, Any]:
@@ -226,8 +206,7 @@ def run_backlog(out: Path, locations: int, days: float, stable_s: float = 30.0) 
                 row["status"]: int(row["n"])
                 for row in env.restate.query(
                     "SELECT status, count(*) AS n FROM sys_invocation "
-                    "WHERE target_service_name = 'Probe' "
-                    f"AND starts_with(target_service_key, '{run_id}:') "
+                    f"WHERE starts_with(target_service_key, '{run_id}:') "
                     "GROUP BY status"
                 )
             }
@@ -265,10 +244,9 @@ def run_backlog(out: Path, locations: int, days: float, stable_s: float = 30.0) 
 
 @app.command()
 def main(
-    mode: Annotated[str, typer.Argument(help="skew | state-cost | backlog")] = "skew",
+    mode: Annotated[str, typer.Argument(help="skew | backlog")] = "skew",
     locations: Annotated[int | None, typer.Option(help="Households (skew 100, backlog 20)")] = None,
     days: Annotated[float | None, typer.Option(help="Simulated days (skew 2, backlog 1)")] = None,
-    calls: Annotated[int, typer.Option(help="state-cost: touch calls per size and variant")] = 500,
     faults: Annotated[bool, typer.Option(help="skew: publish with fault injection")] = False,
     out: Annotated[Path, typer.Option(help="Results root")] = Path("experiments/results"),
 ) -> None:
@@ -282,17 +260,17 @@ def main(
             "start": START,
             "faults": faults,
             "seed": _generator_seed(),
+            "late_slots": 8,
+            "strategies": ["NoBattery", "SelfConsumption"],
+            "live": "SelfConsumption",
         }
         results = run_skew(out, n, d, faults)
-    elif mode == "state-cost":
-        config |= {"calls": calls, "sizes": list(SIZES)}
-        results = run_state_cost(out, calls)
     elif mode == "backlog":
         n, d = locations or 20, days or 1.0
         config |= {"locations": n, "days": d, "start": START, "seed": _generator_seed()}
         results = run_backlog(out, n, d)
     else:
-        typer.echo(f"unknown mode {mode!r} (skew | state-cost | backlog)", err=True)
+        typer.echo(f"unknown mode {mode!r} (skew | backlog)", err=True)
         raise typer.Exit(2)
     folder = _write(out, mode, config, results)
     summary = {

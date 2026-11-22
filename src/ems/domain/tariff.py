@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date
+from itertools import pairwise
 
 from ems.domain.calendar import ZoneScheme, civil_month, month_index, zone_at
 
@@ -63,8 +64,14 @@ class National:
     quality: tuple[QualityPeriod, ...]
     capacity_band_kwh: tuple[float, float, float]  # 500, 1200, 2800
     capacity_fee_pln_per_month: tuple[float, float, float, float]
-    holidays: frozenset[date]
+    # Sorted, no repeats. A tuple, not a set: stored actor state must encode to the same bytes in
+    # every process, and a set's order depends on the hash seed (spec 011).
+    holidays: tuple[date, ...]
     valid_until: str  # first month not covered, "2027-01"
+
+    def __post_init__(self) -> None:
+        if any(b <= a for a, b in pairwise(self.holidays)):
+            raise ValueError("holidays must be sorted and without repeats")
 
 
 def _pick[V: (OperatorVersion, SellerVersion, QualityPeriod)](

@@ -3,9 +3,10 @@
 ## Current consensus
 
 Designed on 2026-11-14. Stage 2 (spec 010, 2026-11-15) built the runtime under it: Restate, the SDK service,
-registration and the Kafka ingress, feeding a probe object (`02-subsystem-actors.md`); the actors below are not
-built yet. The time and ordering model is ADR 0017. The actors are the minimal skeleton of stage 3 (stages in
-`00-overview.md`); the domain functions they call exist since spec 009 (`12-domain-model.md`). Changes to the
+registration and the Kafka ingress (`02-subsystem-actors.md`). Stage 3 (spec 011, 2026-11-20) built the actors
+below on it, with the assembler that orders a household's inputs (`src/ems/assembler/`). The time and ordering
+model is ADR 0017; its rules for late and missing inputs are ADR 0018; run parameters arrive as control messages
+(ADR 0019). The domain functions the actors call exist since spec 009 (`12-domain-model.md`). Changes to the
 brief §5:
 - `Tariff` is keyed by market and holds price curves only (ADR 0012, spec 009); `Weather` is keyed by location.
   Both are fed from Kafka and call no API (ADR 0011). `Tariff` pushes curves to households as one-way messages;
@@ -57,7 +58,9 @@ flowchart LR
 | Grid energy per step, real ledger, bills and deposit | `Meter` |
 | Virtual SoC, shadow ledger and bills | each strategy, for its own key |
 | Per-site tariff rules, battery parameters, the RCEm table | config, through `ems.tariffs` and the site catalog (not an actor) |
-| The ingress log of a record key (count, last offset, offset digest, regressions, rejected records) and its stream leads | `Probe` in stage 2; from stage 3 the Kafka-fed actor of that key (`Household`, `Weather`, `Tariff`) keeps the log |
+| A run's parameters (`RunParams`: window, `L`, strategies, live strategy, site model, RCEm table, initial SoC) | the run's operator, through `configure` (ADR 0019); each object of a managed household stores its own copy once |
+| The ingress log of a record key (count, last offset, offset digest, regressions, rejected records) | the Kafka-fed object of that key: `Household` (meters), `Weather` (forecasts), `Tariff` (prices); `Probe` in stage 2 |
+| A managed household's stream leads (measured, never compared) | `Household` |
 
 ### Time and ordering model (ADR 0017)
 
@@ -75,7 +78,9 @@ flowchart LR
   are released strictly in order, from the run's first step. That step is a run parameter on a UTC hour (the
   domain requires it), never the first record seen; earlier records are ignored and counted.
 
-**How each watermark advances:** from the stream's content and schedule, never from the wall clock in sim.
+**How each watermark advances:** from the stream's content and schedule, never from the wall clock in sim. In
+code every time is an integer step (stage 3): a record may be read by the steps from `ceil(available_at / 900 s)`
+on, and a watermark covers the steps below `floor(watermark / 900 s)`.
 
 | Stream | Advances when | To |
 |---|---|---|
@@ -86,11 +91,16 @@ flowchart LR
 - A sparse stream's watermark is the earliest moment its next record can become usable. A step that starts at
   that moment is therefore not covered until the next record arrives: after the 00:00 run (usable 02:00,
   watermark 05:00) the step starting at 05:00 waits for the 03:00 run.
-- The cadence and the window opening are schedule constants, per forecast model and per market. They join the
-  availability table in `ems.contracts.availability` (code, not wire contract) in stage 3, with a test of the
-  generator against them. Only `PL:RCE` is defined, the market the skeleton consumes.
+- The cadence and the window opening are schedule constants, per forecast model and per market, in
+  `ems.contracts.availability` (code, not wire contract) with a test of the generator against them: every model
+  runs every 180 min, and the window opens at 13:00 Europe/Warsaw. Only `PL:RCE` is defined, the market the
+  skeleton consumes.
 - A missing forecast run makes the household wait for the next one; a late run keeps its place in its key's
-  order (`06-data-flows.md`, faults).
+  order (`06-data-flows.md`, faults). A run of a model without a delay or cadence is counted and dropped, like a
+  missing run (ADR 0018).
+- A forecast run not newer than the newest one accepted, and a price curve of a day older than the newest one, are
+  counted and dropped where they arrive: they could only become visible after a newer record, so no step would
+  read them.
 
 **Visibility.** A record becomes visible from `max(available_at, the stream's watermark when it arrived)`. On
 schedule that is `available_at`. A record that arrives behind the watermark (a republished price day, an
@@ -103,22 +113,31 @@ positions of the record's own stream, so the outcome does not depend on the othe
 | Case | What happens |
 |---|---|
 | The record for slot `q` arrives before its stream is `L` slots past `q` | Used normally; the step waited for it |
-| The stream reaches `q + L` without it | Step `q` runs on an estimate, flagged `estimated`. The estimate uses only earlier slots of the same stream |
-| It arrives after that, while the stream is less than `2L` past `q` | It never changes a decision. It corrects the settlement of its hour, at a fixed point: just before the first step after the stream's newest slot at that moment |
-| It arrives later still | Dropped and counted; the slot is already pruned |
+| The stream reaches `q + L` without it | Step `q` runs on an estimate, flagged `estimated`: the value the stream used for the slot before (0 before the first reading; ADR 0018) |
+| It arrives after that, while the stream is less than `2L` past `q` | It never changes a decision. It corrects the settlement of its hour, carried by the first step after the stream's newest slot at that moment (at most `2L` steps after `q`) |
+| It arrives later still | Dropped and counted (`too_old`); the slot is already pruned |
 
-A correction recomputes the slot's grid energy from the corrected PV and load and the battery power that was
-already executed, then the settlement of that hour. The command, the executed power, the SoC and every later
-decision stay as they were on the estimate. So whoever settles keeps each recent quarter's PV, load and
-executed power, back to the start of the hour that holds the oldest slot still open to correction.
+A correction recomputes the slot's grid energy from the corrected PV or load and the battery power that was
+already executed, then the hour's row (allowed lateness, ADR 0018). The command, the executed power, the SoC and
+every later decision stay as they were on the estimate. So whoever settles keeps each recent quarter's PV, load
+and executed power, back to the start of the hour that holds the oldest slot still open to correction, and a
+civil month is settled `2L` quarter-hours after it ends, with its own fixed charges and price basis.
+
+**A quarter-hour with no visible price** uses the statutory replacement (RES act art. 4b ust. 10): the price of
+the same local quarter-hour on the nearest earlier delivery day with a visible curve, at most two days back, or 0
+if there is none; the step is flagged `price_replaced` (ADR 0018).
 
 **Dedup and revisions.** State keeps one entry per slot (stream, `t`) from `2L` below the stream's newest slot.
-An identical `event_id` is ignored. Different content for the same slot is a revision: a measurement revision is
-handled like a late record, a price or forecast revision by the visibility rule.
+The first reading of a slot wins; a second one is counted (`duplicate` for the same `event_id`, `conflict` for
+another). A measurement's `event_id` does not depend on its content, so no source can send a revision with a new
+id (ADR 0018). A price revision follows the visibility rule; a forecast run with an issue time already seen is
+stale.
 
-**Between actors.** Order between different actors is not assumed. `Tariff` and `Weather` number their updates
-per receiver, and the household applies them in sequence, holding back any that arrive early. Steps, commands,
-acknowledgements and flows carry `t` and are applied the same way.
+**Between actors.** Order between different actors is not assumed. `Tariff` numbers its curves once per market
+and sends a household a snapshot of every accepted curve on subscribe, then one update per curve; `Weather`
+numbers its runs. The household applies them in sequence, holding back any that arrive early. Steps, commands,
+acknowledgements and flows carry `t` and are applied the same way, through one hold-back function
+(`ems.actors.reorder`) that counts early and stale messages outside the compared state.
 
 **Live mode.** The same rules run, with one more source: a durable wall-clock timer in each household. The
 household keeps its own effective watermark per stream, the higher of the one it received and "now minus a
@@ -148,45 +167,51 @@ fired.
 
 ### State, handlers and messages
 
-E = exclusive, S = shared (read-only).
+E = exclusive, S = shared (read-only; each returns the object's `state`). Every handler goes through
+`ems.actors.shell`: read own state, call a pure transition, write own state, send (`02-subsystem-actors.md`).
+Every configured object also stores `params` (its `RunParams`); Kafka-fed objects also `log`, `n` and
+`n_at_configure`.
 
 | Actor | State | Handlers | Sends |
 |---|---|---|---|
-| `Household` | Run and site parameters, resolved once. Per meter stream: newest slot and the slots from `2L` below it. Price view: curves from the current local day on, with visibility, effective watermark, last sequence number, held-back updates. Forecast view: run ids with visibility, effective watermark, sequence number. Next step, pending corrections, counters | `on_measurement` (E, Kafka: production and consumption) · `on_prices` (E, from Tariff) · `on_forecast` (E, from Weather) · `status` (S) · stage 4: `on_deadline` (E, live timer), `set_strategies` (E, control) | `Tariff.subscribe` on first use · `on_step` of each strategy · `Ems.on_step` |
-| `Tariff` | The run's curves by delivery day with versions and visibility, watermark, subscribers with their sequence numbers | `on_price` (E, Kafka) · `subscribe` (E, from Household) · `status` (S) | `Household.on_prices`: a snapshot on subscribe, then one update per accepted publication |
-| `Weather` | Per run: issue time, model, `event_id` and visibility, for the slots still open to dedup; watermark, sequence number. No forecast payload in stage 3 (stage 5 decides storage and retention) | `on_forecast` (E, Kafka) · `status` (S) | `Household.on_forecast`: issue time, visibility and watermark, no payload |
-| `NoBattery`, `SelfConsumption` | The stepper state (virtual SoC, last flows, open hour, the open month's rows, deposit tranches), the recent quarters kept for corrections, closed months, next step, held-back steps | `on_step` (E, from Household) · `summary` (S) | nothing in stage 3 |
-| `Ems` | Live strategy name, its view of the real SoC tagged with `t`, the previous step's flows (for the observation), steps waiting for the previous acknowledgement, next step | `on_step` (E, from Household) · `on_ack` (E, from Battery) · `status` (S) | `Battery.apply` |
-| `Battery` | Real SoC, parameters, last step, clamp counters | `apply` (E, from Ems) · `state` (S) | `Ems.on_ack` · `Meter.on_flows` |
-| `Meter` | The settlement state (open hour, month rows, tranches), the recent quarters kept for corrections (PV, load, executed power), closed months, next step | `on_flows` (E, from Battery) · `bill` (S) | nothing |
+| `Household` | The join: next step, per meter stream the slots from `2L` below its newest, the closed values not yet released and the late readings waiting for their step; curves and runs with their visibility and the watermarks; counters. The price and forecast inboxes; the stream leads (measured) | `configure` (E) · `on_measurement` (E, Kafka: production and consumption) · `on_prices` (E, from Tariff) · `on_forecast` (E, from Weather) · `status` (S) · stage 4: `on_deadline`, `set_strategies` | `Tariff.subscribe` on `configure` · `on_step` of each strategy · `Ems.on_step` |
+| `Tariff` | The price stream (watermark, newest day and its ids, sequence number, counters), every accepted curve of the run with its visibility, the subscribers. No parameters | `on_price` (E, Kafka) · `subscribe` (E, from Household) · `status` (S) | `Household.on_prices`: a snapshot on subscribe, then one update per accepted curve |
+| `Weather` | The forecast stream: watermark, newest issue time, sequence number, counters. No forecast payload in stage 3 (stage 5 decides storage and retention) | `configure` (E) · `on_forecast` (E, Kafka) · `status` (S) | `Household.on_forecast`: issue time, visibility and watermark, no payload |
+| `NoBattery`, `SelfConsumption` | The strategy result (virtual SoC, last flows, ledger accumulator, flows open to correction, closed months) and the step inbox | `configure` (E) · `on_step` (E, from Household) · `summary` (S) | nothing in stage 3 |
+| `Ems` | The real SoC from the latest acknowledgement, the last decided step's flows, the last step commanded, the step and acknowledgement inboxes, released steps not yet decided | `configure` (E) · `on_step` (E, from Household) · `on_ack` (E, from Battery) · `status` (S) | `Battery.apply` |
+| `Battery` | Real SoC, the command inbox, clamp counter | `configure` (E) · `apply` (E, from Ems) · `state` (S) | `Ems.on_ack` · `Meter.on_flows` |
+| `Meter` | The ledger accumulator, the flows open to correction, closed months, the flow inbox | `configure` (E) · `on_flows` (E, from Battery) · `bill` (S) | nothing |
 
-Internal Restate messages (not wire contract; each carries `schema_version`, `t` and the sim timestamp):
+Internal Restate messages (not wire contract; field lists in `08-contracts.md`). Each carries `schema_version`
+and `t`, the step it belongs to or, for a stream update, the stream's watermark; `t` is the simulated time (R7).
 
 | Message | From, to | Content |
 |---|---|---|
-| `Step` | Household to each strategy and to Ems | `QuarterIn` of spec 009 (`t`, PV and load energy, the RCE visible at `s_t`), the `estimated` flags, the issue time of the newest forecast run visible at `s_t`, and any corrections due |
-| `PriceUpdate` | Tariff to Household | Sequence number, curves with their visibility, the watermark |
+| `Step` | Household to each strategy and to Ems | `QuarterIn` of spec 009 (`t`, PV and load energy, the RCE of `t` or its replacement), the `estimated` and `price_replaced` flags, the issue time of the newest forecast run visible at `s_t`, and any corrections due |
+| `PriceUpdate` | Tariff to Household | Sequence number, a snapshot flag, curves with their visibility, the watermark |
 | `ForecastUpdate` | Weather to Household | Sequence number, the run's issue time and visibility, the watermark |
 | `Subscribe` | Household to Tariff | The household key and its first step |
 | `Apply` | Ems to Battery | The `Action`, the step's flows and price, corrections |
 | `Ack` | Battery to Ems | `t` and the SoC after it |
 | `Flows` | Battery to Meter | PV, load and the executed battery power of `t`, its price, corrections. `Meter` derives the grid energy with the domain function the reference uses |
+| `RunParams` (control) | Operator to every object of a managed household | The run's parameters (ADR 0019); its time is `first_step` |
 
-- **The real loop.** `Ems` holds the real SoC from the last acknowledgement and waits for acknowledgement `t−1`
-  before deciding `t`. `Battery` resolves the action against the step's flows, clamps it (P8) and reports the new
-  SoC. With SelfConsumption live, the real SoC and bill equal that strategy's virtual ones (parity check).
+- **The real loop.** `Ems` holds the real SoC from the last acknowledgement and decides `t` only once `t − 1`
+  is acknowledged, with `reference.prices` and `reference.decide`. `Battery` resolves the action against the
+  step's flows with `reference.apply`, which clamps it (P8), and reports the new SoC. With SelfConsumption live,
+  the real SoC and ledger equal that strategy's virtual ones (parity check).
 - **Corrections travel inside the next `Step`** and on through `Apply` and `Flows`, so they never overtake the
   step they correct.
-- **A site the EMS does not manage** keeps a counter and nothing else, in `Household` and in `Weather` alike;
-  its records still reach those objects, because the topics carry every site.
-- **Run and site parameters** (the run's first step, tariff, battery, strategy list, `L`, the RCEm table) are
-  resolved once per object and kept in its state, so a config edit or a later deployment cannot change a
-  running household (P14). How the actor service obtains them is decided in stage 3.
+- **A site the EMS does not manage** is never configured: its `Household` and `Weather` keep the ingress log and
+  the record counter, nothing else, although its records still reach them, because the topics carry every site.
+- **Run parameters** are resolved once by `ems.experiments.runs.managed_params` and sent by `configure` before
+  data flows; each object keeps its copy, so a config edit or a later deployment cannot change a running
+  household (P14, ADR 0019).
 - **The `estimated` flag** marks the household's own estimate for a missing reading. It is not the wire
   `quality` of a reading.
 - **The RCEm table is a run parameter** read as config, as `reference.run` and `stepper.step` take it: PSE values
   for real-data runs, a proxy table computed before the run for synthetic runs (it needs whole months). A site
-  whose months are missing from it fails fast.
+  whose months are missing from it fails before anything is sent.
 - **Cost:** 6 invocations per household-step plus one per strategy; 8 with two strategies.
 
 ### How R1–R7 hold
@@ -194,11 +219,11 @@ Internal Restate messages (not wire contract; each carries `schema_version`, `t`
 | Rule | How it holds |
 |---|---|
 | R1, R2 no blocking cycles | Every edge between actors is one-way, including both cycles (Household to Tariff and back; Ems to Battery and back). Request-response is used only from outside (tests, the export CLI) to shared handlers |
-| R3 journal non-determinism | Handlers make no external calls. Site parameters are resolved once and stored in state. The wall clock appears only in the live deadline handler, through `ctx.time()` |
-| R4 idempotent ingress | Three kinds of duplicate, each caught where it arises. A Kafka record redelivered after a restart or rebalance: Restate deduplicates by consumer group, topic, partition and offset. Messages a handler sends: Restate deduplicates them across retries of that execution, so they need no idempotency key. The same event published twice: the slot table drops the second by `event_id`. No idempotency key is taken from records: the slot table is needed anyway for the join, late records and revisions. Control calls through HTTP ingress carry an `Idempotency-Key` |
+| R3 journal non-determinism | Handlers make no external calls. Run parameters arrive by `configure` and are stored in state. The wall clock appears only in the live deadline handler (stage 4), through `ctx.time()`. Stored state and messages encode to the same bytes in every process (no sets), because Restate compares a retried handler's writes with its journal (RT0016) |
+| R4 idempotent ingress | Three kinds of duplicate, each caught where it arises. A Kafka record redelivered after a restart or rebalance: Restate deduplicates by consumer group, topic, partition and offset. Messages a handler sends: Restate deduplicates them across retries of that execution, so they need no idempotency key. The same event published twice: the slot table keeps the first reading of a meter slot, the forecast stream drops a run not newer than its newest, the price stream a curve id it holds. No idempotency key is taken from records: the slot table is needed anyway for the join and late records. Control calls through HTTP ingress (`configure`) carry an `Idempotency-Key` |
 | R5 never wait in an exclusive handler | Waiting means buffering in state until a watermark passes. Live deadlines are delayed self-messages |
 | R6 generations | The live deadline timer is the only self-rescheduling chain; it carries a generation number. Sim has none |
-| R7 envelope | Every message carries `schema_version`, `t` and the sim timestamp. Receivers apply messages in `t` or sequence order, hold back early ones, and count every reordering |
+| R7 envelope | Every message carries `schema_version` and `t`, the simulated time (stage 3: no separate timestamp); stream updates also carry `seq`. Receivers apply messages in `t` or sequence order through `ems.actors.reorder`, hold back early ones, and count every reordering |
 
 ### Restate facts
 
@@ -214,15 +239,18 @@ confirms the behaviour on the pinned versions (`05-deploy-and-infra.md`).
 | The in-server Kafka subscriptions are "the old Kafka support which we plan to remove in future releases"; not used | 2026-11-14, <https://docs.restate.dev/services/invocation/kafka> |
 | Nothing is documented about order or relative speed across topics or partitions, or about the order of messages between two objects across separate invocations; the model assumes none | 2026-11-14 |
 | HTTP ingress: `Idempotency-Key` header, result kept 24 h; one-way sends and delays | 2026-11-14, <https://docs.restate.dev/services/invocation/http> |
+| A retried handler whose commands differ from its journal (operation order, state keys, call payloads) fails with RT0016, "journal mismatch" | 2026-11-20, <https://docs.restate.dev/references/errors>, <https://docs.restate.dev/services/versioning> |
+| Removing a service means removing its deployment; adding handlers is allowed, removing or renaming them needs `breaking`. `POST /deployments` with `force: true` overrides the deployment at the same URI and implies `breaking`; `DELETE /deployments/{id}` exists only as a forced, asynchronous delete; `GET /services/{service}/handlers/{handler}` answers 404 for a missing handler | 2026-11-20, <https://docs.restate.dev/services/versioning>, <https://docs.restate.dev/admin-api/deployment/register-deployment> and the sibling admin-API pages (the reference shows API version 1.7.14). Confirmed on 1.8.1-hotfix.2 on 2026-11-21: the handler lookup answers 404 and 200; a `force: true` registration at the same URI keeps the deployment id and replaces its whole service set (`Probe` and the state-cost objects were no longer listed) |
 | Delayed sends are durable; a sleep in an exclusive handler blocks its key; state is sent with every invocation unless lazy state is enabled | 2026-10-30, <https://docs.restate.dev/develop/python/durable-timers>, <https://docs.restate.dev/develop/python/state> |
 
 Confirmed on the pinned versions in stage 2 (spec 010; Restate 1.8.1-hotfix.2, integration 0.1.1, `restate-sdk`
 1.5.2), with the test or result that shows it:
 - Per-key partition order and exactly-once delivery from Kafka hold, also across `kill -9` of the server, the SDK
-  service and an ingress container (`tests/e2e/test_probe_backfill.py`, `tests/fault/test_probe_kills.py`).
+  service and an ingress container (spec 010's `test_probe_backfill.py` and `test_probe_kills.py`, re-homed on
+  the actors in spec 011 as `tests/e2e/test_ingress_backfill.py` and `tests/fault/test_ingress_kills.py`).
 - The value reaches the handler as raw bytes without a content type; besides `kafka.topic`, `kafka.partition`,
   `kafka.offset` and `kafka.timestamp` the handler sees `kafka.key`; other record headers are not forwarded
-  (only `traceparent`, `tracestate`) (`StaticRecordMapper.kt` at v0.1.1; `tests/integration/test_probe_*.py`).
+  (only `traceparent`, `tracestate`) (`StaticRecordMapper.kt` at v0.1.1; `tests/integration/test_ingress_*.py`, formerly `test_probe_*.py`).
   `sys_invocation` shows these invocations as `invoked_by = ingress`.
 - The integration commits a Kafka offset after Restate's durable acknowledgement, not after the handler ran:
   with the SDK service down the consumer lag still fell to 0 (`ingress-backlog-20261116T081316Z`).
@@ -271,6 +299,10 @@ resolved VERIFY items below; its measurements are in `docs/thesis/kafka-ingress.
 
 ### Stage 3 · Actor skeleton
 
+**Done 2026-11-20 (spec 011).** The rules it decided are in this doc and ADRs 0018 and 0019; the handlers in
+`02-subsystem-actors.md`; the messages in `08-contracts.md`; corrections, the month lag and the replacement price
+in `12-domain-model.md`. The brief as it was handed over:
+
 - **Read first:** this doc, ADR 0017, `02-subsystem-actors.md` (runtime, registration, Kafka ingress, the probe),
   `12-domain-model.md` (actions, `Policy`, stepper, reference, the notes for the actor stages), `08-contracts.md`
   (handoff, availability), `06-data-flows.md` (emission schedule, faults), `specs/009-domain-core/`,
@@ -312,7 +344,8 @@ resolved VERIFY items below; its measurements are in `docs/thesis/kafka-ingress.
 - **Docs it writes:** the handlers part of `02-subsystem-actors.md`; the internal messages in `08-contracts.md`;
   the correction and the estimate in `12-domain-model.md`; `06-data-flows.md`; the stage 4 brief.
 - **Done when:** 10 households × 1 day replayed through Kafka give strategy and `Meter` state equal to the
-  offline side with `==`. The result is the same when the topics are published in different orders, with
+  offline side with `==`. The result is the same when the topics arrive in different orders (each ingress
+  container started after the other finished), with
   `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (for example
   2), which is the run that produces corrections and drops. The parity check holds in each run. Unmanaged
   sites keep O(1) state. Property tests show that any interleaving of the per-stream orders gives identical
@@ -321,14 +354,26 @@ resolved VERIFY items below; its measurements are in `docs/thesis/kafka-ingress.
 
 ### Stage 4 · Clocks and systems experiments
 
-- **Read first:** this doc, `11-experiments.md`, `06-data-flows.md`, risks A1–A5, the stage 3 spec.
+- **Read first:** this doc, `11-experiments.md`, `06-data-flows.md`, risks A1–A12, ADRs 0018 and 0019,
+  `specs/011-actor-skeleton/` and `02-subsystem-actors.md` (handlers, state keys, the harness).
 - **Already decided:** live mode adds one durable wall-clock deadline timer per household, with a generation
   number (R6); a strategy is added by a control message through HTTP ingress with an `Idempotency-Key` and an
-  effective step `t0`; results are exported from state by a batch CLI (spec 006).
+  effective step `t0`, next to `configure` (ADR 0019); results are exported from state by a batch CLI (spec 006).
+  From stage 3:
+  - a run is configured before it is published (`ems.experiments.runs.managed_params`, `Restate.configure`), and
+    `Restate.wait_run` waits for the end the offline side computes (`stack.offline_run`, `run_ends`); its lenient
+    mode tolerates the retries a kill causes;
+  - every object stores one `state` value, a frozen dataclass encoded by `ems.actors.serde`; the export decodes
+    it with the same serde, and the shared handlers return it;
+  - a month is settled `2L` quarter-hours after it ends (ADR 0018): bill windows need that many more steps, and a
+    synthetic run with an RCEm site needs the RCEm entry of the month after the window;
+  - stage 3 killed only the SDK service with households configured; the server and ingress kills ran on
+    unconfigured households (re-homed spec 010 tests).
 - **This stage decides:** the grace period and catch-up of the live timer; what happens to a strategy change
   that arrives after `t0` (flagged, never silent); the experiment runner (`make exp`), how the export reads
   state and where systems metrics come from (open in `11-experiments.md`); pacing a history replay; the
-  builder of the proxy RCEm table.
+  builder of the proxy RCEm table; whether to split an object's `state` value (it is rewritten every step, risk
+  A9); the invocation retention for scale runs (A6).
 - **VERIFY items it owns:** none new; it re-runs V10 at scale.
 - **Docs it writes:** `11-experiments.md` (runner, export, metrics), `06-data-flows.md` (live clock), the
   stage 5 brief.
@@ -342,7 +387,12 @@ resolved VERIFY items below; its measurements are in `docs/thesis/kafka-ingress.
 - **Read first:** this doc, `12-domain-model.md` (price signal and its gaps), `11-experiments.md`, the brief
   §7 (forecasting and optimisation stack).
 - **Already decided:** a policy sees only what was visible at the start of its step; a forecast run is
-  immutable and identified by its issue time; each `Step` already names the run visible at its start.
+  immutable and identified by its issue time; each `Step` already names the run visible at its start. A new
+  strategy is a policy in `ems.domain.actions.POLICIES` plus its name: `ems.actors.strategy.strategy_object`
+  builds its service.
+- **Open from stage 3:** a site without PV (PL-LOC-000002 in the 10-household catalog) is not a prosumer under
+  the RES act (art. 2 pkt 27a); with NoBattery and SelfConsumption it never exports. Decide how its export is
+  valued before a strategy can export from its battery.
 - **This stage decides:** how a run's payload reaches a policy, and how long it is kept. Retention must follow
   the reader's progress, not the forecast stream's, or a household that lags would find its run gone (the
   payload travels with the update, or the household reports its released step). Also: whether `Ems` can still
@@ -377,11 +427,11 @@ VERIFY on the pinned versions (stage in brackets):
 
 | # | Item | Why it matters |
 |---|---|---|
-| V1 (2) | Per-key order from one partition holds through the integration, also across a restart of the server, the SDK service and the ingress container | **Resolved 2026-11-16:** holds. Every key's log equals the offline fold with 0 regressions, also after `kill -9` of each component mid-run (`tests/e2e/test_probe_backfill.py`, `tests/fault/test_probe_kills.py`) |
-| V2 (2) | What the integration does when the handler fails, the payload is invalid, or Restate is down; the docs do not say, and it exits after repeated failed reconnects | **Resolved 2026-11-16.** Invalid payload: the integration validates nothing and passes raw bytes; the handler counts it (`test_probe_bad_records.py`). Handler unavailable (SDK service down): records are still ingested and queue as invocations in Restate (`ingress-backlog-20261116T081316Z`); a handler that keeps raising is retried by Restate's policy (70 attempts, then pause) and holds only its own key. Restate down: the integration reconnects every 500 ms and does **not** exit, whatever `RESTATE_RETRY_MAX_ATTEMPTS` says, because each stream opens before it fails (AC-010-16, `PartitionSession.kt`); a process that exits is restarted by `restart: unless-stopped`. A record Restate rejects is skipped (`PartitionSession.kt`), hence the start order in 02 |
+| V1 (2) | Per-key order from one partition holds through the integration, also across a restart of the server, the SDK service and the ingress container | **Resolved 2026-11-16:** holds. Every key's log equals the offline fold with 0 regressions, also after `kill -9` of each component mid-run (`tests/e2e/test_ingress_backfill.py`, `tests/fault/test_ingress_kills.py`, formerly `test_probe_*`) |
+| V2 (2) | What the integration does when the handler fails, the payload is invalid, or Restate is down; the docs do not say, and it exits after repeated failed reconnects | **Resolved 2026-11-16.** Invalid payload: the integration validates nothing and passes raw bytes; the handler counts it (`test_ingress_bad_records.py`, formerly `test_probe_bad_records.py`). Handler unavailable (SDK service down): records are still ingested and queue as invocations in Restate (`ingress-backlog-20261116T081316Z`); a handler that keeps raising is retried by Restate's policy (70 attempts, then pause) and holds only its own key. Restate down: the integration reconnects every 500 ms and does **not** exit, whatever `RESTATE_RETRY_MAX_ATTEMPTS` says, because each stream opens before it fails (AC-010-16, `PartitionSession.kt`); a process that exits is restarted by `restart: unless-stopped`. A record Restate rejects is skipped (`PartitionSession.kt`), hence the start order in 02 |
 | V3 (2) | What the SDK does when a handler's input cannot be deserialised | **Resolved 2026-11-15:** `restate-sdk` 1.5.2 raises `TerminalError("Unable to parse an input argument")` (`handler.py` 406), which would fail the invocation. Kafka-fed handlers therefore take raw bytes and parse themselves |
 | V4 (2) | Pinning the integration image: the docs show only the `latest` tag | **Resolved 2026-11-15:** GHCR carries dated tags; pinned `ghcr.io/restatedev/ingress-integration-kafka:0.1.1-20261109@sha256:20704c886ee4dcc4046bab1743dc424bb08b2317ce1bc6da55ce738345ce01b1` (linux/amd64 only; registry API) |
-| V5 (3) | Order of one-way messages between the same two objects across invocations | Undocumented; not relied on; the reorder counter measures it |
+| V5 (3) | Order of one-way messages between the same two objects across invocations | **Measured 2026-11-21:** in an unpaced backfill of 100 households × 2 days with the 35 managed ones configured, every receiving service (`Household`, both strategies, `Ems`, `Battery`, `Meter`) counted 0 messages early and 0 stale (`ingress-skew-20261121T005630Z`). Still not relied on: Restate documents no such order, so receivers keep holding back by `t` and `seq`, and the in-memory network test (`tests/property/test_network.py`) exercises re-ordering |
 | V6 (5) | State written before a send is visible to a shared read triggered by that message | Undocumented; matters for forecast reads |
 | V7 (2) | Cost of state shipped with every invocation; the lazy-state option of the pinned SDK | **Resolved 2026-11-16:** with eager state a call that touches one small key takes a median of 2, 3 and 9 ms for 1 kB, 100 kB and 1 MB of object state (299, 235 and 84 calls/s); lazy state (`state_preload=False`) keeps the median at 3–4 ms but showed one 39 s call in 500 at 1 MB, cause unknown (`ingress-state-cost-20261116T081221Z`) |
 | V8 (2) | Whether Kafka ingestion slows down when handlers fall behind | **Resolved 2026-11-16:** it does not. With the SDK service stopped the consumer lag of all groups fell to 0 within 7.4 s and 3,426 records waited in Restate as invocations; the backlog drained in 8.8 s after the service came back (`ingress-backlog-20261116T081316Z`) |
@@ -389,11 +439,12 @@ VERIFY on the pinned versions (stage in brackets):
 | V10 (2) | The server restarts cleanly after `kill -9` with VQueues on (risk A5) | **Resolved 2026-11-16:** yes, healthy without a manual step, in the fault tier (AC-010-13) and in the spike's experiment B (healthy 0.5 s after restart, `spike-20261116T080544Z`) |
 | V11 (2) | The integration's Kafka client works against broker 4.3.1 (ADR 0010 checked Restate's bundled client, which is no longer used) | **Resolved 2026-11-15:** the image bundles `kafka-clients` 4.2.0 (`/NOTICE`, `/app/libs`), which consumed every test and measurement run against broker 4.3.1 |
 
-- OPEN (stage 3): how a correction reaches the ledger, the estimate for a missing reading, how the actor service
-  obtains a run's parameters, the rule for a quarter-hour with no visible price. Details in the stage 3 brief.
+- Closed in stage 3 (2026-11-20): how a correction reaches the ledger, the estimate, the price of a quarter-hour
+  without a visible price, an unknown forecast model (ADR 0018); how the actors obtain a run's parameters
+  (ADR 0019); the split of `reference.quarter` (`12-domain-model.md`); the internal messages (`08-contracts.md`).
 - OPEN (stage 5): how forecast payloads reach a policy and how long they are kept.
 - OPEN: delivering a newly published RCEm to running actors in live mode. It needs a new event, which is wire
   contract (ADR 0016); no stage owns it yet.
 - OPEN: exact replay of a live run needs a per-step record of what was visible (risk A4).
-- `02`–`04` (actor handlers in full, strategies and evaluation, forecasting and optimisation) are written with
-  the stages that build them.
+- `03`–`04` (strategies and evaluation, forecasting and optimisation) are written with the stages that build
+  them; `02` has the actor handlers since stage 3.

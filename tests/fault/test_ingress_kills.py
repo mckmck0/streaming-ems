@@ -4,9 +4,12 @@ their reconnect budget, and one that exits on its own comes back by its restart 
 
 Each kill test publishes a backfill while the module's ingress containers are stopped, starts them,
 waits for its trigger (30 % of the run handled or committed) and kills. It then proves, from data
-that survives the kill, that the kill landed mid-run: the probe's progress for the SDK service, the
-meters group's committed offsets in Kafka for the server and the ingress container. A test without
-that proof fails; enlarge the backfill then.
+that survives the kill, that the kill landed mid-run: the record counters of the Kafka-fed actors
+for the SDK service, the meters group's committed offsets in Kafka for the server and the ingress
+container. A test without that proof fails; enlarge the backfill then.
+
+Since spec 011 (AC-011-47) the records reach `Household`, `Weather` and `Tariff`; no household is
+configured, so the actors only keep their ingress logs and counters.
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ def _share(env: stack.StackEnv, base: int, end: int) -> float:
 
 def _exactly_once(env: stack.StackEnv, run_id: str, records: list[stack.Record]) -> None:
     env.restate.wait_handled(run_id, len(records), timeout=1800)
-    logs = env.restate.probe_logs(run_id)
+    logs = env.restate.ingress_logs(run_id)
     assert logs == stack.offline_logs(records)
     entries = [entry for log in logs.values() for entry in log["topics"].values()]
     assert sum(e["regressions"] for e in entries) == 0

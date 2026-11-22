@@ -7,22 +7,33 @@
 (b) The billing settlement: one civil month at a time, a pure function of that month's rows, its
     fixed charges, the price basis and the deposit tranches carried in. It is not additive.
 
-``settle_quarter`` is the incremental form actors call: it takes one quarter-hour and closes the
-hour and the month exactly where the batch reference does.
+The incremental form is four pieces (spec 011, allowed lateness, ADR 0018):
+- ``add_quarter`` adds one quarter-hour and writes its hour's row on the hour's fourth quarter;
+- ``correct`` applies a late reading: it recomputes the quarter's grid energy from the corrected PV
+  or load and the battery power already executed, then re-fires its hour (the row is recomputed);
+- ``due_month`` and ``close_month`` settle a civil month once it has ended and a lag has passed, so
+  that a correction inside the lateness window still reaches the month's bill.
+``settle_quarter`` is their composition with no lag: it closes the hour and the month exactly where
+the batch reference does.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ems.domain.calendar import hour_month, month_add, month_index
 from ems.domain.netbilling import NetBillingRules, PriceBasis, floored
 from ems.domain.tariff import BuyPrice, FixedCharges
-from ems.domain.units import QUARTERS_PER_HOUR
+from ems.domain.units import DT_H, QUARTERS_PER_HOUR
 
 # ── (a) ledger ───────────────────────────────────────────────────────────────────────────────────
+
+
+def grid_kwh(pv_kwh: float, load_kwh: float, p_kw: float) -> float:
+    """Energy through the meter in one quarter-hour (> 0 import): load - PV + battery power · Δt."""
+    return (load_kwh - pv_kwh) + p_kw * DT_H
 
 
 @dataclass(frozen=True)
@@ -235,8 +246,108 @@ def price_signal(buy: BuyPrice, p_pln_per_kwh: float, rules: NetBillingRules) ->
 class SettleAcc:
     t: int  # the next quarter-hour expected
     hour: tuple[SettleIn, ...]  # the open hour (at most three quarters)
-    month_rows: tuple[HourRow, ...]  # the open month's rows
+    # Rows not yet settled: the open month's, and an ended month's until its lag has passed.
+    month_rows: tuple[HourRow, ...]
     tranches: tuple[Tranche, ...]
+
+
+@dataclass(frozen=True)
+class Correction:
+    """A reading that arrived after its quarter-hour ran on an estimate."""
+
+    stream: str  # "production" (replaces PV) or "consumption" (replaces load)
+    t: int
+    kwh: float
+
+
+@dataclass(frozen=True)
+class Flow:
+    """A settled quarter-hour, kept while its hour can still be corrected."""
+
+    pv_kwh: float
+    load_kwh: float
+    p_kw: float  # the battery power executed; a correction never changes it
+    settle: SettleIn
+
+
+def add_quarter(acc: SettleAcc, s: SettleIn) -> tuple[SettleAcc, HourRow | None]:
+    """Add one quarter-hour; its hour's fourth quarter writes the hour's row."""
+    if s.t != acc.t:
+        raise ValueError(f"quarter-hour {s.t} out of order: expected {acc.t}")
+    if s.t % QUARTERS_PER_HOUR < QUARTERS_PER_HOUR - 1:
+        return SettleAcc(s.t + 1, (*acc.hour, s), acc.month_rows, acc.tranches), None
+    row = settle_hour((*acc.hour, s))
+    return SettleAcc(s.t + 1, (), (*acc.month_rows, row), acc.tranches), row
+
+
+def correct(
+    acc: SettleAcc, recent: tuple[Flow, ...], c: Correction
+) -> tuple[SettleAcc, tuple[Flow, ...], HourRow | None]:
+    """Apply a late reading to the kept flow of ``c.t`` and re-fire its hour.
+
+    The quarter's grid energy is recomputed from the corrected PV or load and the battery power
+    that was executed. A quarter of the open hour is replaced in place (no row yet); a quarter of a
+    closed hour recomputes that hour's row, which is returned.
+    """
+    if c.stream not in ("production", "consumption"):
+        raise ValueError(f"correction of an unknown stream {c.stream!r}")
+    if c.t >= acc.t:
+        raise ValueError(f"correction of quarter-hour {c.t}, which is not settled yet")
+    found = [i for i, f in enumerate(recent) if f.settle.t == c.t]
+    if not found:
+        raise ValueError(f"correction of quarter-hour {c.t}, whose flow is no longer kept")
+    i = found[0]
+    old = recent[i]
+    pv, load = (c.kwh, old.load_kwh) if c.stream == "production" else (old.pv_kwh, c.kwh)
+    settle = replace(old.settle, grid_kwh=grid_kwh(pv, load, old.p_kw))
+    recent = (*recent[:i], Flow(pv, load, old.p_kw, settle), *recent[i + 1 :])
+
+    hour_start = QUARTERS_PER_HOUR * (acc.t // QUARTERS_PER_HOUR)
+    if c.t >= hour_start:
+        k = c.t - hour_start
+        hour = (*acc.hour[:k], settle, *acc.hour[k + 1 :])
+        return SettleAcc(acc.t, hour, acc.month_rows, acc.tranches), recent, None
+
+    h = c.t // QUARTERS_PER_HOUR
+    rows = acc.month_rows
+    j = h - rows[0].h if rows else -1
+    if not 0 <= j < len(rows) or rows[j].h != h:
+        raise ValueError(f"correction of hour {h}, whose month is already settled")
+    row = settle_hour([f.settle for f in recent if f.settle.t // QUARTERS_PER_HOUR == h])
+    rows = (*rows[:j], row, *rows[j + 1 :])
+    return SettleAcc(acc.t, acc.hour, rows, acc.tranches), recent, row
+
+
+def due_month(acc: SettleAcc, lag: int) -> str | None:
+    """The oldest unsettled month, once its last hour has a row and ``lag`` more quarter-hours
+    have been added after it; else None.
+    """
+    rows = acc.month_rows
+    if not rows:
+        return None
+    month = rows[0].month
+    last = rows[0]
+    for row in rows:
+        if row.month != month:
+            break
+        last = row
+    if hour_month(last.h + 1) == month:
+        return None  # the month's last hour has no row yet
+    last_quarter = QUARTERS_PER_HOUR * last.h + QUARTERS_PER_HOUR - 1
+    return month if acc.t > last_quarter + lag else None
+
+
+def close_month(
+    acc: SettleAcc, fixed: FixedCharges, basis: PriceBasis, rules: NetBillingRules
+) -> tuple[SettleAcc, MonthSettlement]:
+    """Settle the oldest unsettled month with its own fixed charges and price basis."""
+    rows = acc.month_rows
+    month = rows[0].month
+    n = 0
+    while n < len(rows) and rows[n].month == month:
+        n += 1
+    settled = settle_month(month, rows[:n], fixed, basis, rules, acc.tranches)
+    return SettleAcc(acc.t, acc.hour, rows[n:], settled.closing), settled
 
 
 def settle_quarter(
@@ -246,22 +357,11 @@ def settle_quarter(
     basis: PriceBasis,
     rules: NetBillingRules,
 ) -> tuple[SettleAcc, HourRow | None, MonthSettlement | None]:
-    """Add one quarter-hour. Its fourth quarter closes the hour; the last hour of a civil month
-    closes the month with ``fixed`` and ``basis`` of that month.
+    """Add one quarter-hour with no lag. Its fourth quarter closes the hour; the last hour of a
+    civil month closes the month with ``fixed`` and ``basis`` of that month.
     """
-    if s.t != acc.t:
-        raise ValueError(f"quarter-hour {s.t} out of order: expected {acc.t}")
-    hour = (*acc.hour, s)
-    rows = acc.month_rows
-    tranches = acc.tranches
-    row = None
+    acc, row = add_quarter(acc, s)
     month = None
-    if s.t % QUARTERS_PER_HOUR == QUARTERS_PER_HOUR - 1:
-        row = settle_hour(hour)
-        hour = ()
-        rows = (*rows, row)
-        if hour_month(row.h + 1) != row.month:
-            month = settle_month(row.month, rows, fixed, basis, rules, tranches)
-            rows = ()
-            tranches = month.closing
-    return SettleAcc(s.t + 1, hour, rows, tranches), row, month
+    if due_month(acc, 0) is not None:
+        acc, month = close_month(acc, fixed, basis, rules)
+    return acc, row, month

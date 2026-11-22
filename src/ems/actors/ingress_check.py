@@ -14,7 +14,8 @@ Two functions keep the two parts of a probe's state for one key:
 
 Both return new dictionaries of plain JSON types, never mutate their input and never raise on the
 content of a record: a Kafka-fed handler that raised would be retried and block its key. ``apply``
-does both with one parse of the record. Stage 3 keeps ``log_apply`` in the real Kafka-fed handlers.
+does both with one parse of the record. Since stage 3 (spec 011) the Kafka-fed actors keep the log
+through ``log_step`` and a managed household keeps its stream leads through ``lead_step``.
 """
 
 from __future__ import annotations
@@ -61,7 +62,10 @@ def _chain(previous: str, partition: int, offset: int) -> str:
     return hashlib.sha256(f"{previous}:{partition}:{offset}".encode()).hexdigest()
 
 
-def _log_step(log: Mapping[str, Any], meta: Meta | None, parsed: bool) -> dict[str, Any]:
+def log_step(log: Mapping[str, Any], meta: Meta | None, parsed: bool) -> dict[str, Any]:
+    """The log after one record whose parse result is known (a record without its Kafka coordinates
+    counts as rejected).
+    """
     topics: dict[str, Any] = dict(log["topics"])
     rejected = int(log["rejected"])
     if meta is None:
@@ -91,30 +95,34 @@ def _log_step(log: Mapping[str, Any], meta: Meta | None, parsed: bool) -> dict[s
     return {"topics": topics, "rejected": rejected + (0 if parsed else 1)}
 
 
-def _lead_step(leads: Mapping[str, Any], event: EnvelopeBase | None) -> dict[str, Any]:
+def lead_step(leads: Mapping[str, Any], stream: str, slot: int) -> dict[str, Any]:
+    """The leads after a record of ``stream`` that becomes usable at quarter-hour ``slot``."""
     newest: dict[str, int] = dict(leads["newest"])
     best: dict[str, int] = dict(leads["max"])
-    skipped = int(leads["skipped"])
-    try:
-        if event is None:
-            raise ValueError("record did not parse")
-        stream = event.stream.value
-        slot = quarter_index(available_at(event))
-    except Exception:  # unparsed record, a forecast model without a delay, a date out of range
-        return {"newest": newest, "max": best, "skipped": skipped + 1}
     newest[stream] = max(newest.get(stream, slot), slot)
     for other, other_slot in newest.items():
         if other != stream:
             lead = newest[stream] - other_slot
             key = f"{stream}>{other}"
             best[key] = max(best.get(key, lead), lead)
-    return {"newest": newest, "max": best, "skipped": skipped}
+    return {"newest": newest, "max": best, "skipped": int(leads["skipped"])}
+
+
+def _lead_step(leads: Mapping[str, Any], event: EnvelopeBase | None) -> dict[str, Any]:
+    try:
+        if event is None:
+            raise ValueError("record did not parse")
+        stream = event.stream.value
+        slot = quarter_index(available_at(event))
+    except Exception:  # unparsed record, a forecast model without a delay, a date out of range
+        return {**leads, "skipped": int(leads["skipped"]) + 1}
+    return lead_step(leads, stream, slot)
 
 
 def log_apply(log: Mapping[str, Any], meta: Meta | None, raw: bytes) -> dict[str, Any]:
     """The log after one record: compared with ``==`` between Restate and the offline fold."""
     parsed = True if meta is None else _parse(raw) is not None
-    return _log_step(log, meta, parsed)
+    return log_step(log, meta, parsed)
 
 
 def lead_apply(leads: Mapping[str, Any], raw: bytes) -> dict[str, Any]:
@@ -127,7 +135,7 @@ def apply(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """``(log_apply(log, meta, raw), lead_apply(leads, raw))`` with one parse of the record."""
     event = _parse(raw)
-    return _log_step(log, meta, event is not None), _lead_step(leads, event)
+    return log_step(log, meta, event is not None), _lead_step(leads, event)
 
 
 def fold_log(records: Iterable[tuple[Meta | None, bytes]]) -> dict[str, Any]:

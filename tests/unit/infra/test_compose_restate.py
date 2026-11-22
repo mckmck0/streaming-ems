@@ -1,4 +1,4 @@
-"""Compose for spec 010: the Restate server and the three Kafka ingress containers.
+"""Compose for spec 010 and spec 011: the Restate server and the three Kafka ingress containers.
 
 AC-010-01: every published port is bound to 127.0.0.1 (Restate ingress 8080 and admin 9070);
 Restate keeps its data in the named volume `restate-data`.
@@ -7,6 +7,9 @@ digest, and every other registry image likewise.
 AC-010-08: one ingress container per target handler, with its topics, fixed consumer group and
 handler, the earliest offset, the `ingress` profile, the `ems.role=ingress` label, the restart
 policy and no published port; together they cover the four Kafka-fed topics, each once.
+AC-011-25: since spec 011 each container names its own target service beside its handler
+(`Household.on_measurement`, `Weather.on_forecast`, `Tariff.on_price`); the shared anchor names
+none, and the harness's `INGRESS_TARGETS` agree with the file.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from ruamel.yaml import YAML
 
 from ems.contracts.envelope import Stream
 from ems.contracts.topics import STREAM_TOPICS
+from ems.experiments import stack
 
 RESTATE_IMAGE = (
     "restatedev/restate:1.8.1-hotfix.2-20261102"
@@ -37,22 +41,25 @@ SHARED_ENV = {
     "KAFKA_BOOTSTRAP_SERVERS": "kafka:29092",
     "KAFKA_AUTO_OFFSET_RESET": "earliest",
     "RESTATE_INGRESS_URL": "http://restate:8080",
-    "RESTATE_RECORD_MAPPER_SERVICE": "Probe",
 }
+ANCHOR = "x-ingress-env"
 INGRESS = {
     "ingress-meters": {
         "KAFKA_TOPICS": "ems.production.v1,ems.consumption.v1",
         "KAFKA_GROUP_ID": "ems-ingress-meters",
+        "RESTATE_RECORD_MAPPER_SERVICE": "Household",
         "RESTATE_RECORD_MAPPER_HANDLER": "on_measurement",
     },
     "ingress-forecasts": {
         "KAFKA_TOPICS": "ems.weather.forecast.v1",
         "KAFKA_GROUP_ID": "ems-ingress-forecasts",
+        "RESTATE_RECORD_MAPPER_SERVICE": "Weather",
         "RESTATE_RECORD_MAPPER_HANDLER": "on_forecast",
     },
     "ingress-prices": {
         "KAFKA_TOPICS": "ems.price.v1",
         "KAFKA_GROUP_ID": "ems-ingress-prices",
+        "RESTATE_RECORD_MAPPER_SERVICE": "Tariff",
         "RESTATE_RECORD_MAPPER_HANDLER": "on_price",
     },
 }
@@ -141,3 +148,42 @@ def test_ac_010_08_each_kafka_fed_topic_in_exactly_one_ingress(repo: Path) -> No
         .split(",")
     ]
     assert sorted(topics) == sorted(STREAM_TOPICS[stream] for stream in KAFKA_FED)
+
+
+TARGETS = {
+    "ingress-meters": ("Household", "on_measurement"),
+    "ingress-forecasts": ("Weather", "on_forecast"),
+    "ingress-prices": ("Tariff", "on_price"),
+}
+
+
+def test_ac_011_25_the_shared_anchor_names_no_target_service(repo: Path) -> None:
+    anchor = _compose(repo).get(ANCHOR)
+    assert isinstance(anchor, dict), f"no {ANCHOR} mapping in infra/docker-compose.yml"
+    assert "RESTATE_RECORD_MAPPER_SERVICE" not in anchor
+    assert "RESTATE_RECORD_MAPPER_HANDLER" not in anchor
+
+
+@pytest.mark.parametrize("name", sorted(TARGETS))
+def test_ac_011_25_each_ingress_container_sets_its_own_target(repo: Path, name: str) -> None:
+    env = _service(repo, name).get("environment") or {}
+    target = (env.get("RESTATE_RECORD_MAPPER_SERVICE"), env.get("RESTATE_RECORD_MAPPER_HANDLER"))
+    assert target == TARGETS[name]
+
+
+def test_ac_011_25_no_ingress_container_targets_the_probe(repo: Path) -> None:
+    for name, service in _compose(repo)["services"].items():
+        env = service.get("environment") or {}
+        if isinstance(env, dict):
+            assert env.get("RESTATE_RECORD_MAPPER_SERVICE") != "Probe", name
+
+
+def test_ac_011_25_harness_targets_match_the_compose_file(repo: Path) -> None:
+    from_compose = {
+        name: (
+            _service(repo, name)["environment"]["RESTATE_RECORD_MAPPER_SERVICE"],
+            _service(repo, name)["environment"]["RESTATE_RECORD_MAPPER_HANDLER"],
+        )
+        for name in stack.INGRESS_TARGETS
+    }
+    assert from_compose == stack.INGRESS_TARGETS

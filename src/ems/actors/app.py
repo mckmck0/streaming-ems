@@ -1,12 +1,30 @@
-"""The SDK service registered with Restate (spec 010): `make dev` serves it with hypercorn on
-127.0.0.1:9080.
+"""The SDK service: every Virtual Object of the EMS, served by hypercorn (`make dev`).
+
+Stage 3 (spec 011): the actors of `01-architecture.md`, one service per strategy of ``POLICIES``.
+The ingress containers feed ``Household``, ``Weather`` and ``Tariff``.
 """
 
 from __future__ import annotations
 
 import restate
 
-from ems.actors.probe import probe
-from ems.actors.statecost import state_cost_eager, state_cost_lazy
+from ems.actors.battery import battery
+from ems.actors.ems import ems
+from ems.actors.household import household
+from ems.actors.meter import meter
+from ems.actors.strategy import strategy_object
+from ems.actors.tariff import tariff
+from ems.actors.weather import weather
+from ems.domain.actions import POLICIES
 
-app = restate.app(services=[probe, state_cost_eager, state_cost_lazy])
+SERVICES = (
+    household,
+    tariff,
+    weather,
+    *(strategy_object(name) for name in POLICIES),
+    ems,
+    battery,
+    meter,
+)
+
+app = restate.app(services=list(SERVICES))

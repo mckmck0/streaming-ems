@@ -13,7 +13,7 @@ Canonical docs: [docs/context/README.md](docs/context/README.md) (index). The st
 
 ## Orientation: before planning or writing anything
 
-1. **Locate** the owning area: domain, actors, strategies, forecasting, optimization, ingest, sim,
+1. **Locate** the owning area: domain, assembler, actors, strategies, forecasting, optimization, ingest, sim,
    experiments, infra, helm, docs.
 2. **Ground**: invoke the `ems-context` skill and read only the `docs/context/` files it points to.
 3. **Layer**: add the surface skill for the work (table below).
@@ -46,7 +46,7 @@ Surface real contradictions in your answer instead of silently picking a side.
 | `ems-pr` | Every task of a spec is checked (a Stop hook asks for it), or the user asks for a PR: gates, commits, push, PR |
 
 Path-scoped rules in `.claude/rules/` load when you touch matching files: `domain.md` (`src/ems/domain/`),
-`actors.md` (`src/ems/actors/`), `ingest.md` (`src/ems/ingest/`, `src/ems/contracts/`, `config/`), `tests.md`,
+`assembler.md` (`src/ems/assembler/`), `actors.md` (`src/ems/actors/`), `ingest.md` (`src/ems/ingest/`, `src/ems/contracts/`, `config/`), `tests.md`,
 `experiments.md`, `specs.md`, `docs.md`, `frontend.md`.
 
 ## Subagents
@@ -74,7 +74,7 @@ with its spec, never ad hoc.
 | `make report-coverage` | combine the tiers' coverage (`logs/.coverage.<tier>`) into `logs/coverage.xml` |
 | `make up` / `make down` / `make topics` | Kafka and Restate (`infra/docker-compose.yml`) / stop, removing the ingress containers / ensure topics (`PROFILE=`) |
 | `make dev` / `make register [FORCE=true]` | SDK service on 127.0.0.1:9080 / register it (`force: false`; `FORCE=true` after handler changes, dev only) and start the Kafka ingress |
-| `make measure [MODE=]` / `make spike` | ingress measurements (`skew`, `state-cost`, `backlog`) / the reference spike's A–C on the pinned server |
+| `make measure [MODE=]` / `make spike` | ingress measurements (`skew`, `backlog`) / the reference spike's A–C on the pinned server |
 | `make gen-backfill DAYS=2` / `make validate` / `make tail TOPIC=` | backfill to Kafka (sim profile) / validate topics / inspect |
 | `make gen-live` / `make record NAME=` / `make replay NAME= [BACKGROUND=1]` | hybrid live run / record live sources / replay a recording (with a synthetic fleet) |
 | `make history NAME= START= END=` | fetch and build a real-data window (spec 008) |
@@ -85,7 +85,7 @@ the ruff-pre-commit `rev`). A new or bumped pin takes the newest release, with n
 digests and action SHAs keep every version exact (decided 2026-11-15, spec 010).
 
 The PostToolUse hook in `.claude/settings.json` formats each `.py` file you edit and flags Restate imports
-in `src/ems/domain/`. It does not see edits made through Bash, hence `make format`.
+in `src/ems/domain/` and `src/ems/assembler/`. It does not see edits made through Bash, hence `make format`.
 
 ## Invariants (full text and checks: `docs/context/07-design-principles.md`)
 
@@ -108,7 +108,7 @@ in `src/ems/domain/`. It does not see edits made through Bash, hence `make forma
 
 ## Do not
 
-- Import Restate (or any runtime, I/O or clock) in `src/ems/domain/`.
+- Import Restate (or any runtime, I/O or clock) in `src/ems/domain/` or `src/ems/assembler/`.
 - Build request-response cycles, or call an exclusive handler with request-response.
 - Use wall-clock timers in sim mode, or sleep inside an exclusive handler (use delayed messages).
 - Make blocking calls in handlers.

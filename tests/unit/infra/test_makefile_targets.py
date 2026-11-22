@@ -9,6 +9,12 @@ AC-010-18, AC-010-23: `measure` and `spike` run their jobs.
 AC-010-27: every tier target writes its coverage file under `logs/`; `report-coverage` combines
 them into `logs/coverage.xml`.
 The targets the spec adds are declared `.PHONY`.
+
+Spec 011:
+AC-011-44: after the POST, `register` checks with `curl -fsS` that Restate lists each ingress target
+handler (`Household.on_measurement`, `Weather.on_forecast`, `Tariff.on_price`), and only then starts
+the ingress profile; a failed check stops the recipe.
+AC-011-46: `measure` has the modes `skew` and `backlog`; `state-cost` is gone.
 """
 
 from __future__ import annotations
@@ -126,3 +132,50 @@ def test_ac_010_18_measure_target_runs_measure_job(repo: Path) -> None:
 def test_spec_010_new_targets_are_phony(repo: Path) -> None:
     _, phony = _parse(repo)
     assert sorted(NEW_TARGETS - phony) == []
+
+
+TARGET_HANDLERS = (
+    "Household/handlers/on_measurement",
+    "Weather/handlers/on_forecast",
+    "Tariff/handlers/on_price",
+)
+
+
+def _post_and_up(lines: list[str]) -> tuple[int, int]:
+    posts = [i for i, line in enumerate(lines) if "/deployments" in line and "-X POST" in line]
+    ups = [i for i, line in enumerate(lines) if "--profile ingress up -d --wait" in line]
+    assert posts, "no recipe line posts to /deployments"
+    assert ups, "no recipe line starts the ingress profile"
+    return posts[0], ups[0]
+
+
+@pytest.mark.parametrize("handler", TARGET_HANDLERS)
+def test_ac_011_44_register_checks_each_target_handler_between_post_and_ingress(
+    repo: Path, handler: str
+) -> None:
+    lines = _recipe(repo, "register")
+    post, up = _post_and_up(lines)
+    checks = [
+        i
+        for i, line in enumerate(lines)
+        if "curl -fsS" in line and "$(RESTATE_ADMIN)/services/" in line and handler in line
+    ]
+    assert checks, f"no `curl -fsS` check of {handler} in register"
+    assert all(post < i < up for i in checks), (post, checks, up)
+
+
+def test_ac_011_44_a_failed_handler_check_stops_register(repo: Path) -> None:
+    """A shell loop only fails on its last command: each check must stop the recipe itself."""
+    lines = _recipe(repo, "register")
+    for line in lines:
+        if "curl -fsS" in line and "/services/" in line and line.lstrip("@").startswith("for "):
+            assert "exit 1" in line, line
+
+
+def test_ac_011_46_measure_help_names_skew_and_backlog_only(repo: Path) -> None:
+    help_lines = [line for line in _recipe(repo, "help") if "measure" in line]
+    assert any("MODE=skew|backlog]" in line for line in help_lines), help_lines
+
+
+def test_ac_011_46_no_state_cost_mode_in_the_makefile(repo: Path) -> None:
+    assert "state-cost" not in (repo / "Makefile").read_text()

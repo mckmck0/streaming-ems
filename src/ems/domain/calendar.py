@@ -68,7 +68,7 @@ def month_of(day: date) -> str:
     return f"{day.year:04d}-{day.month:02d}"
 
 
-def day_type(day: date, holidays: frozenset[date]) -> DayType:
+def day_type(day: date, holidays: tuple[date, ...]) -> DayType:
     """Precedence: statutory holiday > Sunday > Saturday > weekday."""
     if day in holidays:
         return DayType.HOLIDAY
@@ -133,7 +133,7 @@ class ZoneScheme:
         return tuple(out)
 
 
-def zone_at(t: int, scheme: ZoneScheme, holidays: frozenset[date]) -> str:
+def zone_at(t: int, scheme: ZoneScheme, holidays: tuple[date, ...]) -> str:
     """The zone of ``t``: the first matching rule on tariff time, else the default zone."""
     if not scheme.rules:
         return scheme.default

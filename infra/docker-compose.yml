@@ -10,7 +10,6 @@ x-ingress-env: &ingress-env
   KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
   KAFKA_AUTO_OFFSET_RESET: "earliest"        # the integration sets none; Kafka's `latest` would skip existing data
   RESTATE_INGRESS_URL: "http://restate:8080"
-  RESTATE_RECORD_MAPPER_SERVICE: "Probe"
   RESTATE_RETRY_MAX_ATTEMPTS: "${EMS_INGRESS_RETRY_MAX_ATTEMPTS:-15}"   # then the process exits; restart below
   JDK_JAVA_OPTIONS: "-Xmx256m"
 
@@ -160,6 +159,7 @@ services:
       <<: *ingress-env
       KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.production.v1,${EMS_INGRESS_PREFIX:-}ems.consumption.v1"
       KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-meters"
+      RESTATE_RECORD_MAPPER_SERVICE: "Household"      # spec 011: the actors (spec 010: Probe)
       RESTATE_RECORD_MAPPER_HANDLER: "on_measurement"
       RESTATE_KAFKA_CONSUMER_INSTANCES: "3"   # never more than the partitions read (2 topics x 3 in live/sim)
 
@@ -169,6 +169,7 @@ services:
       <<: *ingress-env
       KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.weather.forecast.v1"
       KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-forecasts"
+      RESTATE_RECORD_MAPPER_SERVICE: "Weather"
       RESTATE_RECORD_MAPPER_HANDLER: "on_forecast"
       RESTATE_KAFKA_CONSUMER_INSTANCES: "3"
 
@@ -178,6 +179,7 @@ services:
       <<: *ingress-env
       KAFKA_TOPICS: "${EMS_INGRESS_PREFIX:-}ems.price.v1"
       KAFKA_GROUP_ID: "${EMS_INGRESS_PREFIX:-}ems-ingress-prices"
+      RESTATE_RECORD_MAPPER_SERVICE: "Tariff"
       RESTATE_RECORD_MAPPER_HANDLER: "on_price"
       RESTATE_KAFKA_CONSUMER_INSTANCES: "1"   # the price topic has one partition in live and sim
 

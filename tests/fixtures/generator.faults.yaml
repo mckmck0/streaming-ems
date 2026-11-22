@@ -1,0 +1,39 @@
+# Spec 011 test fixture: raised fault rates, so a 10 x 1 day run holds estimates, duplicates and corrections.
+# ems-gen behaviour (no secrets, no interpolation). Connection settings come from EMS_* variables.
+seed: 4242
+clock:
+  mode: backfill            # backfill | accelerated | realtime
+  speed: 96.0               # accelerated: simulated seconds per wall second
+  start: "2026-10-20T00:00:00Z"
+  end: null                 # null: run until stopped (realtime/accelerated) or --days
+streams:
+  weather_forecast: {mode: synthetic}
+  weather_actual: {mode: off}
+  production: {mode: synthetic}
+  consumption: {mode: synthetic}
+  price: {mode: synthetic, emit_initial_day: true}
+meters:
+  availability_delay_s: 0   # meter events are emitted at interval end plus this delay
+  emit_registers: false     # add a cumulative grid-import register to unmanaged sites (register faults)
+scale:
+  synthetic_locations: 1    # PL-LOC-000001 .. n; config/sites.yaml overrides by id
+  catalog_seed: 7
+  site_chunk: 2000          # sites per generation slice (memory bound)
+  site_controlled_bess_share: 0.0   # share of generated batteries controlled by the site (background)
+  site_mix: {}              # empty: households only. e.g. {household: 0.8, commercial: 0.1, solar_farm: 0.1}
+faults:                     # deterministic per seed; enable with `ems-gen run --faults`
+  enabled: false
+  missing_rate: 0.03
+  duplicate_rate: 0.03
+  late_rate: 0.15
+  late_max: PT2H
+  stuck_value_rate: 0.0005
+  register_reset_rate: 0.0001
+  estimated_rate: 0.001
+  substituted_rate: 0.0005
+chunk_days: 1               # generation chunk for open-ended runs
+live:
+  locations: ["PL-LOC-000001"]  # sites that use live sources when a stream's mode is live (hybrid)
+  open_meteo: {meta_poll_s: 300}
+  pse: {reports: [rce-pln, csdac-pln]}
+  entsoe: {enabled: false}      # needs EMS_ENTSOE_TOKEN
