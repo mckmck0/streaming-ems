@@ -9,6 +9,13 @@ guard on canned service lists (AC-011-44); the wait for a configured run, strict
 canned ``sys_invocation`` rows and canned state (AC-011-45); the offline side grouped by service
 (AC-011-47); ``configure`` with an idempotency key per object (AC-011-37). The Restate client is
 subclassed so that no request leaves the process.
+
+Spec 012 (AC-012-38, plan §9 F1): while it waits, the harness selects the suspect invocations in SQL
+(paused, failed, or retried ``STRICT_ATTEMPTS`` times; the stall query from one retry and with
+``backing-off``) instead of reading every invocation of the run. ``wait_run`` and ``wait_handled``
+stop with the error on any admin API status but 503, and keep polling after a connection error, a
+503, and any 5xx inside the 60 s window a kill by the harness opens (``Restate.note_kill``, which
+sets the monotonic ``kill_window_until``).
 """
 
 from __future__ import annotations
@@ -17,12 +24,14 @@ import dataclasses
 import json
 import socket
 import subprocess
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn
 
+import httpx
 import pytest
 
 from ems.actors import battery, ems, ingress_check, meter, strategy
@@ -348,8 +357,16 @@ class CannedRestate(stack.Restate):
         self.canned = {
             svc: {k: dict(v) for k, v in by.items()} for svc, by in (states or {}).items()
         }
+        self.asked: list[tuple[bool, int]] = []  # (suspect_only, min_retries) of each query
 
-    def invocations(self, run_id: str) -> list[dict[str, Any]]:
+    def invocations(
+        self,
+        run_id: str,
+        *,
+        suspect_only: bool = False,
+        min_retries: int = stack.STRICT_ATTEMPTS,
+    ) -> list[dict[str, Any]]:
+        self.asked.append((suspect_only, min_retries))
         return self.rows
 
     def handled(self, run_id: str, services: Sequence[str] = stack.KAFKA_FED) -> int:
@@ -678,3 +695,188 @@ def test_ac_011_44_stack_env_registers_the_app_after_closing_ingestion_and_befor
     assert names.index("register") < names.index("ingress")
     assert dict(calls)["register"] == (stack.registered_handlers(),)
     assert env.deployment == {"id": "dp_1"}
+
+
+# ── spec 012: suspect invocations in SQL; query errors stop the wait (AC-012-38) ────────────────
+
+SUSPECT_WHERE = (
+    f"starts_with(target_service_key, '{RUN_ID}:') AND "
+    "(status = 'paused' OR completion_result = 'failure' OR retry_count >= 4)"
+)
+RUN_PREFIX = f"starts_with(target_service_key, '{RUN_ID}:')"
+
+
+def _where(sql: str) -> str:
+    _, found, where = sql.partition(" WHERE ")
+    assert found, sql
+    return where.strip()
+
+
+def _recorded(rows: list[dict[str, Any]], call: Any) -> tuple[Any, list[str]]:
+    r = QueryRecorder(rows)
+    try:
+        return call(r), r.sql
+    finally:
+        r.close()
+
+
+def test_ac_012_38_failures_selects_the_suspect_invocations_in_sql() -> None:
+    assert stack.STRICT_ATTEMPTS == 4
+    rows = [CLEAN, PAUSED, RETRYING, KEEPS_FAILING]
+    got, sql = _recorded(rows, lambda r: r.failures(RUN_ID))
+    assert [_where(s) for s in sql] == [SUSPECT_WHERE]
+    assert got == [PAUSED, KEEPS_FAILING]  # still filtered in Python: SQL selects a superset
+
+
+def test_ac_012_38_the_stall_query_adds_backing_off_from_one_retry() -> None:
+    _, sql = _recorded([], lambda r: r.invocations(RUN_ID, suspect_only=True, min_retries=1))
+    where = _where(sql[-1])
+    head = f"{RUN_PREFIX} AND ("
+    assert where.startswith(head) and where.endswith(")"), where
+    assert set(where[len(head) : -1].split(" OR ")) == {
+        "status = 'paused'",
+        "completion_result = 'failure'",
+        "retry_count >= 1",
+        "status = 'backing-off'",
+    }
+
+
+def test_ac_012_38_invocations_without_suspect_only_reads_the_whole_run() -> None:
+    _, sql = _recorded([], lambda r: r.invocations(RUN_ID))
+    assert _where(sql[-1]) == RUN_PREFIX
+
+
+def test_ac_012_38_wait_run_reads_only_suspect_invocations(canned: list[CannedRestate]) -> None:
+    r = _restate(canned, rows=[CLEAN], handled=RECORDS, states=AT_END)
+    r.wait_run(RUN_ID, RECORDS, ENDS, timeout=-1.0)
+    assert r.asked, "wait_run read no invocations"
+    assert all(suspect_only for suspect_only, _ in r.asked), r.asked
+
+
+_QUERY_URL = "http://127.0.0.1:9070/query"
+
+
+def _status(code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", _QUERY_URL)
+    response = httpx.Response(code, request=request, text=f"status {code}")
+    return httpx.HTTPStatusError(f"{code} from /query", request=request, response=response)
+
+
+def _refused() -> httpx.ConnectError:
+    return httpx.ConnectError("connection refused", request=httpx.Request("POST", _QUERY_URL))
+
+
+class FlakyRestate(CannedRestate):
+    """A run at its end whose first queries fail as the admin API can fail, one error per query."""
+
+    def __init__(self, errors: Sequence[Exception]) -> None:
+        super().__init__(rows=[CLEAN], handled=RECORDS, states=AT_END)
+        self.errors = list(errors)
+        self.queries = 0
+
+    def _query(self) -> None:
+        self.queries += 1
+        if self.errors:
+            raise self.errors.pop(0)
+
+    def invocations(
+        self,
+        run_id: str,
+        *,
+        suspect_only: bool = False,
+        min_retries: int = stack.STRICT_ATTEMPTS,
+    ) -> list[dict[str, Any]]:
+        self._query()
+        return super().invocations(run_id, suspect_only=suspect_only, min_retries=min_retries)
+
+    def handled(self, run_id: str, services: Sequence[str] = stack.KAFKA_FED) -> int:
+        self._query()
+        return super().handled(run_id, services)
+
+
+WAITS = ("wait_run", "wait_handled")
+
+
+@pytest.fixture
+def flaky() -> Iterator[list[FlakyRestate]]:
+    made: list[FlakyRestate] = []
+    yield made
+    for client in made:
+        client.close()
+
+
+def _flaky(made: list[FlakyRestate], *errors: Exception) -> FlakyRestate:
+    client = FlakyRestate(errors)
+    made.append(client)
+    return client
+
+
+def _wait(r: FlakyRestate, which: str) -> float:
+    """One of the two waits; the timeout only guards the test, polling does not sleep."""
+    if which == "wait_run":
+        return r.wait_run(RUN_ID, RECORDS, ENDS, timeout=60.0, poll=0.0)
+    return r.wait_handled(RUN_ID, RECORDS, timeout=60.0, poll=0.0)
+
+
+@pytest.mark.parametrize("which", WAITS)
+def test_ac_012_38_a_500_stops_the_wait_with_the_error(
+    flaky: list[FlakyRestate], which: str
+) -> None:
+    r = _flaky(flaky, _status(500))
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        _wait(r, which)
+    assert raised.value.response.status_code == 500
+    assert r.queries == 1  # no second poll
+
+
+@pytest.mark.parametrize("which", WAITS)
+@pytest.mark.parametrize("code", [400, 404])
+def test_ac_012_38_a_4xx_stops_the_wait_even_inside_a_kill_window(
+    flaky: list[FlakyRestate], which: str, code: int
+) -> None:
+    r = _flaky(flaky, _status(code))
+    r.note_kill()
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        _wait(r, which)
+    assert raised.value.response.status_code == code
+
+
+@pytest.mark.parametrize("which", WAITS)
+@pytest.mark.parametrize("error", [_refused, lambda: _status(503)], ids=["connect", "503"])
+def test_ac_012_38_a_connection_error_or_a_503_keeps_the_wait_polling(
+    flaky: list[FlakyRestate], which: str, error: Any
+) -> None:
+    r = _flaky(flaky, error(), error())
+    assert _wait(r, which) >= 0.0
+    assert r.errors == []
+
+
+def test_ac_012_38_note_kill_opens_a_window_of_60_s(canned: list[CannedRestate]) -> None:
+    r = _restate(canned)
+    assert r.kill_window_until <= time.monotonic()  # closed until the harness kills something
+    before = time.monotonic()
+    r.note_kill()
+    after = time.monotonic()
+    assert before + 60.0 <= r.kill_window_until <= after + 60.0
+
+
+@pytest.mark.parametrize("which", WAITS)
+@pytest.mark.parametrize("code", [500, 502, 504])
+def test_ac_012_38_any_5xx_inside_the_kill_window_keeps_the_wait_polling(
+    flaky: list[FlakyRestate], which: str, code: int
+) -> None:
+    r = _flaky(flaky, _status(code), _refused(), _status(code))
+    r.note_kill()
+    assert _wait(r, which) >= 0.0
+    assert r.errors == []
+
+
+@pytest.mark.parametrize("which", WAITS)
+def test_ac_012_38_a_500_after_the_kill_window_stops_the_wait(
+    flaky: list[FlakyRestate], which: str
+) -> None:
+    r = _flaky(flaky, _status(500))
+    r.note_kill()
+    r.kill_window_until = time.monotonic() - 1.0  # the window has passed
+    with pytest.raises(httpx.HTTPStatusError):
+        _wait(r, which)

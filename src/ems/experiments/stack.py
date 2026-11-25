@@ -74,6 +74,9 @@ TOPIC_SERVICE = {t: INGRESS_TARGETS[svc][0] for svc, ts in INGRESS_TOPICS.items(
 STEP_INBOX = {"Ems": "acks", "Battery": "commands", "Meter": "flows"}  # strategies: "steps"
 CONFIGURED = ("Household", "Weather", "Ems", "Battery", "Meter")  # plus each strategy of the run
 STRICT_ATTEMPTS = 4  # failed attempts after which a strict wait calls an invocation failed
+# After a kill the harness itself caused, the admin API may answer with any 5xx while partitions
+# recover: a wait retries those for this long (spec 012, AC-012-38; the fault tier records them).
+KILL_WINDOW_S = 60.0
 _NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -224,6 +227,22 @@ class Restate:
         self.ingress = s.restate_ingress_url.rstrip("/")
         self.service_url = s.service_url
         self._http = httpx.Client(timeout=timeout)
+        self.kill_window_until = 0.0  # monotonic; in the past until the harness kills something
+
+    def note_kill(self) -> None:
+        """Open the window in which a wait retries any 5xx (a kill the harness caused)."""
+        self.kill_window_until = time.monotonic() + KILL_WINDOW_S
+
+    def transient(self, exc: httpx.HTTPError) -> bool:
+        """Worth another poll: a connection that failed, the query service still starting (503), or
+        any 5xx inside the window a kill by the harness opened. Anything else is a real error.
+        """
+        if isinstance(exc, httpx.TransportError):
+            return True
+        if not isinstance(exc, httpx.HTTPStatusError):
+            return False
+        code = exc.response.status_code
+        return code == 503 or (code >= 500 and time.monotonic() < self.kill_window_until)
 
     def close(self) -> None:
         self._http.close()
@@ -346,8 +365,11 @@ class Restate:
         start = time.monotonic()
         seen = -1
         while True:
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 seen = self.handled(run_id, services)
+            except httpx.HTTPError as exc:
+                if not self.transient(exc):
+                    raise
             if seen >= expected:
                 return time.monotonic() - start
             if time.monotonic() - start > timeout:
@@ -375,12 +397,29 @@ class Restate:
             if "log" in values
         }
 
-    def invocations(self, run_id: str) -> list[dict[str, Any]]:
-        """Every invocation of the run's objects: target, status, result, last failure, attempts."""
+    def invocations(
+        self, run_id: str, *, suspect_only: bool = False, min_retries: int = STRICT_ATTEMPTS
+    ) -> list[dict[str, Any]]:
+        """The invocations of the run's objects: target, status, result, last failure, attempts.
+
+        With ``suspect_only``, only those that are paused, failed or retried at least
+        ``min_retries`` times (and, below ``STRICT_ATTEMPTS``, backing off): the filter runs in SQL,
+        so a poll does not grow with the run (AC-012-38). It selects a superset of ``failed``.
+        """
+        where = f"starts_with(target_service_key, '{_check_name(run_id)}:')"
+        if suspect_only:
+            terms = [
+                "status = 'paused'",
+                "completion_result = 'failure'",
+                f"retry_count >= {int(min_retries)}",
+            ]
+            if min_retries < STRICT_ATTEMPTS:
+                terms.append("status = 'backing-off'")
+            where += f" AND ({' OR '.join(terms)})"
         return self.query(
-            "SELECT target_service_name, target_service_key, target_handler_name, status, "
+            "SELECT id, target_service_name, target_service_key, target_handler_name, status, "
             "invoked_by, completion_result, last_failure, retry_count FROM sys_invocation "
-            f"WHERE starts_with(target_service_key, '{_check_name(run_id)}:')"
+            f"WHERE {where}"
         )
 
     def configure(self, params: Mapping[str, Any]) -> None:
@@ -414,18 +453,22 @@ class Restate:
         """
         start = time.monotonic()
         while True:
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 failures = self.failures(run_id, strict=strict)
                 if failures:
                     raise RuntimeError(f"failed invocations in run {run_id}: {failures[:5]}")
                 if self.handled(run_id) >= records and self._at_end(run_id, ends):
                     return time.monotonic() - start
+            except httpx.HTTPError as exc:
+                if not self.transient(exc):
+                    raise
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"run {run_id} did not finish within {timeout:.0f} s")
             time.sleep(poll)
 
     def failures(self, run_id: str, *, strict: bool = True) -> list[dict[str, Any]]:
-        return [row for row in self.invocations(run_id) if failed(row, strict=strict)]
+        rows = self.invocations(run_id, suspect_only=True)
+        return [row for row in rows if failed(row, strict=strict)]
 
     def _at_end(self, run_id: str, ends: Mapping[str, Mapping[str, int]]) -> bool:
         for service, by_key in ends.items():
@@ -559,11 +602,15 @@ def close_stack_ingestion() -> list[str]:
     return running
 
 
-def kill_restate(timeout: float = 60.0) -> int:
-    """SIGKILL to the stack's Restate server; returns the container's exit code."""
+def kill_restate(timeout: float = 60.0, restate: Restate | None = None) -> int:
+    """SIGKILL to the stack's Restate server; returns the container's exit code. With ``restate``,
+    its waits retry any 5xx for ``KILL_WINDOW_S`` (``Restate.note_kill``).
+    """
     cid = container_of("restate")
     if cid is None:
         raise RuntimeError("the restate service has no container: run `make up`")
+    if restate is not None:
+        restate.note_kill()
     docker("kill", "--signal", "KILL", cid)
     wait_for(lambda: not container_state(cid).get("Running"), timeout, "restate still running")
     return int(container_state(cid)["ExitCode"])
