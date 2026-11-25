@@ -334,3 +334,55 @@ def test_ac_012_14_trace_drops_corrections_before_an_added_strategys_first_step(
         r = step_strategy(q, NB, r, s)
     assert r.dropped_corrections == 1
     assert (traced[NB][-1].state, traced[NB][-1].recent) == (r.state, r.recent)
+
+
+# ── spec 012: which record made each step releasable (release lag, AC-012-29) ───────────────────
+
+
+def _merged(location_id: str) -> list[tuple[str, bytes]]:
+    """One household's records and the market's prices, in emission (publication) order."""
+    from ems.contracts.envelope import to_json_bytes
+
+    return [
+        (s, to_json_bytes(e))
+        for s, e in generated().events
+        if s == "price" or e.location_id == location_id
+    ]
+
+
+def test_ac_012_29_released_by_releases_the_same_steps_as_fold() -> None:
+    p = run_params()
+    events = _merged(PV_SITE)
+    by = off.released_by(p, events)
+    g = generated()
+    folded = fold(
+        p,
+        g.raw("production", PV_SITE),
+        g.raw("consumption", PV_SITE),
+        g.raw("weather_forecast", PV_SITE),
+        g.raw("price"),
+    )
+    assert list(by) == [s.t for s in folded.steps]
+
+
+def test_ac_012_29_a_step_is_released_by_the_last_input_it_waited_for() -> None:
+    from ems.assembler.mapping import parse, reading
+
+    p = run_params()
+    events = _merged(PV_SITE)
+    by = off.released_by(p, events)
+    own: dict[int, list[int]] = {}
+    first_forecast = next(i for i, (s, _) in enumerate(events) if s == "weather_forecast")
+    for i, (s, raw) in enumerate(events):
+        if s in ("production", "consumption"):
+            r = reading(parse(raw))
+            assert r is not None
+            own.setdefault(r.t, []).append(i)
+    for t, i in by.items():
+        assert i >= max(own[t]), (t, i)  # never before its own readings
+        if i != max(own[t]):  # then by a price or forecast it waited for, published later
+            assert events[i][0] in ("price", "weather_forecast"), (t, events[i][0])
+    # The day's first steps wait for its first forecast run (none is published before the window).
+    assert [by[t] for t in range(FIRST, FIRST + 7)] == [first_forecast] * 7
+    # 13:00 local waits for the next day's curve: the price watermark stops there until it comes.
+    assert events[by[step_at("2026-10-20T11:00")]][0] == "price"

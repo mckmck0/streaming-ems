@@ -429,7 +429,7 @@ exactly-once check passes.
 |---|---|
 | `records_per_s`, `invocations_per_s` | records handled (Σ `n`) and kept timing lines per wall second, from the first publish to the end |
 | `decision_latency_ms` | per household-step: the `ns` of the first `Battery` line sending `["Ems", t]` minus that of the first `Household` line sending `["Ems", t]`. Reported as p50, p99, max, the count and the number missing; steps inside a recovery window are left out |
-| `release_lag_s` | the `Household` release `ns` minus `paced_from_unix + (900·(t+1) + meter_delay − 900·first_step)/S` |
+| `release_lag_s` | the `Household` release `ns` minus the `ingested_at` of the record that made the step releasable: the household's records and its market's prices, merged in publication order through the same join (`offline.released_by`). Amended 2026-11-25, after the first `sys-recovery` run: counting from the reading's due time put each household's first 7 steps, which wait for the first forecast run, at 13–70 s at speed 96 (p99 66 s against 9.4 s), so no speed was sustained |
 | `publisher_lateness_s` | how far the publisher fell behind its own schedule (p99, max; `pace` records it in the generator's manifest), with the consumer-group lag and the container CPU beside it, so a speed that is not sustained shows whether the publisher, the emulated ingress, Restate or the SDK service set the limit |
 | `sustained` | AC-012-31 |
 | `recovery` | per kill: `healthy_s`, `first_commit_s` and `caught_up_s` (release lag back under the pre-kill p99) |

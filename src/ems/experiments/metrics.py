@@ -146,35 +146,14 @@ def decision_latency_ms(lines: Sequence[Line], windows: Sequence[tuple[int, int]
     return stats(values, missing)
 
 
-def due_unix(
-    t: int, *, paced_from_unix: float, speed: float, first_step: int, meter_delay_s: float
-) -> float:
-    """When the reading of slot ``t`` was due on the publication schedule:
-    ``paced_from_unix + (900·(t+1) + meter_delay_s - 900·first_step) / speed``.
-    """
-    return paced_from_unix + (QUARTER_S * (t + 1) + meter_delay_s - QUARTER_S * first_step) / speed
-
-
 def release_lags_s(
-    lines: Sequence[Line],
-    *,
-    paced_from_unix: float,
-    speed: float,
-    first_step: int,
-    meter_delay_s: float,
+    lines: Sequence[Line], due: Mapping[tuple[str, int], float]
 ) -> dict[tuple[str, int], float]:
-    """Per released household-step, the release time minus when its reading was due."""
-    return {
-        (key, t): ns / 1e9
-        - due_unix(
-            t,
-            paced_from_unix=paced_from_unix,
-            speed=speed,
-            first_step=first_step,
-            meter_delay_s=meter_delay_s,
-        )
-        for (key, t), ns in releases(lines).items()
-    }
+    """Per released household-step, the release time minus ``due[(key, t)]``: the publication
+    time (``ingested_at``) of the record that made the step releasable (``offline.released_by``),
+    so a step that waited for a forecast or a price counts from that record, not from its reading.
+    """
+    return {step: ns / 1e9 - due[step] for step, ns in releases(lines).items() if step in due}
 
 
 def sustained(

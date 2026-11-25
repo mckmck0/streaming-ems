@@ -29,7 +29,7 @@ from typing import Any, Protocol
 import httpx
 
 from ems.actors.messages import StrategyChange
-from ems.assembler.offline import NO_CHANGES, Offline, fold
+from ems.assembler.offline import NO_CHANGES, Offline, fold, released_by
 from ems.assembler.params import RunParams
 from ems.assembler.schedule import Change, Schedule, strategy_params
 from ems.domain.units import QUARTERS_PER_HOUR
@@ -460,19 +460,14 @@ def _metrics(
         out["release_lag_s"] = None
         out["live_release_delay_s"] = dataclasses.asdict(metrics.live_release_delay_s(lines))
         return out
-    lags = metrics.release_lags_s(
-        lines,
-        paced_from_unix=start_unix,
-        speed=spec.run.speed,
-        first_step=first,
-        meter_delay_s=0.0,
-    )
+    due = release_due(params, records)
+    lags = metrics.release_lags_s(lines, due)
     recoveries = [metrics.recovery(k, lines, lags) for k in kills]
     windows = [metrics.recovery_window(k, r) for k, r in zip(kills, recoveries, strict=True)]
     out["decision_latency_ms"] = dataclasses.asdict(metrics.decision_latency_ms(lines, windows))
     out["release_lag_s"] = dataclasses.asdict(metrics.stats(list(lags.values())))
     out["recovery"] = [dataclasses.asdict(r) for r in recoveries]
-    last_publish = start_unix + QUARTER_S * (end - first) / spec.run.speed
+    last_publish = max(due.values(), default=start_unix)
     rel = metrics.releases(lines)
     last_release = max(rel.values(), default=0) / 1e9
     out["sustained"] = dataclasses.asdict(
@@ -484,6 +479,40 @@ def _metrics(
         )
     )
     return out
+
+
+def release_due(
+    params: Mapping[str, RunParams], records: Sequence[stack.Record]
+) -> dict[tuple[str, int], float]:
+    """``(key, t)`` -> the publication time (unix s, the record's ``ingested_at``) of the record
+    that made step ``t`` of household ``key`` releasable: the household's records and its market's
+    prices, merged in publication order, through ``offline.released_by``.
+    """
+    by_key: dict[str, list[stack.Record]] = {}
+    for rec in records:
+        by_key.setdefault(rec.key, []).append(rec)
+    out: dict[tuple[str, int], float] = {}
+    for key, p in params.items():
+        events: list[tuple[float, str, bytes]] = []
+        for rec in (*by_key.get(key, ()), *by_key.get(p.market_key, ())):
+            stream = stack.stream_of(rec)
+            published = _ingested_unix(rec.value)
+            if stream is not None and published is not None:
+                events.append((published, stream, rec.value))
+        events.sort(key=lambda e: e[0])  # stable: partition order within a tie
+        released = released_by(p, [(stream, raw) for _, stream, raw in events])
+        out |= {(key, t): events[i][0] for t, i in released.items()}
+    return out
+
+
+def _ingested_unix(raw: bytes) -> float | None:
+    """A record's ``ingested_at`` (the generator's wall clock when it published it); None for a
+    record that does not parse (the actors count it and skip it, and so does the fold).
+    """
+    try:
+        return datetime.fromisoformat(json.loads(raw)["ingested_at"]).timestamp()
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 def _reason(exc: Exception) -> str:

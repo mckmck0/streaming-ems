@@ -99,6 +99,39 @@ def trace(
     return out
 
 
+def released_by(params: RunParams, events: Sequence[tuple[str, bytes]]) -> dict[int, int]:
+    """Step ``t`` -> the index of the record in ``events`` after which it was released.
+
+    ``events`` are one household's records and its market's prices, each with its stream name
+    (``production``, ``consumption``, ``weather_forecast``, ``price``), merged in the order they
+    were published. The records go through the same functions as ``fold``, one by one, so the
+    record that released a step is the last input it waited for, whatever the stream (the release
+    lag of spec 012 counts from that record's publication).
+    """
+    j = start(params)
+    price_stream, forecast_stream = PriceStream(), ForecastStream()
+    out: dict[int, int] = {}
+    for i, (stream, raw) in enumerate(events):
+        released: Sequence[Step] = ()
+        if stream == "price":
+            c = curve(parse(raw))
+            if c is not None:
+                price_stream, accepted = price_apply(price_stream, c)
+                if accepted is not None:
+                    j, released = on_curves(params, j, price_stream.covered, (accepted,))
+        elif stream == "weather_forecast":
+            r = run(parse(raw))
+            if r is not None:
+                forecast_stream, accepted_run = forecast_apply(forecast_stream, r)
+                if accepted_run is not None:
+                    j, released = on_run(params, j, forecast_stream.covered, accepted_run)
+        elif stream in ("production", "consumption"):
+            j, released = on_reading(params, j, reading(parse(raw)))
+        for step_ in released:
+            out[step_.t] = i
+    return out
+
+
 def fold(
     params: RunParams,
     production: Sequence[bytes],

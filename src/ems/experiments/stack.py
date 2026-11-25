@@ -843,10 +843,18 @@ def records_by_stream(records: Iterable[Record], key: str) -> dict[str, list[byt
     out: dict[str, list[bytes]] = defaultdict(list)
     for rec in records:
         if rec.key == key:
-            for t, name in _STREAM_OF_TOPIC.items():
-                if rec.meta[0].endswith(t):
-                    out[name].append(rec.value)
+            name = stream_of(rec)
+            if name is not None:
+                out[name].append(rec.value)
     return out
+
+
+def stream_of(rec: Record) -> str | None:
+    """The stream a record's topic carries (its name without the run's prefix)."""
+    for t, name in _STREAM_OF_TOPIC.items():
+        if rec.meta[0].endswith(t):
+            return name
+    return None
 
 
 _STREAM_OF_TOPIC = {topic: stream.value for stream, topic in STREAM_TOPICS.items()}

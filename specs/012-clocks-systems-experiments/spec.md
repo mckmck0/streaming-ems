@@ -311,7 +311,8 @@ Runner, export and metrics
   reported with the recovery, not in the percentiles), and from the runner's events: records/s and
   invocations/s; decision latency per household-step (the `Battery` commit that sends `Ack t` minus the
   `Household` commit that sends `Step t` to `Ems`) with p50, p99, max and the number of steps without both
-  lines; release lag against the publish schedule, beside the publisher's own lateness behind that schedule,
+  lines; release lag (the release minus the publication time of the record that made the step releasable,
+  amended 2026-11-25), beside the publisher's own lateness behind its schedule,
   the consumer-group lag and each container's CPU, so that a speed that is not sustained shows where it stops;
   retries; the forecast age at each step; peak memory per container and the CPU and RSS of the SDK service's
   whole process group; state bytes per service at the end.
@@ -321,7 +322,7 @@ Runner, export and metrics
   durations.
 - **AC-012-31**: WHEN a config sweeps speeds, THE SYSTEM SHALL mark a speed `S` sustained when 99 % of steps
   have a release lag of at most 900 s / `S` and the last step is released within 2 × 900 s / `S` after the last
-  record is published, and SHALL report the highest sustained speed.
+  record that releases a step is published, and SHALL report the highest sustained speed.
 - **AC-012-32**: WHILE a run is in progress, THE SYSTEM SHALL detect its end from the timing log (every managed
   `Meter` has handled the last step the offline join releases; in live, the step before `end_step`) and read the
   `state` table at most once every 5 s; after the end it SHALL wait, through one SQL check, until every

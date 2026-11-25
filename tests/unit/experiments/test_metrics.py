@@ -11,9 +11,6 @@ every expected value is exact in binary floating point.
 from __future__ import annotations
 
 import json
-from typing import Any
-
-import pytest
 
 from ems.experiments import metrics
 from ems.experiments.metrics import KillEvent, Line, Recovery, Stats, Sustained
@@ -160,34 +157,26 @@ def test_ac_012_29_a_step_released_inside_a_recovery_window_is_left_out() -> Non
 
 # ── release lag (AC-012-29) and the sustained rule (AC-012-31) ───────────────────────────────────
 
-PACED: dict[str, Any] = {
-    "paced_from_unix": 1000.0,
-    "speed": 96.0,
-    "first_step": 100,
-    "meter_delay_s": 60.0,
-}
 
-
-@pytest.mark.parametrize(("t", "due"), [(100, 1010.0), (103, 1038.125), (195, 1900.625)])
-def test_ac_012_29_due_unix_is_when_the_reading_of_a_slot_is_due_on_the_schedule(
-    t: int, due: float
-) -> None:
-    # paced_from + (900·(t+1) + meter_delay - 900·first_step) / speed
-    assert metrics.due_unix(t, **PACED) == due
-
-
-def test_ac_012_29_release_lag_is_the_release_minus_the_due_time() -> None:
+def test_ac_012_29_release_lag_is_the_release_minus_its_releasing_publication() -> None:
+    # ``due``: (key, t) -> the publication time of the record that made the step releasable.
+    due = {(A, 100): 1010.0, (B, 103): 1038.125, (A, 103): 1038.125, (A, 104): 1050.0}
     lines = [
-        hh(1_012_500_000_000, A, 100),  # due 1010.0, released 1012.5
-        hh(1_038_125_000_000, B, 103),  # released exactly when due
+        hh(1_012_500_000_000, A, 100),  # released 2.5 s after its releasing record
+        hh(1_038_125_000_000, B, 103),  # released at the same instant
         hh(1_040_000_000_000, A, 103),
-        bat(1_041_000_000_000, A, 103),  # no release line: no lag
+        bat(1_041_000_000_000, A, 104),  # no release line: no lag
     ]
-    assert metrics.release_lags_s(lines, **PACED) == {
+    assert metrics.release_lags_s(lines, due) == {
         (A, 100): 2.5,
         (B, 103): 0.0,
         (A, 103): 1.875,
     }
+
+
+def test_ac_012_29_a_release_without_its_record_is_left_out() -> None:
+    # Cannot happen when ``due`` comes from the same records; a lag is never invented for it.
+    assert metrics.release_lags_s([hh(1_000_000_000_000, A, 7)], {}) == {}
 
 
 def _lags(within: int, over: int, at_s: float, over_s: float) -> dict[tuple[str, int], float]:

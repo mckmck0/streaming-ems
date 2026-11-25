@@ -34,6 +34,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from ems.actors.messages import StrategyChange
+from ems.assembler.offline import released_by
 from ems.assembler.params import RunParams
 from ems.assembler.schedule import Change, Schedule, strategy_params, windows
 from ems.contracts.time import quarter_index
@@ -256,11 +257,48 @@ class FakeOps:
         return self.record_list()
 
     def record_list(self) -> list[stack.Record]:
-        """The records without a log entry (for the tests' own checks)."""
+        """The records without a log entry (for the tests' own checks). In sim each carries as
+        ``ingested_at`` the fake time it was published at: its emission time on the schedule.
+        """
+        gen = self.gen()
         out = []
-        for (topic, key), values in sorted(self.gen().records.items()):
-            out += [stack.Record(key, (topic, 0, i), v) for i, v in enumerate(values)]
+        for (topic, key), values in sorted(gen.records.items()):
+            times = gen.emitted[(topic, key)]
+            out += [
+                stack.Record(key, (topic, 0, i), self._stamped(v, times[i]))
+                for i, v in enumerate(values)
+            ]
         return out
+
+    def _published_unix(self, emit_at: datetime) -> float | None:
+        if not self.publications or self.publications[-1].spec.run.mode == "live":
+            return None
+        pub = self.publications[-1]
+        return pub.started_unix + (emit_at - self.start).total_seconds() / pub.speed
+
+    def _stamped(self, value: bytes, emit_at: datetime) -> bytes:
+        at = self._published_unix(emit_at)
+        if at is None:
+            return value
+        doc = json.loads(value)
+        doc["ingested_at"] = datetime.fromtimestamp(at, UTC).isoformat()
+        return json.dumps(doc).encode()
+
+    def release_due(self, key: str, p: RunParams) -> dict[int, float]:
+        """Step -> the fake publication time of the record that made it releasable (the household's
+        and the market's records merged by emission time, through ``offline.released_by``).
+        """
+        gen = self.gen()
+        events: list[tuple[datetime, str, bytes]] = []
+        for (topic, k), values in gen.records.items():
+            if k in (key, p.market_key):
+                stream = stack.stream_of(stack.Record(k, (topic, 0, 0), b""))
+                if stream is not None:
+                    times = gen.emitted[(topic, k)]
+                    events += [(e, stream, v) for e, v in zip(times, values, strict=True)]
+        events.sort(key=lambda e: e[0])
+        by = released_by(p, [(stream, v) for _, stream, v in events])
+        return {t: self._published_unix(events[i][0]) or 0.0 for t, i in by.items()}
 
     def household_params(self) -> dict[str, RunParams]:
         return {k: p for (svc, k), p in self.configured.items() if svc == "Household"}
@@ -289,12 +327,12 @@ class FakeOps:
         lines: list[Line] = []
         for key, p in sorted(self.household_params().items()):
             end = self.net().state("Household", key).join.next
+            due = {} if p.mode == "live" else self.release_due(key, p)
             for t in range(p.first_step, end):
                 if p.mode == "live":
                     rel = 900.0 * (t + 1) + p.grace_s + 1.0
                 else:
-                    due = pub.started_unix + (900.0 * (t + 1 - p.first_step) + 60.0) / pub.speed
-                    rel = due + self.release_delay_s.get(pub.speed, RELEASE_S)
+                    rel = due[t] + self.release_delay_s.get(pub.speed, RELEASE_S)
                 sent = ((p.live, t), ("Ems", t))
                 lines.append(
                     Line(_ns(rel), "Household", "on_measurement", key, f"h{key}{t}", None, sent)
@@ -701,6 +739,17 @@ def test_ac_012_29_the_summary_reports_the_systems_metrics(sim_run: SimRun) -> N
     ):
         assert key in summary, key
     assert summary["retries"] == 0
+
+
+def test_ac_012_29_release_lag_counts_from_the_record_that_made_the_step_releasable(
+    sim_run: SimRun,
+) -> None:
+    # The fake releases every step RELEASE_S after the publication of its releasing record (the
+    # first steps after the first forecast run): a lag from the reading's due time would be larger.
+    lag = _summary(sim_run.out)["release_lag_s"]
+    assert lag["missing"] == 0 and lag["count"] > 0
+    assert lag["max"] == pytest.approx(RELEASE_S, abs=1e-6)
+    assert _summary(sim_run.out)["sustained"]["sustained"] is True
 
 
 # ── failures ─────────────────────────────────────────────────────────────────────────────────────

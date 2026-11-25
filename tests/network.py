@@ -115,6 +115,8 @@ class Generated:
     params: Mapping[str, RunParams]  # household_key -> parameters, managed sites only
     market_key: str
     records: Mapping[tuple[str, str], tuple[bytes, ...]]  # (topic, key) -> values, partition order
+    # (topic, key) -> each record's emission time on the generator's schedule, parallel to records
+    emitted: Mapping[tuple[str, str], tuple[datetime, ...]] = MappingProxyType({})
 
     def of(self, topic: str, key: str) -> tuple[bytes, ...]:
         return self.records.get((topic, key), ())
@@ -200,13 +202,16 @@ def generate(
         fault_cfg = FaultConfig.from_dict({**cfg.faults, "enabled": True})
         source = apply_faults(source, fault_cfg, cfg.seed)
     records: dict[tuple[str, str], list[bytes]] = {}
-    for _, _, build in source:
+    emitted: dict[tuple[str, str], list[datetime]] = {}
+    for emit_at, _, build in source:
         event = build(INGESTED_AT)
         records.setdefault(route(event), []).append(to_json_bytes(event))
+        emitted.setdefault(route(event), []).append(emit_at)
     return Generated(
         managed_params(start, hours, late_slots, run_id),
         scoped(run_id, "PL:RCE"),
         MappingProxyType({k: tuple(v) for k, v in records.items()}),
+        MappingProxyType({k: tuple(v) for k, v in emitted.items()}),
     )
 
 

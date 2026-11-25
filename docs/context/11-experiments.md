@@ -131,10 +131,13 @@ A run that fails is recorded with `status: failed` and its reason; the next run 
 - `decision_latency_ms`: per household-step, `Battery`'s commit that sends the `Ack` of `t` minus `Household`'s
   commit that releases `t`; p50, p99 (nearest rank), max; steps inside a recovery window are left out, steps
   with one side only count as missing.
-- `release_lag_s`: a step's release time minus when its reading was due on the publication schedule
-  (`paced_from_unix + (900·(t+1) − 900·first_step)/S`).
+- `release_lag_s`: a step's release time minus the publication time (`ingested_at`) of the record that made it
+  releasable, found by merging the household's records and its market's prices in publication order through the
+  same join (`ems.assembler.offline.released_by`). So a step that waited for a forecast run or a price curve
+  counts from that record: the first steps of a window wait for its first forecast run (about 2 h of data time),
+  and counting from their readings would charge that wait to the system.
 - `sustained`: speed `S` is sustained when the p99 release lag is at most `900/S` s and the last step is released
-  within `2·900/S` s after the last record is published.
+  within `2·900/S` s after the last record that releases a step is published.
 - `recovery` per kill: kill → healthy, healthy → first commit, first commit → the first release whose lag is back
   under the pre-kill p99.
 - `records_per_s` and `invocations_per_s` over the wall span; `retries` (invocations with more than one line,
