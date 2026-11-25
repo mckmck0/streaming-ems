@@ -95,6 +95,7 @@ services:
       GITHUB_RELEASE_INFO_ENABLED: "false"
     ports:
       - "127.0.0.1:8088:8080"                      # 8080 is reserved for the Restate ingress
+    mem_limit: 512m                                # peak 405 MiB; every long-running service has a limit (spec 012)
     depends_on:
       kafka-init:
         condition: service_completed_successfully  # also makes `up --wait` wait for the one-shot job
@@ -137,6 +138,12 @@ services:
       RESTATE_NODE_NAME: "restate-1"         # fixed: the node finds its data under /restate-data/<node name>
       RESTATE_CLUSTER_NAME: "ems"
       RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE: "512 MiB"
+      # The other memory pools default to 1.5 GiB (invoker), 1 GiB (query engine) and 250 MiB (Bifrost record
+      # cache), above mem_limit together. Their sum here (1.5 GiB) plus the runtime stays under it
+      # (https://docs.restate.dev/server/memory; spec 012, risk K15).
+      RESTATE_WORKER__INVOKER__MEMORY_LIMIT: "512 MiB"
+      RESTATE_ADMIN__QUERY_ENGINE__MEMORY_SIZE: "384 MiB"
+      RESTATE_BIFROST__RECORD_CACHE_MEMORY_SIZE: "128 MiB"
       # Journals of completed invocations: 1 d in development, 0 in experiments and live (spec 012, risk A6).
       RESTATE_DEFAULT_JOURNAL_RETENTION: "${EMS_RESTATE_JOURNAL_RETENTION:-1d}"
     ports:

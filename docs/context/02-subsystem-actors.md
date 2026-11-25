@@ -10,8 +10,9 @@ parameters ADR 0019.
 ### Runtime and SDK service
 
 - Restate server `1.8.1-hotfix.2` in compose (service `restate`, pins in `05-deploy-and-infra.md`): one node,
-  node name `restate-1`, cluster `ems`, RocksDB memory 512 MiB (`RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE`, confirmed
-  with `restate-server --dump-config`), data on the named volume `restate-data`. Ingress `127.0.0.1:8080`,
+  node name `restate-1`, cluster `ems`, memory pools sized to fit its 2 GiB container (RocksDB 512 MiB, invoker
+  512 MiB, query engine 384 MiB, Bifrost record cache 128 MiB; spec 012, confirmed with
+  `restate-server --dump-config`), data on the named volume `restate-data`. Ingress `127.0.0.1:8080`,
   admin API and UI `127.0.0.1:9070`; the node port 5122 is not published. Healthy when the admin `/health` and
   the ingress `/restate/health` both answer 200.
 - The SDK service is `ems.actors.app`, served by hypercorn on `127.0.0.1:9080` (`make dev`, with `--reload`).
