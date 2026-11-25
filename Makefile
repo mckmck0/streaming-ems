@@ -8,7 +8,7 @@ SHELL := /bin/bash
 
 .PHONY: help install format lint type-check test test-unit test-integration test-e2e test-fault \
         report-coverage ci clean up down reset topics topics-describe gen gen-fast gen-backfill tail \
-        validate schemas gen-live record replay stats bench history register dev spike measure
+        validate schemas gen-live record replay stats bench history register dev spike measure exp
 
 help:
 	@echo ""
@@ -177,6 +177,14 @@ measure:   # LOCATIONS= and DAYS= override the mode's defaults (skew 100 x 2, ba
 	uv run python jobs/ingress_measure.py $(MODE) $(if $(LOCATIONS),--locations $(LOCATIONS),) $(if $(filter command line environment,$(origin DAYS)),--days $(DAYS),)
 spike:
 	uv run python jobs/spike_repro.py A B C
+# exp (spec 012): one experiment config, each run on a fresh stack (Kafka and Restate volumes wiped).
+exp:
+	@test -n "$(NAME)" || { echo "usage: make exp NAME=<experiment-id> [CONFIRM=yes]"; exit 1; }
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+	  read -r -p "make exp wipes the Kafka and Restate volumes before every run. Type yes to continue: " ans; \
+	  [ "$$ans" = "yes" ] || { echo "aborted"; exit 1; }; \
+	fi
+	uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml --yes
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)
@@ -212,11 +220,6 @@ spike:
 # 	curl -fsS -X POST $(RESTATE_ADMIN)/deployments \
 # 	  -H "content-type: application/json" \
 # 	  -d '{"uri": "$(SERVICE_URL)", "force": $(FORCE)}'
-
-# ── Spec: experiment harness ──
-# exp:
-# 	@test -n "$(NAME)" || { echo "usage: make exp NAME=<experiment-id>"; exit 1; }
-# 	uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml
 
 # ── Optional spec (started only once every mandatory spec is evaluated; gate in docs/context/00-overview.md): ──
 # ── Helm deployment, kind + Helm 4. Never target a context other than kind-$(KIND_CLUSTER). ──

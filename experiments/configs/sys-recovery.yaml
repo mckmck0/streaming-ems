@@ -1,0 +1,19 @@
+# Validation run (spec 012, AC-012-30, -33, -36): kill -9 of the SDK service and of the server mid-run.
+id: sys-recovery
+hypothesis: >-
+  After kill -9 of the SDK service and of the Restate server, every state equals the offline side;
+  the recovery is measured by phase.
+data:
+  kind: synthetic
+  start: "2026-06-03T00:00:00Z"
+  days: 1
+  locations: 350
+  households: 100
+run:
+  strategies: [NoBattery, SelfConsumption]
+  live: SelfConsumption
+  speed: 96
+kills:
+  - {target: sdk, at: 0.3}
+  - {target: server, at: 0.7}
+repetitions: 2

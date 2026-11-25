@@ -1,0 +1,16 @@
+# Validation run (spec 012, AC-012-36): the live deadline in real time, with faults.
+id: sys-live
+hypothesis: >-
+  In live mode every step is released by its end plus the grace plus 5 s, missing readings become
+  estimates, and the real battery equals the SelfConsumption shadow.
+data:
+  kind: synthetic
+  hours: 2
+  locations: 50
+  households: 10
+  faults: true
+run:
+  strategies: [NoBattery, SelfConsumption]
+  live: SelfConsumption
+  mode: live
+  grace_s: 120

@@ -16,6 +16,16 @@ Spec 012 (AC-012-38, plan §9 F1): while it waits, the harness selects the suspe
 stop with the error on any admin API status but 503, and keep polling after a connection error, a
 503, and any 5xx inside the 60 s window a kill by the harness opens (``Restate.note_kill``, which
 sets the monotonic ``kill_window_until``).
+
+Spec 012, the experiment runner's plumbing (plan §7; AC-012-17, -21, -25, -29, -37):
+- the ``Publisher`` command lines and environment, started with ``Popen`` without blocking;
+- ``reset_stack``, with compose and docker replaced by recorders;
+- ``run_ends`` with strategy schedules; the ``ems-exp-`` ingress project;
+- the SDK service's process group sampled with ``ps`` and followed across restarts;
+- ``docker stats`` CPU, the restate cgroup's anonymous memory and the consumer-group lag;
+- the offset between the host and Docker VM clocks.
+The samplers run as threads with ``interval=0`` against fakes, stopped once the fakes have answered
+enough samples.
 """
 
 from __future__ import annotations
@@ -24,12 +34,14 @@ import dataclasses
 import json
 import socket
 import subprocess
+import sys
+import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NoReturn
+from typing import Any, ClassVar, NoReturn
 
 import httpx
 import pytest
@@ -40,7 +52,7 @@ from ems.actors.reorder import Inbox
 from ems.actors.serde import serde_for
 from ems.assembler.params import RunParams
 from ems.experiments import stack
-from ems.experiments.runs import managed_params
+from ems.experiments.runs import managed_params, pse_table
 from ems.settings import EmsSettings
 
 RUN_ID = "r1"
@@ -220,7 +232,11 @@ def test_ac_011_45_run_ends_cover_each_strategy_ems_battery_and_meter() -> None:
 @pytest.fixture(scope="module")
 def params() -> dict[str, RunParams]:
     return managed_params(
-        run_id=RUN_ID, start=datetime(2026, 10, 20, tzinfo=UTC), days=1, locations=10
+        run_id=RUN_ID,
+        start=datetime(2026, 10, 20, tzinfo=UTC),
+        days=1,
+        locations=10,
+        rcem=pse_table(),
     )
 
 
@@ -880,3 +896,453 @@ def test_ac_012_38_a_500_after_the_kill_window_stops_the_wait(
     r.kill_window_until = time.monotonic() - 1.0  # the window has passed
     with pytest.raises(httpx.HTTPStatusError):
         _wait(r, which)
+
+
+# ── spec 012: the experiment runner's plumbing (AC-012-17, -21, -29, -37; plan §7) ──────────────
+
+
+def _ems_gen() -> str:
+    return str(Path(sys.executable).with_name("ems-gen"))
+
+
+def _publisher(tmp_path: Path, mode: str, **kwargs: Any) -> stack.Publisher:
+    return stack.Publisher(
+        EmsSettings(),
+        PREFIX,
+        RUN_ID,
+        mode=mode,
+        start="2026-06-03T00:00:00Z",
+        end="2026-06-04T00:00:00Z",
+        locations=350,
+        data_dir=tmp_path / "data",
+        log_path=tmp_path / "logs" / "publisher.log",
+        **kwargs,
+    )
+
+
+TAIL = ["--run-id", RUN_ID, "--locations", "350"]
+WINDOW = ["--start", "2026-06-03T00:00:00Z", "--end", "2026-06-04T00:00:00Z"]
+
+
+def test_ac_012_21_publisher_accelerated_command_line(tmp_path: Path) -> None:
+    pub = _publisher(tmp_path, "accelerated", speed=96.0)
+    assert pub.command() == [
+        _ems_gen(), "run", "--mode", "accelerated", *WINDOW, "--speed", "96.0", *TAIL
+    ]  # fmt: skip
+
+
+def test_ac_012_21_publisher_backfill_and_realtime_have_no_speed(tmp_path: Path) -> None:
+    assert _publisher(tmp_path, "backfill").command() == [
+        _ems_gen(), "run", "--mode", "backfill", *WINDOW, *TAIL
+    ]  # fmt: skip
+    # Realtime publishes until --end (the live runner path stops it before the checks).
+    assert _publisher(tmp_path, "realtime", profile="live").command() == [
+        _ems_gen(), "run", "--mode", "realtime", *WINDOW, *TAIL
+    ]  # fmt: skip
+
+
+def test_ac_012_21_publisher_adds_faults_and_config_when_given(tmp_path: Path) -> None:
+    config = tmp_path / "generator.faults.yaml"
+    cmd = _publisher(tmp_path, "accelerated", speed=192.0, faults=True, config=config).command()
+    base = [_ems_gen(), "run", "--mode", "accelerated", *WINDOW, "--speed", "192.0", *TAIL]
+    assert cmd[: len(base)] == base
+    assert cmd[len(base) :] == ["--faults", "--config", str(config)]
+
+
+@pytest.mark.parametrize("profile", ["sim", "live"])
+def test_ac_012_21_publisher_env_names_kafka_topics_and_data_dir(
+    tmp_path: Path, profile: str
+) -> None:
+    env = _publisher(tmp_path, "accelerated", speed=96.0, profile=profile).env()
+    assert {k: env[k] for k in ENV_KEYS} == {
+        "EMS_KAFKA_BOOTSTRAP": EmsSettings().kafka_bootstrap,
+        "EMS_TOPICS_PROFILE": profile,
+        "EMS_TOPIC_PREFIX": PREFIX,
+        "EMS_DATA_DIR": str(tmp_path / "data"),
+    }
+
+
+ENV_KEYS = ("EMS_KAFKA_BOOTSTRAP", "EMS_TOPICS_PROFILE", "EMS_TOPIC_PREFIX", "EMS_DATA_DIR")
+
+
+class FakePopen:
+    """A child that never runs: records how it was started and whether anyone waited for it."""
+
+    made: ClassVar[list[FakePopen]] = []
+
+    def __init__(self, args: Sequence[str], **kwargs: Any) -> None:
+        self.args = list(args)
+        self.kwargs = kwargs
+        self.pid = 424242
+        self.returncode: int | None = None
+        self.waited = False
+        FakePopen.made.append(self)
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.waited = True
+        self.returncode = 0 if self.returncode is None else self.returncode
+        return self.returncode
+
+    def communicate(self, *args: Any, **kwargs: Any) -> NoReturn:
+        pytest.fail("Publisher.start must not block on the child's output")
+
+
+@pytest.fixture
+def popen(monkeypatch: pytest.MonkeyPatch) -> list[FakePopen]:
+    FakePopen.made = []
+
+    def blocking(*args: Any, **kwargs: Any) -> NoReturn:
+        pytest.fail("Publisher.start must not run the child to completion")
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(subprocess, "run", blocking)
+    monkeypatch.setattr(stack.time, "time", lambda: 1234.5)
+    return FakePopen.made
+
+
+def test_ac_012_21_publisher_starts_without_blocking(
+    tmp_path: Path, popen: list[FakePopen]
+) -> None:
+    pub = _publisher(tmp_path, "accelerated", speed=96.0)
+    assert pub.start() is pub
+    (child,) = popen
+    assert child.args == pub.command()
+    assert not child.waited
+    env = child.kwargs["env"]
+    assert {k: env[k] for k in ENV_KEYS} == {k: pub.env()[k] for k in ENV_KEYS}
+    assert pub.started_unix == 1234.5
+    assert pub.running is True
+    child.returncode = 0
+    assert pub.running is False
+    assert pub.wait(timeout=1.0) == 0
+
+
+def test_ac_012_21_publisher_manifest_is_the_generators_run_manifest(tmp_path: Path) -> None:
+    pacing = {"paced_from_unix": 1234.5, "speed": 96.0, "lateness": {"p99_s": 0.01, "max_s": 0.2}}
+    path = tmp_path / "data" / "runs" / RUN_ID / "manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"run_id": RUN_ID, "pacing": pacing}))
+    assert _publisher(tmp_path, "accelerated", speed=96.0).manifest()["pacing"] == pacing
+
+
+# reset_stack: a fresh stack per run (AC-012-25), with journal retention 0 (AC-012-18).
+
+
+def _record_stack_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[str, ...], dict]]:
+    calls: list[tuple[str, tuple[str, ...], dict]] = []
+
+    def compose(*args: str, **kwargs: Any) -> SimpleNamespace:
+        calls.append(("compose", args, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def docker(*args: str, **kwargs: Any) -> SimpleNamespace:
+        calls.append(("docker", args, kwargs))
+        listing = "ps" in args and any(INGRESS_FILTER in a for a in args)
+        return SimpleNamespace(returncode=0, stdout="c1\nc2\n" if listing else "", stderr="")
+
+    monkeypatch.setattr(stack, "compose", compose)
+    monkeypatch.setattr(stack, "docker", docker)
+    return calls
+
+
+INGRESS_FILTER = "label=ems.role=ingress"
+
+
+@pytest.mark.parametrize(("retention", "given"), [("0s", None), ("1d", "1d")])
+def test_ac_012_25_reset_stack_wipes_both_volumes_and_starts_three_services(
+    monkeypatch: pytest.MonkeyPatch, retention: str, given: str | None
+) -> None:
+    calls = _record_stack_calls(monkeypatch)
+    if given is None:
+        stack.reset_stack()
+    else:
+        stack.reset_stack(given)
+    composes = [(args, kw) for kind, args, kw in calls if kind == "compose"]
+    assert len(composes) == 2
+    (down, down_kw), (up, up_kw) = composes
+    assert list(down) == ["--profile", "ingress", "down", "-v"]
+    assert down_kw.get("project") == "ems"
+    assert list(up) == ["up", "-d", "--wait", "kafka", "kafka-init", "restate"]
+    assert stack.STACK_SERVICES == ("kafka", "kafka-init", "restate")
+    assert up_kw.get("project") == "ems"
+    assert up_kw.get("env") == {"EMS_RESTATE_JOURNAL_RETENTION": retention}
+    removed = [i for i, (kind, args, _) in enumerate(calls) if kind == "docker" and "rm" in args]
+    assert removed, "the ingress containers were not removed"
+    (_, rm_args, _) = calls[removed[0]]
+    assert {"c1", "c2"} <= set(rm_args)
+    order = [
+        kind if kind == "docker" else ("down" if "down" in args else "up")
+        for kind, args, _ in calls
+    ]
+    assert order.index("down") < removed[0] < order.index("up")
+
+
+# run_ends with strategy schedules (AC-012-37).
+
+
+def _ends_case(next_step: int, strategies: tuple[str, ...]) -> tuple[Any, Any]:
+    return (
+        SimpleNamespace(strategies=strategies, first_step=100),
+        SimpleNamespace(join=SimpleNamespace(next=next_step)),
+    )
+
+
+def test_ac_012_37_run_ends_follow_the_strategy_schedules() -> None:
+    from ems.assembler.schedule import Change, Schedule
+
+    both = ("NoBattery", "SelfConsumption")
+    only = ("SelfConsumption",)
+    removed = Schedule(changes=(Change(140, only),))
+    added = Schedule(changes=(Change(140, both),))
+    cases = {
+        "r1:removed": (_ends_case(200, both), removed),  # removed at 140, reached: ends at 140
+        "r1:removed-early": (_ends_case(120, both), removed),  # never got to 140: min(140, 120)
+        "r1:added": (_ends_case(200, only), added),  # added at 140: max(140, 200)
+        "r1:added-never": (_ends_case(120, only), added),  # 140 never reached: it stays at 140
+        "r1:plain": (_ends_case(160, both), None),  # no schedule recorded: as before
+    }
+    params = {k: case[0][0] for k, case in cases.items()}
+    offline = {k: case[0][1] for k, case in cases.items()}
+    schedules = {k: case[1] for k, case in cases.items() if case[1] is not None}
+    ends = stack.run_ends(params, offline, schedules)
+    assert ends["NoBattery"] == {
+        "r1:removed": 140,
+        "r1:removed-early": 120,
+        "r1:added": 200,
+        "r1:added-never": 140,
+        "r1:plain": 160,
+    }
+    every = {"r1:removed": 200, "r1:removed-early": 120, "r1:added": 200}
+    every |= {"r1:added-never": 120, "r1:plain": 160}
+    for service in ("SelfConsumption", "Ems", "Battery", "Meter"):
+        assert ends[service] == every, service
+
+
+def test_ac_012_37_run_ends_without_schedules_is_unchanged() -> None:
+    params = {"r1:A": SimpleNamespace(strategies=("NoBattery",), first_step=100)}
+    offline = {"r1:A": SimpleNamespace(join=SimpleNamespace(next=180))}
+    expected = {s: {"r1:A": 180} for s in ("NoBattery", "Ems", "Battery", "Meter")}
+    assert stack.run_ends(params, offline) == expected
+    assert stack.run_ends(params, offline, None) == expected
+    assert stack.run_ends(params, offline, {}) == expected
+
+
+# The runner's ingress project (test cleanup removes only `ems-it-*`).
+
+
+def test_ac_012_25_the_runner_ingress_project_is_ems_exp() -> None:
+    assert stack.EXP_PROJECT_PREFIX == "ems-exp-"
+    assert stack.IngressSet(PREFIX).project == "ems-it-it0123456789"
+    exp = stack.IngressSet(PREFIX, project_prefix=stack.EXP_PROJECT_PREFIX)
+    assert exp.project == "ems-exp-it0123456789"
+
+
+def test_ac_012_25_stack_env_passes_the_ingress_project_prefix(tmp_path: Path) -> None:
+    env = stack.StackEnv(PREFIX, log_dir=tmp_path, ingress_project_prefix=stack.EXP_PROJECT_PREFIX)
+    try:
+        assert env.ingress.project == "ems-exp-it0123456789"
+    finally:
+        env.restate.close()
+    plain = stack.StackEnv(PREFIX, log_dir=tmp_path)
+    try:
+        assert plain.ingress.project.startswith(stack.TEST_PROJECT_PREFIX)
+    finally:
+        plain.restate.close()
+
+
+# The SDK service's process group: ps over the whole group, followed across restarts (AC-012-29).
+
+
+def test_ac_012_29_sdk_service_pgid_is_the_running_group() -> None:
+    service = stack.SdkService()
+    assert service.pgid is None
+    child = SimpleNamespace(pid=777, returncode=None)
+    child.poll = lambda: child.returncode
+    service.proc = child  # ty: ignore[invalid-assignment]
+    assert service.pgid == 777
+    child.returncode = -9
+    assert service.pgid is None
+
+
+def _fake_ps(monkeypatch: pytest.MonkeyPatch, *, gone: bool = False) -> list[list[str]]:
+    seen: list[list[str]] = []
+
+    def run(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(list(args))
+        tool = Path(args[0]).name
+        if gone:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+        if tool == "pgrep":
+            return subprocess.CompletedProcess(args, 0, stdout="4321\n4322\n", stderr="")
+        if tool == "ps":
+            return subprocess.CompletedProcess(
+                args, 0, stdout=" 12.5 20480\n  3.0  1024\n", stderr=""
+            )
+        pytest.fail(f"unexpected command {args!r}")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return seen
+
+
+def test_ac_012_29_ps_group_sums_cpu_and_rss_over_the_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _fake_ps(monkeypatch)
+    assert stack.ps_group(4321) == (15.5, (20480 + 1024) * 1024)  # ps reports RSS in KiB
+    assert any(Path(a[0]).name == "ps" for a in seen)
+
+
+def test_ac_012_29_ps_group_of_a_group_that_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_ps(monkeypatch, gone=True)
+    assert stack.ps_group(4321) == (0.0, 0)
+
+
+def test_ac_012_29_host_sampler_rereads_the_group_after_a_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    groups = iter([100, 100, None, 200])  # None: the service is down while it restarts
+    sampled: list[int] = []
+    done = threading.Event()
+
+    def pgid() -> int | None:
+        return next(groups, 200)
+
+    def ps_group(group: int) -> tuple[float, int]:
+        sampled.append(group)
+        if sampled.count(200) >= 2:
+            done.set()
+        return {100: (50.0, 1000), 200: (20.0, 3000)}[group]
+
+    monkeypatch.setattr(stack, "ps_group", ps_group)
+    sampler = stack.HostSampler(pgid, interval=0.0)
+    sampler.start()
+    try:
+        assert done.wait(10.0), sampled
+    finally:
+        sampler.stop()
+    assert sampled[:2] == [100, 100]
+    assert set(sampled) == {100, 200}
+    assert (sampler.cpu_peak, sampler.rss_peak) == (50.0, 3000)
+
+
+# docker stats CPU and the restate cgroup's anonymous memory (AC-012-29, -39).
+
+
+@pytest.mark.parametrize(("text", "value"), [("12.34%", 12.34), ("0.00%", 0.0), ("153.20%", 153.2)])
+def test_ac_012_29_parse_cpu(text: str, value: float) -> None:
+    assert stack.parse_cpu(text) == value
+
+
+def test_ac_012_29_parse_cpu_refuses_what_is_no_percentage() -> None:
+    with pytest.raises(ValueError):
+        stack.parse_cpu("--")
+
+
+MEMORY_STAT = "anon 734003200\nfile 1048576\nkernel 524288\nanon_thp 0\nshmem 0\n"
+
+
+def test_ac_012_39_parse_anon_reads_the_anon_line_of_memory_stat() -> None:
+    assert stack.parse_anon(MEMORY_STAT) == 734003200
+
+
+def test_ac_012_39_parse_anon_without_an_anon_line() -> None:
+    with pytest.raises(ValueError):
+        stack.parse_anon("file 1048576\n")
+
+
+STATS = [
+    {"ems-restate-1": ("1GiB / 2GiB", "150.00%"), "ems-kafka-1": ("500MiB / 1GiB", "20.00%")},
+    {"ems-restate-1": ("1.5GiB / 2GiB", "30.00%"), "ems-kafka-1": ("400MiB / 1GiB", "80.50%")},
+]
+ANON = [700 * 2**20, 900 * 2**20]
+
+
+def test_ac_012_39_memory_sampler_keeps_cpu_and_anonymous_memory_peaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"stats": 0, "exec": 0}
+    read: list[str] = []
+    done = threading.Event()
+
+    def docker(*args: str, **kwargs: Any) -> SimpleNamespace:
+        if args[0] == "stats":
+            sample = STATS[min(calls["stats"], 1)]
+            calls["stats"] += 1
+            fmt = args[args.index("--format") + 1]
+            lines = []
+            for name, (mem, cpu) in sample.items():
+                line = fmt.replace("{{.Name}}", name).replace("{{.MemUsage}}", mem)
+                lines.append(line.replace("{{.CPUPerc}}", cpu))
+            out = "\n".join(lines) + "\n"
+        elif args[0] == "exec":
+            read.append(args[1])
+            assert list(args[2:]) == ["cat", "/sys/fs/cgroup/memory.stat"]
+            out = f"anon {ANON[min(calls['exec'], 1)]}\nfile 4096\n"
+            calls["exec"] += 1
+        else:
+            pytest.fail(f"unexpected docker call {args!r}")
+        if calls["stats"] >= 3 and calls["exec"] >= 3:
+            done.set()
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+    monkeypatch.setattr(stack, "docker", docker)
+    sampler = stack.MemorySampler(interval=0.0)
+    sampler.start()
+    try:
+        assert done.wait(10.0), calls
+    finally:
+        sampler.stop()
+    assert sampler.peaks == {"ems-restate-1": int(1.5 * 2**30), "ems-kafka-1": 500 * 2**20}
+    assert sampler.cpu_peaks == {"ems-restate-1": 150.0, "ems-kafka-1": 80.5}
+    assert sampler.anon_peaks == {"ems-restate-1": 900 * 2**20}
+    assert set(read) == {stack.RESTATE_CONTAINER}  # anon_of defaults to restate only
+
+
+# The consumer-group lag beside the release lag (AC-012-29).
+
+
+def test_ac_012_29_lag_sampler_keeps_each_groups_peak_lag(monkeypatch: pytest.MonkeyPatch) -> None:
+    progress = {"g1": [(0, 100), (50, 300), (300, 300)], "g2": [(10, 10)]}
+    calls: dict[str, int] = {"g1": 0, "g2": 0}
+    done = threading.Event()
+
+    def group_progress(settings: Any, group: str, topics: Sequence[str]) -> tuple[int, int]:
+        seq = progress[group]
+        value = seq[min(calls[group], len(seq) - 1)]
+        calls[group] += 1
+        if calls["g1"] >= 4 and calls["g2"] >= 4:
+            done.set()
+        return value
+
+    monkeypatch.setattr(stack, "group_progress", group_progress)
+    groups = {"g1": ("it.ems.production.v1",), "g2": ("it.ems.price.v1",)}
+    sampler = stack.LagSampler(EmsSettings(), groups, interval=0.0)
+    sampler.start()
+    try:
+        assert done.wait(10.0), calls
+    finally:
+        sampler.stop()
+    assert sampler.peaks == {"g1": 250, "g2": 0}
+
+
+# The offset between the host and Docker VM clocks, recorded in the manifest (AC-012-26).
+
+
+def test_ac_012_26_clock_offset_is_the_median_of_five_readings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = iter([100.0, 100.2, 200.0, 200.0, 300.0, 300.4, 400.0, 400.2, 500.0, 500.0])
+    vm = iter(["100.6", "200.4", "301.1", "400.55", "500.48"])  # offsets .5 .4 .9 .45 .48
+    asked: list[tuple[str, ...]] = []
+
+    def docker(*args: str, **kwargs: Any) -> SimpleNamespace:
+        asked.append(args)
+        return SimpleNamespace(returncode=0, stdout=next(vm) + "\n", stderr="")
+
+    monkeypatch.setattr(stack, "docker", docker)
+    monkeypatch.setattr(stack.time, "time", lambda: next(host))
+    assert stack.clock_offset_s() == pytest.approx(0.48)
+    assert asked == [("exec", stack.RESTATE_CONTAINER, "date", "+%s.%N")] * 5
