@@ -129,7 +129,10 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
   passes about 1.8 GiB, `mem_limit` goes to `2560m`.
 - Journal retention (spec 012, risk A6): `RESTATE_DEFAULT_JOURNAL_RETENTION` comes from
   `EMS_RESTATE_JOURNAL_RETENTION`, `1d` when unset (development keeps journals for debugging); `make exp` starts
-  the stack with `0`.
+  the stack with `0s`. Restate refuses a bare `0` (`RT0002 … expected a human-friendly duration string`). Measured
+  on 2026-11-25 (`tests/integration/test_retention.py`): at `0s` a completed invocation without an idempotency
+  key leaves `sys_invocation` at once, while a keyed one (`configure`) keeps its status for the idempotency
+  retention (24 h) with an empty journal (`P0D`); a service registered before the restart takes the new default.
 - Registration guard (spec 011): after the POST, `make register` checks with `curl -fsS` that Restate lists the
   three ingress targets (`Household/on_measurement`, `Weather/on_forecast`, `Tariff/on_price`) and stops before
   any ingress container starts if one is missing, because a deployment at the same URI keeps its old handlers

@@ -152,7 +152,7 @@ def test_ac_012_18_journal_retention_one_day_by_default_and_zero_when_set(
         assert retentions == {DAY_S}, rows
 
         # Restate recreated with `0`; the deployment registered before stays as it is.
-        _recreate_restate(restate, {RETENTION_ENV: "0"})
+        _recreate_restate(restate, {RETENTION_ENV: "0s"})
         zero_run = f"{run_id}z"
         sent, rows = _configure_and_read(stack_env, zero_run)
         record["zero"] = _summary(zero_run, rows)
