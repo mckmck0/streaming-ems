@@ -26,6 +26,10 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - `accelerated`: simulated seconds per wall second = `--speed` (default 96: one day per 15 min). `sim` profile.
 - `realtime`: starts at the current quarter-hour, wall-clock pacing; `live` profile.
 - Preflight refuses a run whose record timestamps the target topics would reject or expire.
+- A paced run (`accelerated`, `realtime`, or a replay with `--speed`) records in its manifest under `pacing` the
+  Unix time pacing started, the speed, and how far publication fell behind its schedule (a fixed-bucket
+  histogram with count, p99 bucket edge and exact maximum; spec 012). The experiment runner reads the start time
+  to know when each reading was due.
 
 ### Live, hybrid, record and replay (spec 002)
 
@@ -39,7 +43,9 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - Historical backfill (spec 008): `ems-gen history fetch` stores a real-data window once (archived forecasts, PSE,
   satellite and ERA5), `ems-gen history build` turns it offline into events in availability order, and replay
   publishes it, optionally with a synthetic background fleet (`--background`). Experiments replay it into the sim
-  profile; they never refetch.
+  profile; they never refetch. `ems-gen replay --speed S` paces a history recording by when each event becomes
+  usable (its emission time, the first part of its emission key), through the same pacing helper as
+  `accelerated` runs (spec 012, risk A1).
 
 ### Faults (spec 003)
 
@@ -79,8 +85,14 @@ at its own speed. So each household orders its own inputs by event time; the ful
   curve already held are dropped; all are counted.
 - **The real loop.** `Ems` decides step `t` only after `Battery` acknowledged `t−1`, so the decision uses the
   real SoC and never a stale view.
-- **Live mode** runs the same rules; one durable wall-clock timer per household raises the watermarks to "now
-  minus a grace period" (P7). Scheduled actions are data in state, fired at their step in both modes.
+- **Live mode** (spec 012, ADR 0020) runs the same rules; one durable wall-clock timer per household raises the
+  watermarks to the clock step `⌊(now − G)/900 s⌋` (grace `G`, default 120 s): needed meter slots below it close
+  on their reading or the estimate, prices and forecasts count as complete up to it, and a record that arrives
+  behind it becomes visible from it. After an outage one firing releases every due step; the timer then waits for
+  the next quarter end plus `G` plus 1 s. No clock in sim (P7). Scheduled actions are data in state, fired at
+  their step in both modes.
+- **Strategy changes** (spec 012, ADR 0021) take effect from a UTC hour `t`: each released step goes to the
+  strategies in force at its own `t`.
 - **Pacing.** Results never depend on publication speed, but buffers grow with the skew between a household's
   inputs. Large backfills are published in `accelerated` mode (risk A1).
 - **End of a run.** No marker: steps the rules cannot release stay unreleased, in the actors and on the offline
@@ -88,8 +100,8 @@ at its own speed. So each household orders its own inputs by event time; the ful
 
 ## What to build
 
-- The live timer and pacing for history replays (stage 4); briefs in `01-architecture.md`. The assembler and the
-  actors are built (stage 3, spec 011).
+- Built: the assembler and the actors (stage 3, spec 011); the live timer and history pacing (stage 4,
+  spec 012).
 
 ## Prerequisites
 

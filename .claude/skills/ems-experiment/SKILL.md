@@ -11,24 +11,29 @@ Arguments: `$ARGUMENTS` (mode and experiment id). Read `docs/context/11-experime
 
 ## Prerequisites
 
-The experiment harness is backlog spec 010 and the dev environment is spec 001. If
-`src/ems/experiments/run.py` does not exist yet, say so and stop: experiments cannot run through
-`make exp` before that. Until then the only runnable experiments are the reference spike's (A–E), whose
-reproduction is part of spec 001.
+The runner is built (spec 012): `make exp NAME=<id>` runs `experiments/configs/<id>.yaml` through
+`python -m ems.experiments.run`. It needs Docker running and port 9080 free (stop `make dev`); every run wipes
+the Kafka and Restate volumes, so it asks once (`CONFIRM=yes` skips the prompt). The runner publishes synthetic
+data only; a history recording needs a spec first. The reference spike's experiments stay on `make spike`.
 
 ## create `<id>`
 
-1. Write `experiments/configs/<id>.yaml` with every spec field: id, hypothesis, config, dataset and
-   period, seeds, metrics (energy and systems), acceptance criteria, output location.
+1. Write `experiments/configs/<id>.yaml` in the schema of `ems.experiments.config.Experiment` (extra keys are
+   refused): `id`, `hypothesis`, `data` (window, catalog size, managed households, faults; the seed comes
+   from the generator config and is recorded in the manifest), `run`, and optionally `kills`, `changes`,
+   `matrix`, `sweep`, `repetitions`. Put the metrics and numeric acceptance criteria in a header comment and in
+   the spec that motivates the experiment; results go to `experiments/results/<id>-<UTC>/`.
 2. Check the hypothesis is falsifiable and the acceptance criteria are numeric.
 3. Show the config and stop for approval. If the experiment needs new code, it needs a spec first
    (`ems-plan-change`).
 
 ## run `<id>`
 
-1. Confirm a clean git tree (the commit is recorded) and that `make up` reports healthy services.
-2. Run `make exp NAME=<id>`. Results go to the configured location with config, seed, data window,
-   hardware, software versions and git commit.
+1. Confirm a clean git tree (the commit is recorded) and that port 9080 is free; the runner starts its own
+   stack, SDK service and ingress containers.
+2. Run `make exp NAME=<id>`. Each run writes `config.yaml`, `manifest.json` (seed, data window, hardware,
+   software versions, git commit, RCEm table), `summary.json` (status, exactly-once check, systems metrics) and
+   the Parquet tables to `experiments/results/<id>-<UTC>/<run>/`. A run with `status: failed` names its reason.
 3. Never edit or delete recorded results; rerun instead.
 
 ## report `<id>`

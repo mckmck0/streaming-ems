@@ -24,6 +24,11 @@
   test-unit. Each tier writes coverage to `logs/.coverage.<tier>` (pytest-cov 7.1.0, coverage 7.17.3 with
   `patch = ["subprocess"]`, so the SDK service a tier starts is measured too); `make report-coverage` combines
   them into `logs/coverage.xml`.
+- Experiments (spec 012): `make exp NAME=<id> [CONFIRM=yes]` runs `experiments/configs/<id>.yaml` through
+  `python -m ems.experiments.run`. It asks once, because every run wipes the Kafka and Restate volumes and starts
+  `kafka`, `kafka-init` and `restate` with journal retention `0s`; it starts its own SDK service on 9080 with
+  `EMS_TIMING_LOG` set (the optional timing log path; unset means no log) and ingress projects `ems-exp-*`.
+  Results go to `experiments/results/` (gitignored).
 
 ### CI (spec 010)
 
@@ -142,8 +147,9 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
 
 - Refresh the pins that predate the version policy of 2026-11-15 to their newest releases (risk H4), in a
   change of their own.
-- Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Scale
-  experiments run on Docker Compose.
+- Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Where the
+  evaluation's scale experiments run is OPEN (`00-overview.md`, spec 012); the laptop validation runs use Docker
+  Compose.
 
 ## Prerequisites
 

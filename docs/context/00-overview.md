@@ -140,6 +140,23 @@ with durable timers, fleet scale), one research contribution (OPEN: which strate
   - `Probe` and the state-cost objects are deleted; `make measure` keeps `skew` (now on configured households,
     prices included) and `backlog`; `make register` checks the three ingress target handlers.
 
+- 2026-11-25 (spec 012, stage 4): clocks and systems experiments. Every decision with its alternatives is in
+  `specs/012-clocks-systems-experiments/spec.md` (Decisions) and ADRs 0020–0022.
+  - Live clock (ADR 0020): one grace `G` per run (default 120 s); a durable deadline chain per household, started
+    on the price snapshot, releases every due step in one firing and stops at `end_step`; the step it expects is
+    its generation; records behind the clock become visible from it. Live mode runs only in real time, so kill
+    runs are in sim.
+  - Strategy changes (ADR 0021): `Household.set_strategies` adds and removes from a UTC hour `t`; a change that
+    cannot be exact is refused with its reason, never applied late; the offline twin replays the schedule.
+  - Measurement (ADR 0022): a timing log side channel of the SDK service plus the runner's events and samples;
+    a fresh stack per run with journal retention `0s` (`1d` in dev); results exported from state through SQL,
+    per-step series from the offline fold once it equals the actors' state.
+  - Restate memory pools set below the container limit (invoker 512 MiB, query engine 384 MiB, record cache
+    128 MiB); the serde refuses NaN and infinity; stored state changes only additively within a run.
+  - `make exp NAME=<id>` runs `experiments/configs/<id>.yaml`; the proxy RCEm table is built in the runner;
+    `ems-gen replay --speed` paces history recordings. The runs of this stage are laptop validation runs; the
+    thesis evidence comes later at growing scale.
+
 ### Repo map (current and planned)
 
 ```
@@ -184,7 +201,7 @@ conversation from its brief in `01-architecture.md`.
 | 1 Ordering decision (docs only, no spec) | ADR 0017, `01-architecture.md`, updates to 00, 05, 06, 08, 09 | Done 2026-11-14 |
 | 2 Restate environment and Kafka into a Virtual Object (spec 010; done 2026-11-15) | Restate 1.8.1-hotfix.2 and the Kafka ingress integration in compose (one container per target handler), `make register` and `make dev`, the e2e and fault tiers, a probe object fed from the four topics, spike experiments A–C (the spike sits untracked at `restate-ems-spike/`; the stage moves it to `reference/restate-ems-spike/`). Merges the former "Kafka ingestion" and "Dev environment" rows | The stack is healthy and registration is idempotent. The probe sees each key's records in partition order, with none lost or doubled after `kill -9` of the server, the SDK service or an ingress container. The skew between topics during a backfill is recorded for the thesis. Spike A and C show 0 mismatches and B 0 duplicates. V1–V4 and V7–V11 of 01 are resolved with value, source and date |
 | 3 Actor skeleton (spec 011; done 2026-11-21) | The pure assembler (watermarks, join, dedup, late rule) with property tests, one mapping from events to `QuarterIn` shared with the offline reference, the actors of 01 with NoBattery and SelfConsumption | 10 households × 1 day through Kafka give strategy and `Meter` state equal to the offline side with `==`, also with the topics arriving in different orders, with `--faults` at the default `L`, and with `--faults` at an `L` below the generator's `late_max` (the run that produces corrections and drops). The parity check holds. Unmanaged sites keep O(1) state |
-| 4 Clocks and systems experiments | The live wall-clock deadline timer; adding a strategy from a data time `t0`; `kill -9` runs; scaling households × strategies at paced speeds; the export CLI and run manifest | Results stay identical under failures. Recovery latency by phase, sustained speed, events per second and decision latency are reported (P16) |
+| 4 Clocks and systems experiments (spec 012; done 2026-11-25) | The live wall-clock deadline timer; adding and removing a strategy from a data time `t`; `kill -9` runs; scaling households × strategies at paced speeds; the export CLI and run manifest | Results stay identical under failures. Recovery latency by phase, sustained speed, events per second and decision latency are reported (P16), here from laptop validation runs |
 | 5 Strategies and forecasts | Price rules, MPC with the offline oracle, forecasts with a persistence baseline | Per-strategy results against the reference |
 | 6 Adaptive Selector | Selector against the best fixed strategy (RQ3) | RQ3 results |
 
@@ -205,5 +222,8 @@ Started only when every mandatory piece above is implemented, tested, validated 
 
 - OPEN (brief §13): research-contribution strategies, thesis language, battery wear model. (The CI platform
   was settled by spec 010: GitHub Actions.)
+- OPEN (spec 012): where the evaluation runs. Spec 006 put scale experiments on Docker Compose; the evaluation is
+  now planned in a cluster at growing scale. Decide before the evaluation, with the runner's compose-specific
+  operations (`ems.experiments.ops.StackOps`) replaced by a cluster backend if needed.
 - OPEN only for the optional specs: GPU availability (LLM strategy); single-node Kafka on Kubernetes (Strimzi vs
   Redpanda) and Restate Operator vs plain Deployments (Helm).

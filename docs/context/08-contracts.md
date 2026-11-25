@@ -107,7 +107,7 @@ Source of truth: `src/ems/contracts/` (pydantic). Full field tables:
 - Messages between actors are internal Restate messages, not wire contract (below). Any new Kafka topic or event
   is wire contract (ADR 0016).
 
-### Internal actor messages v1.0.0 (spec 011)
+### Internal actor messages v1 (specs 011 and 012)
 
 Frozen dataclasses encoded as JSON by `ems.actors.serde`; source of truth `src/ems/actors/messages.py`,
 `ems.assembler.join.Step` and `ems.assembler.params.RunParams`. Every message carries `schema_version` and `t`
@@ -136,17 +136,38 @@ a default passes.
 | `Apply` | Ems → Battery | `t`, `action: Action{kind, level, p_kw}`, `pv_kwh`, `load_kwh`, `rce_pln_per_kwh`, `corrections` |
 | `Ack` | Battery → Ems | `t`, `soc_kwh` |
 | `Flows` | Battery → Meter | `t`, `pv_kwh`, `load_kwh`, `p_kw`, `rce_pln_per_kwh`, `corrections` |
-| `RunParams` (control, ADR 0019) | operator → each object of a managed household | `run_id`, `location_id`, `household_key`, `market_key`, `first_step`, `end_step`, `late_slots`, `strategies`, `live`, `has_pv`, `initial_soc_kwh`, `model` (the `SiteModel`), `rcem` (the `RcemTable`); no `t`, its time is `first_step` |
+| `RunParams` 1.1.0 (control, ADR 0019) | operator → each object of a managed household | `run_id`, `location_id`, `household_key`, `market_key`, `first_step`, `end_step`, `late_slots`, `strategies`, `live`, `has_pv`, `initial_soc_kwh`, `model` (the `SiteModel`), `rcem` (the `RcemTable`), and since 1.1.0 `mode` (`sim` or `live`, default `sim`) and `grace_s` (default 120); no `t`, its time is `first_step` |
+| `Deadline` (spec 012, ADR 0020) | Household → itself, live only, delayed | `t`: the step the deadline is set for |
+| `StrategyChange` (control, spec 012, ADR 0021) | operator → Household | `t` (a UTC hour), `strategies` (the set from `t`) |
 
 Units: energy kWh, power kW (> 0 charges), prices PLN/kWh, times in steps (UTC quarter-hours) or unix seconds
 (`issued_s`, `issue_s`).
 
+### Result files v1.0.0 (spec 012, ADR 0022)
+
+Results leave Restate through the export CLI (`python -m ems.experiments.export`, also called by the runner),
+which reads Virtual Object state through SQL on the `state` table after a run (spec 006 decision). There is no
+Kafka result (egress) topic in v1. One folder per run, `experiments/results/<id>-<UTC>/<run>/`. Every Parquet
+file carries `ems.schema_version` in its metadata; the JSON files carry `schema_version`. The same additive rule
+applies: within a major version a column or key is only added.
+
+| File | One row per | Columns or keys |
+|---|---|---|
+| `households.parquet` | managed household | key, location, `has_pv`, `mode`, first and end step, next step, records handled, the join's counters (estimates, corrections, drops, `after_end_late`, `price_replaced`, `clamped_price`, `clamped_forecast`), changes and refusals, deadline firings, early and stale |
+| `strategies.parquet` | household and strategy window, plus `real` (`Battery` and `Meter`) | `start_step`, `stop_step`, `compare_until_step`, next step, start and end SoC, months closed, `bill_pln`, `deposit_closing_pln`, `ledger_net_cost_pln` (null when nothing is closed), `partial`, `dropped_corrections`, `clamped` (real only) |
+| `months.parquet` | household, strategy and closed month | the `MonthSettlement` scalars and its basis |
+| `steps.parquet` | household, strategy and released step (from the offline fold, written only when it equals the actors' state) | the `Step` inputs and flags, action, `p_kw`, `soc_kwh`, `grid_kwh` |
+| `timings.parquet` | invocation (first timing line kept) | `ns`, `svc`, `h`, `key`, `inv`, `in_t`, `sent` (service, `t`), `lines` |
+| `summary.json` | run | status and reason, the exactly-once check, the systems metrics of `11-experiments.md`, samples (memory, CPU), kills |
+| `manifest.json` | run | `stack.manifest` (git commit, versions, hardware, config), seed, window, households, the RCEm table and its source, `rcem_used`, the timing log version, the host and VM clock offset |
+
+The timing log line (version 1) is `{"ns", "svc", "h", "key", "inv", "in_t", "sent": [[service, t], …]}`, one
+JSON object per line.
+
 ## What to build
 
-- The result Parquet and run summary with stage 4; ranking and selection with stage 6. (The internal actor
-  messages are built: spec 011.)
-- Results leave Restate through an export CLI that reads Virtual Object state after a run and writes the result
-  Parquet and run summary (spec 006 decision). There is no Kafka result (egress) topic in v1.
+- Ranking and selection with stage 6. Built: the internal actor messages (spec 011), the result files below
+  (spec 012).
 
 ## Prerequisites
 

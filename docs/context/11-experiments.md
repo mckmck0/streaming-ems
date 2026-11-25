@@ -106,11 +106,65 @@ MODE=skew` now runs on configured households and reports the price leads and the
   stats`, page cache included): Restate 1,897 MiB of 2 GiB, Kafka 990 MiB; no OOM kill; Restate's anonymous memory
   after the run 1,506 MiB. Details in `docs/thesis/kafka-ingress.md`.
 
+### Experiment runner (spec 012, ADR 0022)
+
+`make exp NAME=<id>` reads `experiments/configs/<id>.yaml` (`ems.experiments.config`): id, hypothesis, data
+(synthetic: start, days or hours, locations, managed households, faults, seed), run (strategies, live strategy,
+`L`, `mode`, `grace_s`, speed), kills (`sdk` or `server` at a fraction of the run), strategy changes (at an hour
+of the run), and a `matrix` (households × strategy sets), a speed `sweep` (doubling until a speed is not
+sustained) or `repetitions`. Each run, on a fresh stack (`ems.experiments.run.run_one`):
+1. wipes and starts Kafka and Restate with journal retention `0s`, the SDK service with the timing log, the
+   ingress containers (`ems-exp-*`);
+2. builds the parameters and the proxy RCEm table, and configures every managed object;
+3. publishes paced (`ems-gen run --mode accelerated --speed S`, or `realtime` in live mode), sends the strategy
+   changes before their hour and kills on schedule;
+4. detects the end from the timing log (each household's `Meter` committed its last step), or a stall (no
+   `Meter` advanced for a set time, reported with the stuck invocations and the last `t` per service);
+5. checks exactly-once: in sim every object's state equals the offline twin (with the recorded schedules) with
+   `==`; in live, invariants (every step released, `Battery` and `Meter` equal the live strategy's shadow); then
+   that no object still holds messages;
+6. exports the Parquet tables of `08-contracts.md` and writes `summary.json` and `manifest.json`.
+
+A run that fails is recorded with `status: failed` and its reason; the next run still starts.
+
+**Systems metrics** (`ems.experiments.metrics`; from the timing log, first line per invocation):
+- `decision_latency_ms`: per household-step, `Battery`'s commit that sends the `Ack` of `t` minus `Household`'s
+  commit that releases `t`; p50, p99 (nearest rank), max; steps inside a recovery window are left out, steps
+  with one side only count as missing.
+- `release_lag_s`: a step's release time minus when its reading was due on the publication schedule
+  (`paced_from_unix + (900·(t+1) − 900·first_step)/S`).
+- `sustained`: speed `S` is sustained when the p99 release lag is at most `900/S` s and the last step is released
+  within `2·900/S` s after the last record is published.
+- `recovery` per kill: kill → healthy, healthy → first commit, first commit → the first release whose lag is back
+  under the pre-kill p99.
+- `records_per_s` and `invocations_per_s` over the wall span; `retries` (invocations with more than one line,
+  K14); `forecast_age_h` at decision; `publisher_lateness_s` from the generator manifest; live:
+  `live_release_delay_s` (release time minus the end of the quarter).
+- `samples`: memory peaks and limits per container (page cache included) and anonymous memory, CPU peaks, the SDK
+  process's CPU and RSS, Kafka lag peaks, OOM kills, the state bytes per service, the host and VM clock offset.
+
+**Comparing a strategy that joins or leaves a run** (ADR 0021). An added strategy starts at its hour `t` on a fresh
+battery at the run's initial SoC and pays the whole month's fixed charges, so it is compared per step from `t`
+(the `steps` table) against NoBattery over the same steps, with its ΔSoC; its month bills are flagged `partial`. A
+removed one is comparable only until `compare_until_step` (`4·⌊(stop − 2L)/4⌋`), because it no longer receives
+the corrections for its last `2L` slots. The deposit reported is the one after the last closed month. Corrections
+dropped as `after_end_late` touch only held rows, never `bill_pln`.
+
+Configs ready (`experiments/configs/`): `sys-scale` (100 and 400 households × one and two strategies, speed 96,
+1 day), `sys-speed` (100 households, speed doubling from 96 to 1536), `sys-recovery` (100 households, `kill -9` of
+the SDK service at 30 % and of the server at 70 %, two repetitions), `sys-strategy-change` (SelfConsumption, add
+NoBattery at hour 12, remove it at hour 36, 2 days across the end of June), `sys-live` (10 households, 2 h real
+time, faults). Scaling up is a config change.
+
+### Validation runs (spec 012)
+
+Laptop validation of the runner and the measurement, not thesis evidence (the evaluation runs later at growing
+scale; OPEN in `00-overview.md`: where).
+
 ## What to build
 
-- Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to
-  Parquet, the run manifest and reports. Scale runs are published paced (`accelerated` mode), and the highest
-  speed the system sustains is a result (risk A1).
+- Built: the experiment runner, export, manifest and metrics (spec 012). Next: the energy experiments of stage 5
+  and the evaluation at scale.
 - Stage 3 delivered the first bit-exact comparison of actor state through Kafka (above); stage 2 compared the
   ingress log only.
 
@@ -122,8 +176,6 @@ MODE=skew` now runs on configured households and reports the price leads and the
 
 - OPEN: which strategies form the research contribution (brief §13). The LLM-based strategy (CLM-8B) is optional
   (gate in `00-overview.md`).
-- OPEN (stage 4): how the export reads state (Restate SQL introspection on the admin API vs a shared read
-  handler; VERIFY against the docs of the pinned Restate, 1.8.1-hotfix.2) and which per-step data stay in object
-  state for export (state size per object: VERIFY, V7 in 01).
-- OPEN (stage 4): where the systems metrics come from (Restate metrics or traces, runner timings); object
-  state cannot supply latencies or throughput.
+- Closed (spec 012, ADR 0022): the export reads state through SQL on the admin API's `state` table; no per-step
+  data stay in object state, per-step series come from the offline fold once it equals the actors' state; the
+  systems metrics come from the timing log and the runner's samples.

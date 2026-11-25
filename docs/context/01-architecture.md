@@ -6,7 +6,8 @@ Designed on 2026-11-14. Stage 2 (spec 010, 2026-11-15) built the runtime under i
 registration and the Kafka ingress (`02-subsystem-actors.md`). Stage 3 (spec 011, 2026-11-20) built the actors
 below on it, with the assembler that orders a household's inputs (`src/ems/assembler/`). The time and ordering
 model is ADR 0017; its rules for late and missing inputs are ADR 0018; run parameters arrive as control messages
-(ADR 0019). The domain functions the actors call exist since spec 009 (`12-domain-model.md`). Changes to the
+(ADR 0019). Stage 4 (spec 012, 2026-11-25) added the live deadline clock (ADR 0020), strategy changes at run time
+(ADR 0021) and the experiment runner with its measurement (ADR 0022). The domain functions the actors call exist since spec 009 (`12-domain-model.md`). Changes to the
 brief §5:
 - `Tariff` is keyed by market and holds price curves only (ADR 0012, spec 009); `Weather` is keyed by location.
   Both are fed from Kafka and call no API (ADR 0011). `Tariff` pushes curves to households as one-way messages;
@@ -51,6 +52,7 @@ flowchart LR
 |---|---|
 | Measurements, forecasts, prices on Kafka | `ems-gen` (`13-subsystem-ingest.md`) |
 | A household's step sequence: joined flows, `estimated` flags, what was visible at each step; its effective watermark per stream; its strategy list | `Household` |
+| A household's strategy schedule (accepted changes and refusals, spec 012) and its live deadline chain (the step the pending deadline is set for, firings, early and stale deadlines) | `Household` |
 | Price curves and their versions; the price stream's watermark and the visibility stamped from it | `Tariff` |
 | Forecast runs; the forecast stream's watermark and the visibility stamped from it | `Weather` |
 | The action commanded for the real battery at each step; the live strategy in force | `Ems` (the choice moves to the Selector, stage 6) |
@@ -139,11 +141,29 @@ numbers its runs. The household applies them in sequence, holding back any that 
 acknowledgements and flows carry `t` and are applied the same way, through one hold-back function
 (`ems.actors.reorder`) that counts early and stale messages outside the compared state.
 
-**Live mode.** The same rules run, with one more source: a durable wall-clock timer in each household. The
-household keeps its own effective watermark per stream, the higher of the one it received and "now minus a
-grace period", so a missing reading or a late publication cannot stall a live decision. A record that reaches
-the household behind its effective watermark becomes visible from that watermark. In sim the timer does not
-exist (P7), and the effective watermark equals the received one.
+**Live mode** (built in stage 4, ADR 0020). The same rules run, with one more source: a durable wall-clock timer
+in each household (`RunParams.mode = "live"`). The household keeps its own effective watermark per stream, the
+higher of the one it received and "now minus a grace period" `G` (`grace_s`, default 120 s), so a missing reading
+or a late publication cannot stall a live decision:
+- `Household.on_deadline` reads the journaled time, computes the clock step `⌊(now − G)/900 s⌋` (capped at
+  `end_step`) and calls `join.on_clock`, which closes every needed meter slot below it on its reading or on the
+  ADR 0018 estimate and raises the price and forecast watermarks to it;
+- lateness keeps being judged in the record's own stream, against the stream's horizon (the higher of its newest
+  reading and its last closed slot), so a reading for a slot the clock closed is a correction or `too_old`;
+- a record that reaches the household behind its effective watermark becomes visible from that watermark
+  (counted `clamped_price`, `clamped_forecast`);
+- the chain starts once the price snapshot is applied, releases every due step in one firing after an outage,
+  then sets the next deadline for when the clock step next increases plus 1 s; an early firing reschedules the same
+  step after at least 1 s (`early`); `Deadline.t` against the expected step is its generation (`stale`); it stops at
+  `end_step`.
+
+In sim the timer does not exist (P7), and the effective watermark equals the received one: the horizon equals the
+newest reading and no visibility is clamped, which property tests show.
+
+**Strategy changes** (stage 4, ADR 0021). `Household.set_strategies(t, strategies)` from the operator feeds exactly
+that set from step `t` (a UTC hour), or refuses the change with its reason. Each released step goes to the set in
+force at its own `t`; an added strategy starts at `t` on a fresh virtual battery (`strategy_params`); a removed one
+receives nothing from `t`. The offline twin replays the schedule from `Household` state.
 
 **End of a run.** No marker and no flush. Steps the rules cannot release stay unreleased, for example after a
 gap in the last `L` slots of a stream. The offline side runs the same assembler over the recorded streams and
@@ -174,7 +194,7 @@ Every configured object also stores `params` (its `RunParams`); Kafka-fed object
 
 | Actor | State | Handlers | Sends |
 |---|---|---|---|
-| `Household` | The join: next step, per meter stream the slots from `2L` below its newest, the closed values not yet released and the late readings waiting for their step; curves and runs with their visibility and the watermarks; counters. The price and forecast inboxes; the stream leads (measured) | `configure` (E) · `on_measurement` (E, Kafka: production and consumption) · `on_prices` (E, from Tariff) · `on_forecast` (E, from Weather) · `status` (S) · stage 4: `on_deadline`, `set_strategies` | `Tariff.subscribe` on `configure` · `on_step` of each strategy · `Ems.on_step` |
+| `Household` | The join: next step, per meter stream the slots from `2L` below its newest, the closed values not yet released and the late readings waiting for their step; curves and runs with their visibility and the watermarks; counters. The price and forecast inboxes; the stream leads (measured) | `configure` (E) · `on_measurement` (E, Kafka: production and consumption) · `on_prices` (E, from Tariff) · `on_forecast` (E, from Weather) · `on_deadline` (E, live: delayed self-send) · `set_strategies` (E, operator) · `status` (S) | `Tariff.subscribe` on `configure` · `on_step` of each strategy · `Ems.on_step` |
 | `Tariff` | The price stream (watermark, newest day and its ids, sequence number, counters), every accepted curve of the run with its visibility, the subscribers. No parameters | `on_price` (E, Kafka) · `subscribe` (E, from Household) · `status` (S) | `Household.on_prices`: a snapshot on subscribe, then one update per accepted curve |
 | `Weather` | The forecast stream: watermark, newest issue time, sequence number, counters. No forecast payload in stage 3 (stage 5 decides storage and retention) | `configure` (E) · `on_forecast` (E, Kafka) · `status` (S) | `Household.on_forecast`: issue time, visibility and watermark, no payload |
 | `NoBattery`, `SelfConsumption` | The strategy result (virtual SoC, last flows, ledger accumulator, flows open to correction, closed months) and the step inbox | `configure` (E) · `on_step` (E, from Household) · `summary` (S) | nothing in stage 3 |
@@ -194,7 +214,9 @@ and `t`, the step it belongs to or, for a stream update, the stream's watermark;
 | `Apply` | Ems to Battery | The `Action`, the step's flows and price, corrections |
 | `Ack` | Battery to Ems | `t` and the SoC after it |
 | `Flows` | Battery to Meter | PV, load and the executed battery power of `t`, its price, corrections. `Meter` derives the grid energy with the domain function the reference uses |
-| `RunParams` (control) | Operator to every object of a managed household | The run's parameters (ADR 0019); its time is `first_step` |
+| `RunParams` (control) | Operator to every object of a managed household | The run's parameters (ADR 0019), 1.1.0 with `mode` and `grace_s`; its time is `first_step` |
+| `Deadline` | Household to itself, live only | `t`: the step the deadline is set for (ADR 0020) |
+| `StrategyChange` (control) | Operator to Household | `t` (a UTC hour) and the strategy set from it (ADR 0021) |
 
 - **The real loop.** `Ems` holds the real SoC from the last acknowledgement and decides `t` only once `t − 1`
   is acknowledged, with `reference.prices` and `reference.decide`. `Battery` resolves the action against the
@@ -219,10 +241,10 @@ and `t`, the step it belongs to or, for a stream update, the stream's watermark;
 | Rule | How it holds |
 |---|---|
 | R1, R2 no blocking cycles | Every edge between actors is one-way, including both cycles (Household to Tariff and back; Ems to Battery and back). Request-response is used only from outside (tests, the export CLI) to shared handlers |
-| R3 journal non-determinism | Handlers make no external calls. Run parameters arrive by `configure` and are stored in state. The wall clock appears only in the live deadline handler (stage 4), through `ctx.time()`. Stored state and messages encode to the same bytes in every process (no sets), because Restate compares a retried handler's writes with its journal (RT0016) |
+| R3 journal non-determinism | Handlers make no external calls. Run parameters arrive by `configure` and are stored in state. The wall clock appears only in the live deadline handler, through the journaled `ctx.time()` (`shell.handle_timed`); the timing log reads the host clock outside every journaled operation (ADR 0022). Stored state and messages encode to the same bytes in every process (no sets), because Restate compares a retried handler's writes with its journal (RT0016) |
 | R4 idempotent ingress | Three kinds of duplicate, each caught where it arises. A Kafka record redelivered after a restart or rebalance: Restate deduplicates by consumer group, topic, partition and offset. Messages a handler sends: Restate deduplicates them across retries of that execution, so they need no idempotency key. The same event published twice: the slot table keeps the first reading of a meter slot, the forecast stream drops a run not newer than its newest, the price stream a curve id it holds. No idempotency key is taken from records: the slot table is needed anyway for the join and late records. Control calls through HTTP ingress (`configure`) carry an `Idempotency-Key` |
 | R5 never wait in an exclusive handler | Waiting means buffering in state until a watermark passes. Live deadlines are delayed self-messages |
-| R6 generations | The live deadline timer is the only self-rescheduling chain; it carries a generation number. Sim has none |
+| R6 generations | The live deadline timer is the only self-rescheduling chain; `Deadline.t` must equal the step the household expects, else it is counted stale. Sim has none |
 | R7 envelope | Every message carries `schema_version` and `t`, the simulated time (stage 3: no separate timestamp); stream updates also carry `seq`. Receivers apply messages in `t` or sequence order through `ems.actors.reorder`, hold back early ones, and count every reordering |
 
 ### Restate facts
@@ -354,6 +376,12 @@ in `12-domain-model.md`. The brief as it was handed over:
 
 ### Stage 4 · Clocks and systems experiments
 
+**Done 2026-11-25 (spec 012).** The live clock is ADR 0020 and the live mode paragraph above; strategy changes are
+ADR 0021; the runner, the timing log, journal retention and the export are ADR 0022 and `11-experiments.md`; the
+handlers are in `02-subsystem-actors.md`; the messages and result schemas in `08-contracts.md`. The runs were
+laptop validation runs; the evaluation runs later, at growing scale (OPEN in `00-overview.md`: where). The brief
+as it was handed over:
+
 - **Read first:** this doc, `11-experiments.md`, `06-data-flows.md`, risks A1–A12, ADRs 0018 and 0019,
   `specs/011-actor-skeleton/` and `02-subsystem-actors.md` (handlers, state keys, the harness).
 - **Already decided:** live mode adds one durable wall-clock deadline timer per household, with a generation
@@ -366,7 +394,8 @@ in `12-domain-model.md`. The brief as it was handed over:
   - every object stores one `state` value, a frozen dataclass encoded by `ems.actors.serde`; the export decodes
     it with the same serde, and the shared handlers return it;
   - a month is settled `2L` quarter-hours after it ends (ADR 0018): bill windows need that many more steps, and a
-    synthetic run with an RCEm site needs the RCEm entry of the month after the window;
+    synthetic run with an RCEm site needs the RCEm entries from M−2 to the month of the last step (corrected in
+    spec 012);
   - stage 3 killed only the SDK service with households configured; the server and ingress kills ran on
     unconfigured households (re-homed spec 010 tests).
 - **This stage decides:** the grace period and catch-up of the live timer; what happens to a strategy change
@@ -389,7 +418,15 @@ in `12-domain-model.md`. The brief as it was handed over:
 - **Already decided:** a policy sees only what was visible at the start of its step; a forecast run is
   immutable and identified by its issue time; each `Step` already names the run visible at its start. A new
   strategy is a policy in `ems.domain.actions.POLICIES` plus its name: `ems.actors.strategy.strategy_object`
-  builds its service.
+  builds its service. From stage 4:
+  - a strategy joins or leaves a running household from a UTC hour through `Household.set_strategies`
+    (ADR 0021); the runner configures the added object first, and an added strategy is compared per step from its
+    first step, not by month bills (it pays a whole month's fixed charges);
+  - `make exp NAME=<id>` runs `experiments/configs/<id>.yaml` on a fresh stack and writes the Parquet export, the
+    timing metrics and the exactly-once check (`11-experiments.md`); a strategy is a config field;
+  - synthetic runs use the proxy RCEm table (`ems.experiments.rcem`); history replays are paced by emission time
+    (`ems-gen replay --speed`), but the runner does not publish history yet;
+  - the live strategy is still fixed for a run (the Selector is stage 6).
 - **Open from stage 3:** a site without PV (PL-LOC-000002 in the 10-household catalog) is not a prosumer under
   the RES act (art. 2 pkt 27a); with NoBattery and SelfConsumption it never exports. Decide how its export is
   valued before a strategy can export from its battery.
