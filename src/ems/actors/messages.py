@@ -83,3 +83,25 @@ class Flows:
     rce_pln_per_kwh: float
     corrections: tuple[Correction, ...]
     schema_version: str = SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class Deadline:
+    """Household to itself, live mode only (spec 012, ADR 0020): fire when the clock reaches ``t``.
+    ``t`` is the step the deadline was set for; the household keeps the one it expects, so a
+    deadline for another step is stale (R6).
+    """
+
+    t: int
+    schema_version: str = SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class StrategyChange:
+    """Operator to Household (HTTP ingress, with an ``Idempotency-Key``): from step ``t``, on a
+    UTC hour, feed exactly these strategies (spec 012, ADR 0021).
+    """
+
+    t: int
+    strategies: tuple[str, ...]
+    schema_version: str = SCHEMA_VERSION

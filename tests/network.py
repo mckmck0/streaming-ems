@@ -12,24 +12,37 @@ An ``Order`` picks the next delivery: a seed, a weight per source and how a mess
 those in flight. A message to an object that was never configured fails the run (``shell.handle``
 fails such an invocation, and the run could not finish).
 
+Spec 012 (plan, Test strategy) adds two sources, each ready only while it has something to give:
+- a fake wall clock (``now_s``). A send with ``delay_s`` (the household's deadline) is held with its
+  due time and goes in flight only once a clock tick passes it, as Restate delivers a delayed send;
+  a timed handler (``shell.handle_timed``) gets ``now_s`` as its journaled time;
+- operator calls: ``set_strategies`` through the HTTP ingress, queued by ``change`` after the added
+  strategies are configured, as the runner does (AC-012-17), and delivered in the order sent.
+Households configured with ``mode="live"`` (``live``) run the deadline chain; a sim network has
+neither source, so its deliveries are drawn exactly as before. With ``timing_log``, every commit is
+also marked in the timing log, as ``shell`` does after its last write (AC-012-19, -20).
+
 Records of keys that are not managed are not delivered to a transition: on the real service they
 only update the ingress log and the counter (AC-011-28), which this network does not model.
 """
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
+import logging
 import random
+import signal
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from ems.actors import battery, ems, household, meter, strategy, tariff, weather
+from ems.actors import battery, ems, household, messages, meter, strategy, tariff, weather
 from ems.actors.battery import BatteryState
 from ems.actors.ems import EmsState
 from ems.actors.household import HouseholdState
@@ -85,6 +98,12 @@ PRICE = "ems.price.v1"
 TOPICS = (PRODUCTION, CONSUMPTION, FORECAST, PRICE)
 MESSAGES = "messages"
 SOURCES = (*TOPICS, MESSAGES)  # the order of ``Order.weights``
+CLOCK = "clock"  # the fake wall clock, ready while a delayed message waits (``Order.clock``)
+CONTROL = "control"  # operator calls, ready while one is queued (``Order.control``)
+# How far past the earliest due time a clock tick goes: on time, 1 s late, half a step and three
+# steps late (a deadline that fires late releases every due step at once, AC-012-07).
+TICK_EXTRA_S = (0.0, 1.0, 450.0, 2700.0)
+TIMED = ("Household", "on_deadline")  # through ``shell.handle_timed``: it also takes the time
 
 # ── a generated run ─────────────────────────────────────────────────────────────────────────────
 
@@ -108,6 +127,19 @@ class Generated:
             self.of(CONSUMPTION, key),
             self.of(FORECAST, key),
             self.of(PRICE, self.market_key),
+        )
+
+    def twin(self, params: RunParams, schedule: Any) -> Offline:
+        """The offline twin of one household run with ``params`` and its recorded strategy schedule
+        (``offline.fold(..., schedule=...)``, AC-012-16)."""
+        key = params.household_key
+        return fold(
+            params,
+            self.of(PRODUCTION, key),
+            self.of(CONSUMPTION, key),
+            self.of(FORECAST, key),
+            self.of(PRICE, self.market_key),
+            schedule=schedule,
         )
 
 
@@ -178,6 +210,18 @@ def generate(
     )
 
 
+def live(params: Mapping[str, RunParams], grace_s: int = 120) -> dict[str, RunParams]:
+    """The same households in live mode, with grace ``grace_s`` (``RunParams`` 1.1.0)."""
+    return {k: dataclasses.replace(p, mode="live", grace_s=grace_s) for k, p in params.items()}
+
+
+def with_strategies(
+    params: Mapping[str, RunParams], strategies: tuple[str, ...]
+) -> dict[str, RunParams]:
+    """The same households, each starting with ``strategies``."""
+    return {k: dataclasses.replace(p, strategies=strategies) for k, p in params.items()}
+
+
 # ── the network ─────────────────────────────────────────────────────────────────────────────────
 
 STATE_TYPES: dict[str, type[Any]] = {
@@ -225,11 +269,14 @@ MARKET_HANDLERS: dict[tuple[str, str], tuple[type[Any], Callable[[Any, Any], Out
 @dataclass(frozen=True)
 class Order:
     """How the next delivery is picked: a seed, one weight per source (``SOURCES``) and which
-    message in flight goes next (``any``, ``oldest`` or ``newest``)."""
+    message in flight goes next (``any``, ``oldest`` or ``newest``); the weights of a clock tick and
+    of an operator call. A weight 0 holds that source back until nothing else is ready."""
 
     seed: int
     weights: tuple[int, int, int, int, int]
     pick: str = "any"
+    clock: int = 1
+    control: int = 1
 
 
 @dataclass(frozen=True)
@@ -238,6 +285,7 @@ class InFlight:
     handler: str
     key: str
     raw: bytes  # the message as the sender encoded it
+    delay_s: float | None = None  # ``send_delay``, journaled with the send
 
 
 @dataclass(frozen=True)
@@ -253,21 +301,37 @@ class Commit:
 class Network:
     """Every object of the managed households of ``gen``, configured, with the run's records queued.
 
-    ``commits`` keeps every transition's written state and sends, in order; ``sent`` every message.
+    ``params`` replaces the households' parameters (live mode, other strategies); ``now_s`` starts
+    the fake clock (default: the start of the earliest first step). ``commits`` keeps every
+    transition's written state and sends, in order; ``sent`` every message.
     """
 
-    def __init__(self, gen: Generated) -> None:
+    def __init__(
+        self,
+        gen: Generated,
+        params: Mapping[str, RunParams] | None = None,
+        *,
+        now_s: float | None = None,
+        timing_log: bool = False,
+    ) -> None:
         self.gen = gen
+        self.households: dict[str, RunParams] = dict(gen.params if params is None else params)
         self.params: dict[tuple[str, str], RunParams] = {}
         self.stored: dict[tuple[str, str], bytes] = {}
         self.queues: dict[tuple[str, str], deque[bytes]] = {
             k: deque(v) for k, v in sorted(gen.records.items()) if v
         }
         self.in_flight: list[InFlight] = []
+        self.delayed: list[tuple[float, InFlight]] = []  # (due time, message), in send order
+        self.controls: deque[tuple[str, bytes]] = deque()  # (household key, StrategyChange)
         self.commits: list[Commit] = []
         self.sent: list[Send] = []
         self.deliveries = 0
-        for p in gen.params.values():
+        self.ticks = 0
+        self.timing_log = timing_log
+        starts = [900.0 * p.first_step for p in self.households.values()]
+        self.now_s = (min(starts) if starts else 0.0) if now_s is None else now_s
+        for p in self.households.values():
             for service in ("Household", "Weather", *p.strategies, "Ems", "Battery", "Meter"):
                 self.configure(service, p)
 
@@ -282,24 +346,42 @@ class Network:
                 raise AssertionError(f"{at}: configured again with other parameters")
             return
         self.params[at] = params
-        self._commit(service, params.household_key, STARTS[service](params))
+        self._commit(service, params.household_key, STARTS[service](params), "configure", None)
 
     def state(self, service: str, key: str) -> Any:
         raw = self.stored.get((service, key), b"")
         return serde_for(STATE_TYPES[service]).deserialize(raw)
 
-    def _commit(self, service: str, key: str, out: Out[Any]) -> None:
+    def _commit(
+        self, service: str, key: str, out: Out[Any], handler: str, in_t: int | None
+    ) -> None:
         state, sends = out
         assert isinstance(state, STATE_TYPES[service]), (service, type(state))
         raw = serde_for(STATE_TYPES[service]).serialize(state)
         self.stored[(service, key)] = raw
         encoded = tuple(
-            InFlight(s.service, s.handler, s.key, serde_for(type(s.message)).serialize(s.message))
+            InFlight(
+                s.service,
+                s.handler,
+                s.key,
+                serde_for(type(s.message)).serialize(s.message),
+                # ``Send.delay_s`` arrives with spec 012 (T22); until then no send has a delay.
+                s.delay_s,
+            )
             for s in sends
         )
         self.commits.append(Commit(service, key, raw, encoded))
         self.sent.extend(sends)
-        self.in_flight.extend(encoded)
+        for m in encoded:
+            if m.delay_s is None:
+                self.in_flight.append(m)
+            else:
+                self.delayed.append((self.now_s + m.delay_s, m))
+        if self.timing_log:
+            # Imported here, like the other spec 012 modules: a sim network needs none of them.
+            from ems.actors import timing
+
+            timing.mark((service, handler), key, f"inv_{len(self.commits)}", in_t, sends)
 
     # -- deliveries --
 
@@ -310,17 +392,26 @@ class Network:
         if at in MARKET_HANDLERS:
             input_type, market_fn = MARKET_HANDLERS[at]
             message = serde_for(input_type).deserialize(m.raw)
+            assert message is not None
             state = self.state(m.service, m.key) or TariffState()
-            self._commit(m.service, m.key, market_fn(state, message))
+            self._commit(m.service, m.key, market_fn(state, message), m.handler, message.t)
             return
-        if at not in HANDLERS:
+        if at not in HANDLERS and at != TIMED:
             raise AssertionError(f"a message to {at}, which no handler takes")
-        input_type, fn = HANDLERS[at]
         params = self.params.get((m.service, m.key))
         if params is None:
             raise AssertionError(f"a message to {at} at {m.key}, which is not configured")
+        state = self.state(m.service, m.key)
+        if at == TIMED:
+            deadline = serde_for(messages.Deadline).deserialize(m.raw)
+            assert deadline is not None
+            out = household.on_deadline(params, state, deadline, self.now_s)
+            self._commit(m.service, m.key, out, m.handler, deadline.t)
+            return
+        input_type, fn = HANDLERS[at]
         message = serde_for(input_type).deserialize(m.raw)
-        self._commit(m.service, m.key, fn(params, self.state(m.service, m.key), message))
+        assert message is not None
+        self._commit(m.service, m.key, fn(params, state, message), m.handler, message.t)
 
     def deliver_record(self, topic: str, key: str) -> None:
         """The next record of ``topic`` at ``key``, through its Kafka-fed handler."""
@@ -329,17 +420,59 @@ class Network:
         event = parse(raw)
         if topic == PRICE:
             state = self.state("Tariff", key) or TariffState()
-            self._commit("Tariff", key, tariff.on_record(state, event))
+            self._commit("Tariff", key, tariff.on_record(state, event), "on_price", None)
             return
         service = "Weather" if topic == FORECAST else "Household"
         params = self.params.get((service, key))
         if params is None:
             return  # an unmanaged site: only the ingress log and the counter (not modelled)
         fn = weather.on_record if service == "Weather" else household.on_record
-        self._commit(service, key, fn(params, self.state(service, key), event))
+        handler = "on_forecast" if service == "Weather" else "on_measurement"
+        self._commit(service, key, fn(params, self.state(service, key), event), handler, None)
+
+    # -- the clock and the operator (spec 012) --
+
+    def change(self, key: str, t: int, strategies: tuple[str, ...]) -> None:
+        """Queue ``set_strategies(t, strategies)`` for one household, as the runner sends it
+        (AC-012-17): first every added strategy is configured with ``strategy_params``."""
+        from ems.assembler.schedule import Change, strategy_params
+
+        p = self.households[key]
+        names = tuple(sorted(set(strategies)))
+        for name in names:
+            if name in POLICIES and (name, key) not in self.params:
+                self.configure(name, strategy_params(p, Change(t, names)))
+        body = serde_for(messages.StrategyChange).serialize(messages.StrategyChange(t, strategies))
+        self.controls.append((key, body))
+
+    def deliver_control(self) -> None:
+        """The next operator call: ``Household.set_strategies`` (``shell.handle``)."""
+        key, raw = self.controls.popleft()
+        self.deliveries += 1
+        params = self.params.get(("Household", key))
+        if params is None:
+            raise AssertionError(f"set_strategies at {key}, which is not configured")
+        change = serde_for(messages.StrategyChange).deserialize(raw)
+        assert change is not None
+        out = household.on_change(params, self.state("Household", key), change)
+        self._commit("Household", key, out, "set_strategies", change.t)
+
+    def tick(self, extra_s: float) -> None:
+        """The fake clock moves on to the earliest due time plus ``extra_s``; every delayed message
+        due by then goes in flight, in due order."""
+        self.ticks += 1
+        self.now_s = max(self.now_s, min(due for due, _ in self.delayed)) + extra_s
+        due = sorted((d for d in self.delayed if d[0] <= self.now_s), key=lambda d: d[0])
+        self.delayed = [d for d in self.delayed if d[0] > self.now_s]
+        self.in_flight.extend(m for _, m in due)
 
     def pending(self) -> bool:
-        return bool(self.in_flight) or any(self.queues.values())
+        return (
+            bool(self.in_flight)
+            or bool(self.delayed)
+            or bool(self.controls)
+            or any(self.queues.values())
+        )
 
     def run(
         self,
@@ -351,12 +484,18 @@ class Network:
         called after each delivery."""
         rng = random.Random(order.seed)
         weights = dict(zip(SOURCES, order.weights, strict=True))
+        weights |= {CLOCK: order.clock, CONTROL: order.control}
         while limit is None or self.deliveries < limit:
-            ready = [s for s in SOURCES if self._ready(s)]
+            ready = [s for s in (*SOURCES, CLOCK, CONTROL) if self._ready(s)]
             if not ready:
                 return
-            source = rng.choices(ready, weights=[weights[s] for s in ready])[0]
-            if source == MESSAGES:
+            w = [weights[s] for s in ready]
+            source = rng.choices(ready, weights=w if any(w) else None)[0]
+            if source == CLOCK:
+                self.tick(rng.choice(TICK_EXTRA_S))
+            elif source == CONTROL:
+                self.deliver_control()
+            elif source == MESSAGES:
                 n = len(self.in_flight)
                 index = {"oldest": 0, "newest": n - 1}.get(order.pick)
                 self.deliver_message(rng.randrange(n) if index is None else index)
@@ -369,4 +508,28 @@ class Network:
     def _ready(self, source: str) -> bool:
         if source == MESSAGES:
             return bool(self.in_flight)
+        if source == CLOCK:
+            return bool(self.delayed)
+        if source == CONTROL:
+            return bool(self.controls)
         return any(q for (t, _), q in self.queues.items() if t == source)
+
+
+@contextlib.contextmanager
+def timing_on(path: Path) -> Iterator[Any]:
+    """The timing log on, written to ``path``, for one block (AC-012-19); afterwards the listener
+    is stopped, and the handlers and the SIGTERM handler it installed in this process are removed.
+    """
+    from ems.actors import timing
+
+    logger = logging.getLogger("ems.timing")
+    handlers = list(logger.handlers)
+    sigterm = signal.getsignal(signal.SIGTERM)
+    timing.start(path)
+    try:
+        yield timing
+    finally:
+        timing.stop()
+        for h in [h for h in logger.handlers if h not in handlers]:
+            logger.removeHandler(h)
+        signal.signal(signal.SIGTERM, sigterm)

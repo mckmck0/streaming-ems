@@ -54,13 +54,13 @@ STATE = serde_for(WeatherState)
 
 @weather.handler(input_serde=shell.PARAMS_SERDE)
 async def configure(ctx: ObjectContext, params: RunParams) -> None:
-    await shell.configure(ctx, params, start, STATE, kafka_fed=True)
+    await shell.configure(ctx, ("Weather", "configure"), params, start, STATE, kafka_fed=True)
 
 
 @weather.handler(input_serde=BytesSerde(), accept="*/*")
 async def on_forecast(ctx: ObjectContext, raw: bytes) -> None:
     """`ems.weather.forecast.v1`, through `ingress-forecasts`."""
-    await shell.ingest(ctx, raw, STATE, on_record)
+    await shell.ingest(ctx, ("Weather", "on_forecast"), raw, STATE, on_record)
 
 
 @weather.handler(kind="shared", output_serde=STATE)

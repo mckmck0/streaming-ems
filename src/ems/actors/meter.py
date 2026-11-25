@@ -61,12 +61,14 @@ STATE = serde_for(MeterState)
 
 @meter.handler(input_serde=shell.PARAMS_SERDE)
 async def configure(ctx: ObjectContext, params: RunParams) -> None:
-    await shell.configure(ctx, params, start, STATE)
+    await shell.configure(ctx, ("Meter", "configure"), params, start, STATE)
 
 
 @meter.handler(name="on_flows", input_serde=serde_for(Flows))
 async def on_flows_handler(ctx: ObjectContext, flows: Flows) -> None:
-    await shell.handle(ctx, STATE, lambda p, s: on_flows(p, s, flows))
+    await shell.handle(
+        ctx, ("Meter", "on_flows"), STATE, lambda p, s: on_flows(p, s, flows), flows.t
+    )
 
 
 @meter.handler(kind="shared", output_serde=STATE)

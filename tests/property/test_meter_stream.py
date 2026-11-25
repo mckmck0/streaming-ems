@@ -11,16 +11,26 @@ outside the run window):
 - a copy of a record inserted anywhere after it changes no output, only one counter (AC-011-13);
 - at most ``2L`` slots are kept, sorted; a fold that never prunes gives the same outputs
   (AC-011-09).
+
+Spec 012 (plan §2), at the end of the file:
+- without a clock the horizon ``max(newest, closed - 1)`` is the newest reading after every reading
+  (AC-012-01), so judging lateness against it changes nothing in sim;
+- with non-decreasing ``meter_close`` calls interleaved anywhere, the outputs equal a never-pruned
+  oracle of the spec's rules, slots close once and in order, each close reaches its ``until``, and
+  every accepted reading is accounted for exactly once: its slot's value, one ``Late``, or still
+  waiting; the rest are ``too_old``, ``duplicate`` or ``conflict`` (AC-012-02, -03, -06).
 """
 
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from hypothesis import given
 from hypothesis import strategies as st
 
+from ems.assembler import meter_stream as ms
 from ems.assembler.mapping import Reading
 from ems.assembler.meter_stream import Closed, Late, MeterStream, meter_apply
 
@@ -204,3 +214,195 @@ def test_ac_011_09_pruning_changes_no_output(case: tuple[int, list[Reading]]) ->
     assert s.before_start == sum(r.t < FIRST for r in records)
     assert s.after_end == sum(r.t >= END for r in records)
     assert len(trace.first) + s.too_old + s.duplicate + s.conflict == len(in_window)
+
+
+# ── the live clock (spec 012) ─────────────────────────────────────────────────────────────────────
+
+COUNTERS = ("before_start", "after_end", "too_old", "duplicate", "conflict", "estimated", "late")
+type Event = Reading | int  # a reading, or a clock close up to (excluding) that slot
+
+
+@dataclass
+class Expected:
+    """What the spec's rules give for a sequence of readings and clock closes."""
+
+    closed: list[Closed] = field(default_factory=list)
+    lates: list[Late] = field(default_factory=list)
+    stored: dict[int, tuple[str, float]] = field(default_factory=dict)  # slot -> (event id, kWh)
+    counts: dict[str, int] = field(default_factory=lambda: dict.fromkeys(COUNTERS, 0))
+    skipped: int = 0
+
+
+def clock_oracle(first: int, end: int, late_slots: int, events: Sequence[Event]) -> Expected:
+    """Plan §2 with a slot table that is never pruned. A reading is judged against the horizon
+    before it, ``max(newest, closed - 1)``: at or below ``horizon - 2L`` too old; a slot already
+    held is a duplicate (same event) or a conflict; otherwise it is stored, and if its slot already
+    closed (on an estimate) it is a ``Late`` for step ``horizon + 1``. Slots close while the next
+    one is held or the newest reading is ``L`` past it; a clock close also closes every slot below
+    its step (the estimate: the value used for the slot before, 0 before any)."""
+    exp = Expected()
+    closed, newest, last = first, None, 0.0
+
+    def close_next() -> None:
+        nonlocal closed, last
+        if closed in exp.stored:
+            item = Closed(closed, exp.stored[closed][1], False)
+        else:
+            item = Closed(closed, last, True)
+            exp.counts["estimated"] += 1
+        exp.closed.append(item)
+        last = item.kwh
+        closed += 1
+
+    for ev in events:
+        if isinstance(ev, int):
+            while closed < ev or closed in exp.stored:
+                close_next()
+            continue
+        if ev.t < first:
+            exp.counts["before_start"] += 1
+            continue
+        if ev.t >= end:
+            exp.counts["after_end"] += 1
+            continue
+        horizon = closed - 1 if newest is None else max(newest, closed - 1)
+        if ev.t <= horizon - 2 * late_slots:
+            exp.counts["too_old"] += 1
+            continue
+        if ev.t in exp.stored:
+            same = exp.stored[ev.t][0] == ev.event_id
+            exp.counts["duplicate" if same else "conflict"] += 1
+            continue
+        exp.stored[ev.t] = (ev.event_id, ev.kwh)
+        exp.skipped += ev.skipped
+        if ev.t < closed:
+            exp.lates.append(Late(ev.t, ev.kwh, horizon + 1))
+            exp.counts["late"] += 1
+        newest = ev.t if newest is None else max(newest, ev.t)
+        while closed in exp.stored or newest >= closed + late_slots:
+            close_next()
+    return exp
+
+
+@st.composite
+def clocked(draw: st.DrawFn) -> tuple[int, list[Event]]:
+    """``(L, events)``: the readings of ``arrivals()`` with up to six clock closes inserted at any
+    positions, their steps non-decreasing in ``[FIRST - 2, END]`` (below the first slot, a no-op;
+    the household caps the clock at ``end_step``)."""
+    late_slots, records = draw(arrivals())
+    n = draw(st.sampled_from((1, 2, 3, 4, 6, 0)))
+    untils = sorted(draw(st.lists(st.integers(FIRST - 2, END), min_size=n, max_size=n)))
+    at = sorted(draw(st.lists(st.integers(0, len(records)), min_size=n, max_size=n)))
+    events: list[Event] = []
+    k = 0
+    for i in range(len(records) + 1):
+        while k < n and at[k] == i:
+            events.append(untils[k])
+            k += 1
+        if i < len(records):
+            events.append(records[i])
+    return late_slots, events
+
+
+@dataclass
+class ClockTrace:
+    stream: MeterStream
+    closed: list[Closed] = field(default_factory=list)
+    lates: list[Late] = field(default_factory=list)
+    stored: list[Reading] = field(default_factory=list)  # readings no counter refused
+    refused: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REFUSALS, 0))
+
+
+def fold_clocked(late_slots: int, events: Sequence[Event]) -> ClockTrace:
+    """Apply readings and clock closes in order, checking the per-call properties on the way."""
+    trace = ClockTrace(MeterStream(closed=FIRST))
+    for ev in events:
+        before = trace.stream
+        if isinstance(ev, int):
+            s, out = ms.meter_close(before, ev, late_slots)
+            assert s.closed >= ev  # every slot below the clock step is closed
+            assert [x.t for x in out] == list(range(before.closed, s.closed))
+            # a close reads nothing: only `closed`, `last_kwh`, the slot table and `estimated` move
+            moved = {"closed": 0, "last_kwh": 0.0, "slots": (), "estimated": 0}
+            assert dataclasses.replace(s, **moved) == dataclasses.replace(before, **moved)
+            assert s.estimated - before.estimated == sum(x.estimated for x in out)
+            if ev <= before.closed:
+                assert (s, out) == (before, ())
+            trace.closed += out
+        else:
+            s, out, lt = meter_apply(before, FIRST, END, late_slots, ev)
+            added = [k for k in REFUSALS if getattr(s, k) != getattr(before, k)]
+            assert len(added) <= 1 and all(getattr(s, k) == getattr(before, k) + 1 for k in added)
+            if added:
+                trace.refused[added[0]] += 1
+                assert (out, lt) == ((), None) and s.late == before.late
+            else:
+                trace.stored.append(ev)
+            if lt is not None:
+                assert (lt.t, lt.kwh) == (ev.t, ev.kwh)
+                assert lt.at_step == ms.horizon(before) + 1 >= before.closed
+                assert lt.t < lt.at_step <= lt.t + 2 * late_slots
+                trace.lates.append(lt)
+            trace.closed += out
+        h = ms.horizon(s)
+        ts = [t for t, _, _ in s.slots]
+        assert ts == sorted(set(ts)) and len(ts) <= 2 * late_slots
+        assert all(h - 2 * late_slots < t <= h for t in ts)
+        assert h >= ms.horizon(before)  # the horizon never falls
+        trace.stream = s
+    return trace
+
+
+@given(case=arrivals())
+def test_ac_012_01_without_a_clock_the_horizon_is_the_newest_reading(
+    case: tuple[int, list[Reading]],
+) -> None:
+    late_slots, records = case
+    s = MeterStream(closed=FIRST)
+    for rec in records:
+        s, _, _ = meter_apply(s, FIRST, END, late_slots, rec)
+        assert ms.horizon(s) == (s.newest if s.newest is not None else FIRST - 1)
+    assert fold(late_slots, records).closed == clock_oracle(FIRST, END, late_slots, records).closed
+
+
+@given(case=clocked())
+def test_ac_012_02_03_with_a_clock_the_stream_follows_the_rules(
+    case: tuple[int, list[Event]],
+) -> None:
+    late_slots, events = case
+    trace = fold_clocked(late_slots, events)
+    exp = clock_oracle(FIRST, END, late_slots, events)
+    assert trace.closed == exp.closed
+    assert trace.lates == exp.lates
+    s = trace.stream
+    assert {k: getattr(s, k) for k in COUNTERS} == exp.counts
+    assert s.skipped == exp.skipped
+
+
+@given(case=clocked())
+def test_ac_012_06_with_a_clock_every_accepted_reading_is_accounted_for_once(
+    case: tuple[int, list[Event]],
+) -> None:
+    late_slots, events = case
+    trace = fold_clocked(late_slots, events)
+    s = trace.stream
+    ts = [x.t for x in trace.closed]
+    assert ts == list(range(FIRST, s.closed)) and s.closed <= END  # once each, in order
+    in_window = [ev for ev in events if not isinstance(ev, int) and FIRST <= ev.t < END]
+    refused = trace.refused
+    assert len(trace.stored) + refused["too_old"] + refused["duplicate"] + refused["conflict"] == (
+        len(in_window)
+    )
+    assert [refused[k] for k in REFUSALS] == [getattr(s, k) for k in REFUSALS]
+    closed = {x.t: x for x in trace.closed}
+    late_of = {lt.t: lt for lt in trace.lates}
+    assert len(late_of) == len(trace.lates) == s.late  # at most one correction per slot
+    assert len({r.t for r in trace.stored}) == len(trace.stored)  # a slot is stored once
+    for rec in trace.stored:
+        if rec.t >= s.closed:  # still waiting for its slot to close
+            assert rec.t not in late_of
+        elif closed[rec.t].estimated:  # closed before it came: one correction
+            assert (late_of[rec.t].t, late_of[rec.t].kwh) == (rec.t, rec.kwh)
+        else:  # its slot's value
+            assert closed[rec.t].kwh == rec.kwh and rec.t not in late_of
+    assert set(late_of) <= {r.t for r in trace.stored}

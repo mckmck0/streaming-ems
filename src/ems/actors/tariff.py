@@ -59,12 +59,14 @@ STATE = serde_for(TariffState)
 @tariff.handler(input_serde=BytesSerde(), accept="*/*")
 async def on_price(ctx: ObjectContext, raw: bytes) -> None:
     """`ems.price.v1`, through `ingress-prices`."""
-    await shell.ingest_market(ctx, raw, STATE, on_record, TariffState())
+    await shell.ingest_market(ctx, ("Tariff", "on_price"), raw, STATE, on_record, TariffState())
 
 
 @tariff.handler(name="subscribe", input_serde=serde_for(Subscribe))
 async def subscribe_handler(ctx: ObjectContext, msg: Subscribe) -> None:
-    await shell.handle_market(ctx, STATE, lambda s: subscribe(s, msg), TariffState())
+    await shell.handle_market(
+        ctx, ("Tariff", "subscribe"), STATE, lambda s: subscribe(s, msg), TariffState(), msg.t
+    )
 
 
 @tariff.handler(kind="shared", output_serde=STATE)

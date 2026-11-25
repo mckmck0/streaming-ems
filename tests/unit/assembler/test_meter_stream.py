@@ -9,6 +9,12 @@ stream's own records (``L`` = ``late_slots``):
 
 Plus a gap at the start (estimate 0), a jump after a gap that must not lose the reading behind it,
 duplicate and conflict, and records outside ``[first_step, end_step)``.
+
+AC-012-02, -03 (spec 012, plan §2), at the end of the file: the live clock closes slots with
+``meter_close``, and a reading is judged against the stream's horizon before it,
+``max(newest, closed - 1)``: at or below ``horizon - 2L`` it is ``too_old``; for a slot that closed
+on an estimate it is a ``Late`` for step ``horizon + 1``, also when the stream had no reading
+before.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from collections.abc import Iterable
 
 import pytest
 
+from ems.assembler import meter_stream as ms
 from ems.assembler.mapping import Reading
 from ems.assembler.meter_stream import Closed, Late, MeterStream, meter_apply
 
@@ -223,3 +230,127 @@ def test_counters_of_a_mixed_run() -> None:
     ]
     assert lates == [late(1, 1.5, 4), late(6, 6.5, 10)]
     assert (s.estimated, s.late, s.too_old, s.duplicate, s.conflict) == (5, 2, 1, 1, 1)
+
+
+# ── the live clock (spec 012) ─────────────────────────────────────────────────────────────────────
+
+
+def close(s: MeterStream, until: int, late_slots: int) -> tuple[MeterStream, list[Closed]]:
+    """``meter_close`` up to slot ``FIRST + until`` (exclusive)."""
+    s2, out = ms.meter_close(s, FIRST + until, late_slots)
+    return s2, list(out)
+
+
+def test_ac_012_03_horizon_is_the_newest_reading_or_the_last_closed_slot() -> None:
+    assert ms.horizon(MeterStream(closed=FIRST)) == FIRST - 1  # nothing read, nothing closed
+    s, _, _ = feed([r(0), r(1), r(2)], 2)
+    assert ms.horizon(s) == s.newest == FIRST + 2
+    s, _, _ = feed([r(0), r(3)], 3)  # slots 1 and 2 still wait: closed = 1, newest = 3
+    assert (s.closed, ms.horizon(s)) == (FIRST + 1, FIRST + 3)
+    assert ms.horizon(MeterStream(closed=FIRST + 10, newest=FIRST + 3)) == FIRST + 9
+    assert ms.horizon(MeterStream(closed=FIRST + 10)) == FIRST + 9
+
+
+def test_ac_012_02_meter_close_on_a_stream_that_never_had_a_reading() -> None:
+    s, closed = close(MeterStream(closed=FIRST), 3, 2)
+    assert closed == [c(0, 0.0, True), c(1, 0.0, True), c(2, 0.0, True)]
+    assert s == MeterStream(closed=FIRST + 3, estimated=3)
+    assert ms.horizon(s) == FIRST + 2
+
+
+def test_ac_012_02_meter_close_uses_held_readings_and_estimates_the_rest() -> None:
+    """L = 3, slots 0 and 2: slot 1 waits (newest 2 < 1 + L). The clock at 4 closes 1 on slot 0's
+    value, 2 on its reading and 3 on slot 2's value."""
+    before, closed, _ = feed([r(0), r(2)], 3)
+    assert closed == [c(0, 0.5)] and before.closed == FIRST + 1
+    s, closed = close(before, 4, 3)
+    assert closed == [c(1, 0.5, True), c(2, 2.5), c(3, 2.5, True)]
+    assert s == dataclasses.replace(before, closed=FIRST + 4, last_kwh=2.5, estimated=2)
+    assert s.newest == FIRST + 2 and ms.horizon(s) == FIRST + 3
+    # slots kept: t > horizon - 2L = FIRST - 3, so both readings stay for duplicate detection
+    assert s.slots == ((FIRST, "e0", 0.5), (FIRST + 2, "e2", 2.5))
+
+
+def test_ac_012_02_meter_close_keeps_closing_while_the_next_slot_holds_a_reading() -> None:
+    """L = 8, slots 1 … 3 held behind a missing slot 0: the clock at 1 closes slot 0 on the
+    estimate 0, then 1, 2 and 3 on their readings."""
+    before, closed, _ = feed([r(1), r(2), r(3)], 8)
+    assert closed == [] and before.closed == FIRST
+    s, closed = close(before, 1, 8)
+    assert closed == [c(0, 0.0, True), c(1, 1.5), c(2, 2.5), c(3, 3.5)]
+    assert (s.closed, s.estimated, s.last_kwh, s.newest) == (FIRST + 4, 1, 3.5, FIRST + 3)
+
+
+@pytest.mark.parametrize("until", [-5, 0, 1, 2])
+def test_ac_012_02_meter_close_at_or_below_closed_changes_nothing(until: int) -> None:
+    s, _, _ = feed([r(0), r(1)], 2)
+    assert s.closed == FIRST + 2
+    assert ms.meter_close(s, FIRST + until, 2) == (s, ())
+    empty = MeterStream(closed=FIRST)
+    if until <= 0:
+        assert ms.meter_close(empty, FIRST + until, 2) == (empty, ())
+
+
+def test_ac_012_03_a_first_reading_for_a_clock_closed_slot_becomes_a_correction() -> None:
+    """The stream had no reading: the clock closed 0 … 2 on 0, horizon 2. Slot 1 is a ``Late`` for
+    step 3 (= horizon + 1), counted, and a copy of it is a duplicate."""
+    s, _ = close(MeterStream(closed=FIRST), 3, 2)
+    s, closed, lates = feed([r(1, 4.0)], 2, s)
+    assert closed == [] and lates == [late(1, 4.0, 3)]
+    assert (s.late, s.newest, s.closed, s.estimated) == (1, FIRST + 1, FIRST + 3, 3)
+    assert s.last_kwh == 0.0  # a correction changes no later estimate
+    assert s.slots == ((FIRST + 1, "e1", 4.0),)  # kept: t > horizon (2) - 2L
+    s2, closed, lates = feed([r(1, 4.0)], 2, s)
+    assert (closed, lates) == ([], []) and s2 == dataclasses.replace(s, duplicate=1)
+
+
+def test_ac_012_03_a_first_reading_is_judged_against_the_clock_horizon() -> None:
+    """No reading before; the clock closed 0 … 7, horizon 7, ``horizon - 2L`` = 3 (L = 2): slot 3 is
+    too old, slot 4 is a ``Late`` for step 8."""
+    s, _ = close(MeterStream(closed=FIRST), 8, 2)
+    old, closed, lates = feed([r(3)], 2, s)
+    assert (closed, lates) == ([], []) and old == dataclasses.replace(s, too_old=1)
+    s, closed, lates = feed([r(4, 2.0)], 2, s)
+    assert closed == [] and lates == [late(4, 2.0, 8)] and s.late == 1
+
+
+def test_ac_012_03_a_reading_behind_the_clock_is_judged_against_the_horizon_not_newest() -> None:
+    """L = 2: slot 0 read, the clock closes 1 … 5 on its value, horizon 5 > newest 0. Slot 1 is at
+    ``horizon - 2L``: too old (the newest alone would make it a correction). Slot 2 is a ``Late``
+    for step 6, not newest + 1."""
+    s, _, _ = feed([r(0, 0.7)], 2)
+    s, closed = close(s, 6, 2)
+    assert [x.t - FIRST for x in closed] == [1, 2, 3, 4, 5] and all(x.estimated for x in closed)
+    assert (s.newest, ms.horizon(s)) == (FIRST, FIRST + 5)
+    old, closed, lates = feed([r(1)], 2, s)
+    assert (closed, lates) == ([], []) and old == dataclasses.replace(s, too_old=1)
+    s, closed, lates = feed([r(2, 3.0)], 2, s)
+    assert closed == [] and lates == [late(2, 3.0, 6)]
+
+
+def test_ac_012_03_the_clock_more_than_2l_ahead_of_the_readings() -> None:
+    """L = 2, slots 0 … 2 read; the clock jumps to 20: 3 … 19 close on slot 2's value, and the
+    readings fall out of the slot table (horizon 19 - 2L = 15). Behind 15 everything is too old,
+    above it a correction for step 20; slot 20 itself closes at once on its reading."""
+    before, _, _ = feed([r(0), r(1), r(2)], 2)
+    s, closed = close(before, 20, 2)
+    assert closed == [c(t, 2.5, True) for t in range(3, 20)]
+    assert (s.closed, s.estimated, s.newest, s.slots) == (FIRST + 20, 17, FIRST + 2, ())
+    assert ms.horizon(s) == FIRST + 19
+    for t in (2, 10, 15):  # slot 2 had a reading, but its copy is now judged too old
+        old, closed, lates = feed([r(t)], 2, s)
+        assert (closed, lates) == ([], []) and old == dataclasses.replace(s, too_old=1)
+    _, closed, lates = feed([r(16, 9.0)], 2, s)
+    assert closed == [] and lates == [late(16, 9.0, 20)]
+    s3, closed, lates = feed([r(20)], 2, s)
+    assert closed == [c(20, 20.5)] and lates == []
+    assert (s3.closed, s3.newest, ms.horizon(s3)) == (FIRST + 21, FIRST + 20, FIRST + 20)
+
+
+def test_ac_012_01_without_a_clock_the_horizon_is_the_newest_reading() -> None:
+    """The mixed run of ``test_counters_of_a_mixed_run``, checked after every reading."""
+    records = [r(0), r(3), r(1), r(2), r(9), r(4), r(6), r(9), r(6, 1.0, "q")]
+    s = MeterStream(closed=FIRST)
+    for rec in records:
+        s, _, _ = meter_apply(s, FIRST, END, 2, rec)
+        assert s.newest is not None and ms.horizon(s) == s.newest

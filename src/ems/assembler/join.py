@@ -12,6 +12,11 @@ watermarks are past the end of ``q`` (ADR 0017). It reads only what was visible 
 
 How the streams interleave cannot change a step: each stream's state depends only on its own order,
 and a record that arrives after a step was released is not visible to that step.
+
+Live mode (spec 012, ADR 0020) adds ``on_clock``: the wall clock closes the meter slots and raises
+the price and forecast watermarks up to "now minus the grace", so a missing reading or a late
+publication cannot stall a decision. A curve or run that then reaches the join behind its watermark
+becomes visible from that watermark (counted); in sim this never happens.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 from ems.assembler.mapping import CONSUMPTION, PRODUCTION, Reading
-from ems.assembler.meter_stream import Closed, Late, MeterStream, meter_apply
+from ems.assembler.meter_stream import Closed, Late, MeterStream, meter_apply, meter_close
 from ems.assembler.params import RunParams
 from ems.assembler.sparse_streams import Curve, Run
 from ems.contracts.time import WARSAW, from_quarter_index
@@ -65,6 +70,9 @@ class Join:
     price_replaced: int = 0
     unneeded: int = 0  # production readings of a site without PV
     unusable: int = 0  # meter records the mapping could not use
+    after_end_late: int = 0  # late readings whose correction would fall at or after end_step
+    clamped_price: int = 0  # curves that reached the join behind its price watermark (live)
+    clamped_forecast: int = 0  # runs that reached the join behind its forecast watermark (live)
 
 
 def start(params: RunParams) -> Join:
@@ -80,29 +88,79 @@ def on_reading(params: RunParams, j: Join, r: Reading | None) -> tuple[Join, tup
     if r.stream == PRODUCTION:
         if j.production is None:
             return _release(replace(j, unneeded=j.unneeded + 1))
-        return _release(replace(j, production=_add(params, j.production, r)))
-    return _release(replace(j, consumption=_add(params, j.consumption, r)))
+        side, dropped = _add(params, j.production, r)
+        return _release(replace(j, production=side, after_end_late=j.after_end_late + dropped))
+    side, dropped = _add(params, j.consumption, r)
+    return _release(replace(j, consumption=side, after_end_late=j.after_end_late + dropped))
 
 
 def on_curves(
     params: RunParams, j: Join, covered: int, curves: Sequence[Curve]
 ) -> tuple[Join, tuple[Step, ...]]:
-    """Curves in the price stream's order, with the stream's watermark after them."""
-    j = replace(j, price_covered=max(j.price_covered, covered), curves=(*j.curves, *curves))
+    """Curves in the price stream's order, with the stream's watermark after them. A curve behind
+    the join's watermark becomes visible from it (only the live clock can put it there).
+    """
+    floor = j.price_covered
+    held = tuple(replace(c, visible_step=max(c.visible_step, floor)) for c in curves)
+    moved = sum(c.visible_step < floor for c in curves)
+    j = replace(
+        j,
+        price_covered=max(j.price_covered, covered),
+        curves=(*j.curves, *held),
+        clamped_price=j.clamped_price + moved,
+    )
     return _release(j)
 
 
 def on_run(params: RunParams, j: Join, covered: int, run: Run) -> tuple[Join, tuple[Step, ...]]:
-    """A run in the forecast stream's order, with the stream's watermark after it."""
-    j = replace(j, forecast_covered=max(j.forecast_covered, covered), runs=(*j.runs, run))
+    """A run in the forecast stream's order, with the stream's watermark after it; clamped like a
+    curve.
+    """
+    floor = j.forecast_covered
+    moved = run.visible_step < floor
+    held = replace(run, visible_step=floor) if moved else run
+    j = replace(
+        j,
+        forecast_covered=max(j.forecast_covered, covered),
+        runs=(*j.runs, held),
+        clamped_forecast=j.clamped_forecast + moved,
+    )
     return _release(j)
 
 
-def _add(params: RunParams, side: MeterSide, r: Reading) -> MeterSide:
+def on_clock(params: RunParams, j: Join, clock_step: int) -> tuple[Join, tuple[Step, ...]]:
+    """Live mode: every step below ``clock_step`` (capped at ``end_step``) has ended at least the
+    grace ago. Close the meter slots below it on their readings or on estimates, raise the price
+    and forecast watermarks to it, and release what the rule then allows.
+    """
+    c = min(clock_step, params.end_step)
+    consumption = _close(params, j.consumption, c)
+    production = None if j.production is None else _close(params, j.production, c)
+    j = replace(
+        j,
+        consumption=consumption,
+        production=production,
+        price_covered=max(j.price_covered, c),
+        forecast_covered=max(j.forecast_covered, c),
+    )
+    return _release(j)
+
+
+def _close(params: RunParams, side: MeterSide, until: int) -> MeterSide:
+    stream, closed = meter_close(side.stream, until, params.late_slots)
+    return MeterSide(stream, side.ready + closed, side.late)
+
+
+def _add(params: RunParams, side: MeterSide, r: Reading) -> tuple[MeterSide, int]:
+    """A reading on one meter side; a correction that could only attach at or after
+    ``end_step`` is dropped and returned as counted (no step there is ever released).
+    """
     stream, closed, late = meter_apply(
         side.stream, params.first_step, params.end_step, params.late_slots, r
     )
-    return MeterSide(stream, side.ready + closed, side.late + ((late,) if late else ()))
+    if late is not None and late.at_step >= params.end_step:
+        return MeterSide(stream, side.ready + closed, side.late), 1
+    return MeterSide(stream, side.ready + closed, side.late + ((late,) if late else ())), 0
 
 
 def _covered(j: Join) -> bool:

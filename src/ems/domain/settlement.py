@@ -365,3 +365,34 @@ def settle_quarter(
     if due_month(acc, 0) is not None:
         acc, month = close_month(acc, fixed, basis, rules)
     return acc, row, month
+
+
+# ── cost metrics of a run (spec 012; definitions in 11-experiments.md) ──────────────────────────
+
+
+@dataclass(frozen=True)
+class Costs:
+    """The three cost numbers of a household and strategy, from what its state holds."""
+
+    bill_pln: (
+        float | None
+    )  # sum of payable minus refunds over the closed months; None with none closed
+    deposit_closing_pln: float | None  # the deposit held after the last closed month
+    ledger_net_cost_pln: float | None  # sum of (energy + distribution - factor x export value)
+
+
+def costs(rules: NetBillingRules, months: Sequence[MonthSettlement], acc: SettleAcc) -> Costs:
+    """``bill_pln`` and ``deposit_closing_pln`` over the closed months (None while none closed);
+    ``ledger_net_cost_pln`` over the closed months and every hour row still held, which during the
+    lag can span two months (None when there is neither). The open hour has no row yet.
+    """
+    bill = deposit = None
+    if months:
+        bill = math.fsum(m.payable_pln for m in months) - math.fsum(m.refund_pln for m in months)
+        deposit = math.fsum(tr.remaining_pln for tr in acc.tranches)
+    terms = [
+        x.energy_cost_pln + x.dist_cost_pln - rules.deposit_factor * x.export_value_pln
+        for x in (*months, *acc.month_rows)
+    ]
+    ledger = math.fsum(terms) if terms else None
+    return Costs(bill, deposit, ledger)

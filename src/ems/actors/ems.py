@@ -82,17 +82,17 @@ STATE = serde_for(EmsState)
 
 @ems.handler(input_serde=shell.PARAMS_SERDE)
 async def configure(ctx: ObjectContext, params: RunParams) -> None:
-    await shell.configure(ctx, params, start, STATE)
+    await shell.configure(ctx, ("Ems", "configure"), params, start, STATE)
 
 
 @ems.handler(name="on_step", input_serde=serde_for(Step))
 async def on_step_handler(ctx: ObjectContext, step: Step) -> None:
-    await shell.handle(ctx, STATE, lambda p, s: on_step(p, s, step))
+    await shell.handle(ctx, ("Ems", "on_step"), STATE, lambda p, s: on_step(p, s, step), step.t)
 
 
 @ems.handler(name="on_ack", input_serde=serde_for(Ack))
 async def on_ack_handler(ctx: ObjectContext, ack: Ack) -> None:
-    await shell.handle(ctx, STATE, lambda p, s: on_ack(p, s, ack))
+    await shell.handle(ctx, ("Ems", "on_ack"), STATE, lambda p, s: on_ack(p, s, ack), ack.t)
 
 
 @ems.handler(kind="shared", output_serde=STATE)

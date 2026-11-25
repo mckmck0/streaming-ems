@@ -54,12 +54,14 @@ STATE = serde_for(BatteryState)
 
 @battery.handler(input_serde=shell.PARAMS_SERDE)
 async def configure(ctx: ObjectContext, params: RunParams) -> None:
-    await shell.configure(ctx, params, start, STATE)
+    await shell.configure(ctx, ("Battery", "configure"), params, start, STATE)
 
 
 @battery.handler(name="apply", input_serde=serde_for(Apply))
 async def apply_handler(ctx: ObjectContext, command: Apply) -> None:
-    await shell.handle(ctx, STATE, lambda p, s: on_apply(p, s, command))
+    await shell.handle(
+        ctx, ("Battery", "apply"), STATE, lambda p, s: on_apply(p, s, command), command.t
+    )
 
 
 @battery.handler(kind="shared", output_serde=STATE)
