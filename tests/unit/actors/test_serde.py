@@ -65,6 +65,12 @@ def _leaves(value: Any, path: str = "") -> list[tuple[str, str, Any]]:
 
 @pytest.fixture(scope="module")
 def values() -> dict[type[Any], list[Any]]:
+    return stored_and_sent_values()
+
+
+def stored_and_sent_values() -> dict[type[Any], list[Any]]:
+    """The values of the ``values`` fixture; the 1.0.0 state fixtures of spec 012 start from them
+    (``tests/fixtures/state/generate.py``)."""
     gen = generate(START, HOURS, LATE_SLOTS, False)
     out: dict[type[Any], list[Any]] = {tp: [] for tp in STORED_AND_SENT}
     for params in gen.params.values():

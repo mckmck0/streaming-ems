@@ -115,6 +115,18 @@ Frozen dataclasses encoded as JSON by `ems.actors.serde`; source of truth `src/e
 no separate timestamp. Within version 1 changes are additive: a new field is optional with a default. A unit test
 pins the field names of every message and of the types nested in it.
 
+**Stored state follows the same rule within a run** (spec 012). The values under `params`, `state` and `log`
+change only by adding fields, each optional with a default. Any other change needs a new `run_id`, whose keys
+start empty. The reason is what an unreadable value does:
+- a stored value that cannot be read fails every invocation of its object until the invocation pauses;
+- a message that cannot be read, or that reaches an object that is not configured, fails terminally and is lost,
+  and its receiver waits for its number from then on (risk A14).
+
+Fixtures of every stored and sent type as version 1.0.0 encoded them (`tests/fixtures/state/1.0.0/`) must keep
+decoding, and re-encoding a decoded value must keep every key and value of its line
+(`tests/unit/actors/test_state_compat.py`). So a removed, renamed or retyped field fails, and an added field with
+a default passes.
+
 | Message | From → to | Fields |
 |---|---|---|
 | `Step` | Household → each strategy, Ems | `t`, `pv_kwh`, `load_kwh`, `rce_pln_per_kwh`, `pv_estimated`, `load_estimated`, `price_replaced`, `forecast_issue_s` (or null), `corrections: [Correction{stream, t, kwh}]` |
