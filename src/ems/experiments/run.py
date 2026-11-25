@@ -18,6 +18,7 @@ import contextlib
 import dataclasses
 import json
 import math
+import subprocess
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ from ems.experiments.metrics import KillEvent, Line
 SUMMARY_SCHEMA = "1.0.0"
 MANIFEST_SCHEMA = "1.0.0"
 TIMING_LOG_VERSION = 1
+STDERR_LINES = 10  # of a failed command, in the reason of a failed run
 POLL_S = 5.0  # the state table is read at most this often while a run is in progress
 QUARTER_S = 900
 CONFIG_DIR = stack.REPO / "config"
@@ -237,7 +239,7 @@ def run_one(
         status, reason = "failed", exc.reason
         summary |= exc.diagnosis
     except Exception as exc:
-        status, reason = "failed", f"{type(exc).__name__}: {exc}"
+        status, reason = "failed", _reason(exc)
     finally:
         with contextlib.suppress(Exception):
             ops.close()
@@ -482,6 +484,15 @@ def _metrics(
         )
     )
     return out
+
+
+def _reason(exc: Exception) -> str:
+    """The exception, and for a failed command the last lines of its stderr (which say why)."""
+    text = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+        err = exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode(errors="replace")
+        text += " stderr: " + " | ".join(err.strip().splitlines()[-STDERR_LINES:])
+    return text
 
 
 def _manifest(

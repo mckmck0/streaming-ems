@@ -121,6 +121,7 @@ class FakeOps:
     pending_answers: list[int] = dataclasses.field(default_factory=lambda: [2, 0])
     fail_set_first: bool = False
     fail_configure_runs: tuple[int, ...] = ()  # runs (counted by reset) whose configure raises
+    fail_reset_runs: tuple[int, ...] = ()  # runs whose reset fails as a command with stderr
     perturb: bool = False
     release_delay_s: Mapping[float, float] = dataclasses.field(default_factory=dict)
     nan_samples: bool = False
@@ -182,6 +183,10 @@ class FakeOps:
         self.runs += 1
         self._new_run()
         self.log("reset")
+        if self.runs in self.fail_reset_runs:
+            raise subprocess.CalledProcessError(
+                1, ["docker", "compose", "up"], output="", stderr="line 1\ncontainer exited (0)\n"
+            )
 
     def open(self, run_dir: Path, *, live: bool) -> None:
         self.log("open", (run_dir, live))
@@ -875,6 +880,13 @@ def test_ac_012_25_a_failed_run_is_written_and_the_next_run_goes_on(tmp_path: Pa
         assert len(rel) == 3 and rel[0].startswith("t-run-"), rel
     statuses = sorted(_strict_json(p)["status"] for p in summaries)
     assert statuses == ["failed", "ok"]
+
+
+def test_ac_012_25_a_failed_command_names_its_stderr_in_the_reason(tmp_path: Path) -> None:
+    ops = FakeOps(fail_reset_runs=(1,))
+    result = _run_one(_experiment(), ops, tmp_path)
+    assert result.status == "failed"
+    assert "container exited (0)" in (result.reason or ""), result.reason
 
 
 def test_ac_012_31_a_sweep_stops_after_the_first_speed_that_is_not_sustained(
