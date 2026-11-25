@@ -10,6 +10,8 @@ policy and no published port; together they cover the four Kafka-fed topics, eac
 AC-011-25: since spec 011 each container names its own target service beside its handler
 (`Household.on_measurement`, `Weather.on_forecast`, `Tariff.on_price`); the shared anchor names
 none, and the harness's `INGRESS_TARGETS` agree with the file.
+AC-012-18 (spec 012, plan §4): Restate takes its journal retention from
+`EMS_RESTATE_JOURNAL_RETENTION`, `1d` when it is unset.
 """
 
 from __future__ import annotations
@@ -187,3 +189,13 @@ def test_ac_011_25_harness_targets_match_the_compose_file(repo: Path) -> None:
         for name in stack.INGRESS_TARGETS
     }
     assert from_compose == stack.INGRESS_TARGETS
+
+
+# ── spec 012: journal retention and memory limits (AC-012-18, AC-012-39) ───────────────────────
+
+
+def test_ac_012_18_restate_journal_retention_from_the_environment_one_day_by_default(
+    repo: Path,
+) -> None:
+    env = _service(repo, "restate").get("environment") or {}
+    assert env.get("RESTATE_DEFAULT_JOURNAL_RETENTION") == "${EMS_RESTATE_JOURNAL_RETENTION:-1d}"

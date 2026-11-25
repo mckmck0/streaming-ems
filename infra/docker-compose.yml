@@ -137,6 +137,8 @@ services:
       RESTATE_NODE_NAME: "restate-1"         # fixed: the node finds its data under /restate-data/<node name>
       RESTATE_CLUSTER_NAME: "ems"
       RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE: "512 MiB"
+      # Journals of completed invocations: 1 d in development, 0 in experiments and live (spec 012, risk A6).
+      RESTATE_DEFAULT_JOURNAL_RETENTION: "${EMS_RESTATE_JOURNAL_RETENTION:-1d}"
     ports:
       - "127.0.0.1:8080:8080"                  # ingress
       - "127.0.0.1:9070:9070"                  # admin API and UI
