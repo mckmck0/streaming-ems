@@ -42,6 +42,7 @@ SUMMARY_SCHEMA = "1.0.0"
 MANIFEST_SCHEMA = "1.0.0"
 TIMING_LOG_VERSION = 1
 STDERR_LINES = 10  # of a failed command, in the reason of a failed run
+HOST_SLEEP_S = 1.0  # a larger gap between the wall and the monotonic clock fails the run
 POLL_S = 5.0  # the state table is read at most this often while a run is in progress
 QUARTER_S = 900
 CONFIG_DIR = stack.REPO / "config"
@@ -108,6 +109,8 @@ class Ops(Protocol):
 
     def now(self) -> float: ...
 
+    def monotonic(self) -> float: ...
+
     def sleep(self, seconds: float) -> None: ...
 
 
@@ -171,6 +174,7 @@ def run_one(
     summary: dict[str, Any] = {"schema_version": SUMMARY_SCHEMA, "run": spec.name, "run_id": run_id}
     manifest: dict[str, Any] = {}
     status, reason = "ok", None
+    clocks = (ops.now(), ops.monotonic())
     try:
         ops.reset()
         ops.open(out_dir, live=live)
@@ -230,8 +234,11 @@ def run_one(
         summary |= _metrics(spec, first, end, kept, retries, records, twins, kills, pacing, due)
         summary["samples"] = samples
         summary["kills"] = [dataclasses.asdict(k) for k in kills]
+        summary["host_slept_s"] = slept = host_slept_s(ops, *clocks)
         if problems:
             raise _Failed(f"{len(problems)} mismatches against the offline side: {problems[:5]}")
+        if slept > HOST_SLEEP_S:
+            raise _Failed(f"the host slept {slept:.0f} s")
         if held:
             raise _Failed(f"{len(held)} objects still hold messages after the end")
         if _has_nan(summary):
@@ -513,6 +520,14 @@ def _ingested_unix(raw: bytes) -> float | None:
         return datetime.fromisoformat(json.loads(raw)["ingested_at"]).timestamp()
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def host_slept_s(ops: Ops, wall0: float, mono0: float) -> float:
+    """How long the host slept since ``(wall0, mono0)``: the wall clock runs on while it sleeps and
+    the monotonic clock does not (macOS and Linux), so the gap between the two is the sleep. A
+    sleep stalls the stack and the publisher alike and inflates every lag, so such a run is failed.
+    """
+    return max(0.0, (ops.now() - wall0) - (ops.monotonic() - mono0))
 
 
 def _reason(exc: Exception) -> str:

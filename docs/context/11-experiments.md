@@ -125,7 +125,10 @@ sustained) or `repetitions`. Each run, on a fresh stack (`ems.experiments.run.ru
    that no object still holds messages;
 6. exports the Parquet tables of `08-contracts.md` and writes `summary.json` and `manifest.json`.
 
-A run that fails is recorded with `status: failed` and its reason; the next run still starts.
+A run that fails is recorded with `status: failed` and its reason; the next run still starts. A run during which
+the host slept (the wall clock ran more than 1 s ahead of the monotonic clock, which stops in sleep) fails as
+`the host slept N s`, since a sleep stalls the stack and the publisher and inflates every lag; `host_slept_s` is in
+every summary. On macOS `make exp` runs under `caffeinate -i`, which prevents idle sleep but not a closed lid.
 
 **Systems metrics** (`ems.experiments.metrics`; from the timing log, first line per invocation):
 - `decision_latency_ms`: per household-step, `Battery`'s commit that sends the `Ack` of `t` minus `Household`'s

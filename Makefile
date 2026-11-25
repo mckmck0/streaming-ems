@@ -178,13 +178,16 @@ measure:   # LOCATIONS= and DAYS= override the mode's defaults (skew 100 x 2, ba
 spike:
 	uv run python jobs/spike_repro.py A B C
 # exp (spec 012): one experiment config, each run on a fresh stack (Kafka and Restate volumes wiped).
+# On macOS, caffeinate -i keeps the host from idle sleep for the run (closing the lid still sleeps it;
+# the runner fails a run during which the host slept).
+CAFFEINATE := $(if $(shell command -v caffeinate),caffeinate -i,)
 exp:
 	@test -n "$(NAME)" || { echo "usage: make exp NAME=<experiment-id> [CONFIRM=yes]"; exit 1; }
 	@if [ "$(CONFIRM)" != "yes" ]; then \
 	  read -r -p "make exp wipes the Kafka and Restate volumes before every run. Type yes to continue: " ans; \
 	  [ "$$ans" = "yes" ] || { echo "aborted"; exit 1; }; \
 	fi
-	uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml --yes
+	$(CAFFEINATE) uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml --yes
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Planned targets: commented out until their spec lands (details: docs/context/05-deploy-and-infra.md)

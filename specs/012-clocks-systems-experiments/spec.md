@@ -330,7 +330,10 @@ Runner, export and metrics
   give, before any comparison. IF no managed `Meter` line advances for `stall_s` (a config field; default
   `max(300, 10 × 900 / S)` s in sim, `1800 + G` s in live), THEN THE SYSTEM SHALL mark the run failed as
   `stalled` and record the invocations that are paused, backing off or retried at least once, every object whose
-  inbox holds messages (its expected number and the numbers held), and the last `t` per service.
+  inbox holds messages (its expected number and the numbers held), and the last `t` per service. IF the host
+  slept during the run (its wall clock ran more than 1 s ahead of its monotonic clock), THEN THE SYSTEM SHALL
+  record `host_slept_s` and mark the run failed as `the host slept N s` (added during validation: a closed lid
+  stalled a run for 124 s).
 
 Done-when and validation runs
 - **AC-012-33**: WHEN the Restate server is killed with SIGKILL during a configured backfill, after the first

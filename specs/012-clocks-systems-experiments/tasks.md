@@ -293,7 +293,9 @@ gaps); the amendment, the plan and this list await approval together.
   - summaries with every metric and the highest sustained speed;
   - peaks and OOM flags reported, and the `Tariff` state size (A16);
   - if `restate` is OOM-killed, or its peak anonymous memory exceeds about 1.8 GiB, `mem_limit` goes to `2560m`
-    (plan §9) and the run is repeated.
+    (plan §9) and the run is repeated;
+  - (added during validation) a run during which the host slept fails with `host_slept_s` (AC-012-32), and
+    `make exp` runs under `caffeinate -i` where it exists; `sys-speed` starts at 24.
 - [ ] T47 (AC-012-36, -39) `make exp NAME=sys-live` (up to about 3 h of wall time, including the wait for the
   next full hour):
   - every step released by its end plus `G` plus 5 s, with the distribution of the delay;

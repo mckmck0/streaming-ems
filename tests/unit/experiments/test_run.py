@@ -126,9 +126,11 @@ class FakeOps:
     perturb: bool = False
     release_delay_s: Mapping[float, float] = dataclasses.field(default_factory=dict)
     nan_samples: bool = False
+    host_slept_s: float = 0.0  # the host sleeps this long on the first sleep() of a run
 
     def __post_init__(self) -> None:
         self.t = self.clock
+        self.slept = 0.0
         self.calls: list[tuple[str, float, Any]] = []
         self.publications: list[FakePublication] = []
         self.runs = 0
@@ -173,7 +175,14 @@ class FakeOps:
     def now(self) -> float:
         return self.t
 
+    def monotonic(self) -> float:
+        # A monotonic clock stops while the host sleeps: it falls behind the wall clock.
+        return self.t - self.slept
+
     def sleep(self, seconds: float) -> None:
+        if self.host_slept_s and not self.slept:
+            self.t += self.host_slept_s
+            self.slept = self.host_slept_s
         self.t += max(0.0, seconds)
         if self.t - self.clock > 30 * 86400:
             raise RuntimeError("the fake clock ran 30 days: the runner does not stop")
@@ -789,6 +798,18 @@ def test_ac_012_32_a_stalled_run_fails_with_its_diagnosis(tmp_path: Path) -> Non
     assert config.stall_s(exp.run) == 300.0
     assert 300.0 <= stuck_at - last_meter <= 300.0 + 2 * run.POLL_S
     assert ops.names()[-1] == "close"
+
+
+def test_ac_012_32_a_run_during_which_the_host_slept_fails(tmp_path: Path) -> None:
+    result = _run_one(_experiment(), FakeOps(host_slept_s=124.0), tmp_path)
+    assert (result.status, result.reason) == ("failed", "the host slept 124 s")
+    summary = _summary(tmp_path)
+    assert summary["host_slept_s"] == pytest.approx(124.0)
+    assert summary["exactly_once"]["mismatches"] == []  # the checks still ran
+
+
+def test_ac_012_32_a_run_without_sleep_reports_zero(sim_run: SimRun) -> None:
+    assert _summary(sim_run.out)["host_slept_s"] == 0.0
 
 
 def test_ac_012_28_a_message_left_in_an_inbox_fails_the_run(tmp_path: Path) -> None:

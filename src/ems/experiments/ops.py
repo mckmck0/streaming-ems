@@ -248,6 +248,9 @@ class StackOps:
     def now(self) -> float:
         return time.time()
 
+    def monotonic(self) -> float:
+        return time.monotonic()
+
     def sleep(self, seconds: float) -> None:
         time.sleep(max(0.0, seconds))
 
