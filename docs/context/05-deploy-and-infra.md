@@ -24,11 +24,12 @@
   test-unit. Each tier writes coverage to `logs/.coverage.<tier>` (pytest-cov 7.1.0, coverage 7.17.3 with
   `patch = ["subprocess"]`, so the SDK service a tier starts is measured too); `make report-coverage` combines
   them into `logs/coverage.xml`.
-- Experiments (spec 012): `make exp NAME=<id> [CONFIRM=yes]` runs `experiments/configs/<id>.yaml` through
-  `python -m ems.experiments.run`. It asks once, because every run wipes the Kafka and Restate volumes and starts
-  `kafka`, `kafka-init` and `restate` with journal retention `0s`; it starts its own SDK service on 9080 with
-  `EMS_TIMING_LOG` set (the optional timing log path; unset means no log) and ingress projects `ems-exp-*`.
-  Results go to `experiments/results/` (gitignored).
+- Experiments (spec 012): `make exp NAME=<id> [CONFIRM=yes]` runs `experiments/configs/<id>.yaml` through `python -m
+  ems.experiments.run`. It asks once, because every run wipes the Kafka and Restate volumes and starts `kafka` and
+  `restate` with journal retention `0s` (no `kafka-init`: `up --wait` failed at random when the one-shot job exited
+  before compose looked, and a run ensures its own prefixed topics); it starts its own SDK service on 9080 with
+  `EMS_TIMING_LOG` set (the optional timing log path; unset means no log) and ingress projects `ems-exp-*`. Results
+  go to `experiments/results/` (gitignored).
 
 ### CI (spec 010)
 

@@ -1066,7 +1066,7 @@ INGRESS_FILTER = "label=ems.role=ingress"
 
 
 @pytest.mark.parametrize(("retention", "given"), [("0s", None), ("1d", "1d")])
-def test_ac_012_25_reset_stack_wipes_both_volumes_and_starts_three_services(
+def test_ac_012_25_reset_stack_wipes_both_volumes_and_starts_kafka_and_restate(
     monkeypatch: pytest.MonkeyPatch, retention: str, given: str | None
 ) -> None:
     calls = _record_stack_calls(monkeypatch)
@@ -1079,8 +1079,11 @@ def test_ac_012_25_reset_stack_wipes_both_volumes_and_starts_three_services(
     (down, down_kw), (up, up_kw) = composes
     assert list(down) == ["--profile", "ingress", "down", "-v"]
     assert down_kw.get("project") == "ems"
-    assert list(up) == ["up", "-d", "--wait", "kafka", "kafka-init", "restate"]
-    assert stack.STACK_SERVICES == ("kafka", "kafka-init", "restate")
+    # No kafka-init: the run ensures its own prefixed topics (StackEnv.open), and `up --wait` fails
+    # at random when the one-shot job exits before compose looks ("container … exited (0)",
+    # Compose v5.4.0, 2026-11-25).
+    assert list(up) == ["up", "-d", "--wait", "kafka", "restate"]
+    assert stack.STACK_SERVICES == ("kafka", "restate")
     assert up_kw.get("project") == "ems"
     assert up_kw.get("env") == {"EMS_RESTATE_JOURNAL_RETENTION": retention}
     removed = [i for i, (kind, args, _) in enumerate(calls) if kind == "docker" and "rm" in args]

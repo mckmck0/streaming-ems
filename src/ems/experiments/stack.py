@@ -1117,11 +1117,10 @@ def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
 # ── spec 012: the experiment runner's plumbing (plan §7) ──────────────────────────────────────────
 
 EXP_PROJECT_PREFIX = "ems-exp-"  # the runner's ingress projects: test cleanup leaves them alone
-STACK_SERVICES = (
-    "kafka",
-    "kafka-init",
-    "restate",
-)  # what a fresh experiment stack starts (no kafka-ui)
+# What a fresh experiment stack starts. No kafka-ui, and no kafka-init: a run ensures its own
+# prefixed topics (`StackEnv.open`), and `up --wait` fails at random when that one-shot job exits
+# before compose looks at it ("container ems-kafka-init-1 exited (0)", Compose v5.4.0).
+STACK_SERVICES = ("kafka", "restate")
 RESTATE_CONTAINER = "ems-restate-1"
 
 
