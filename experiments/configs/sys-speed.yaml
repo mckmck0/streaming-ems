@@ -1,7 +1,7 @@
 # Validation run (spec 012, AC-012-31, -36): the highest publication speed the stack sustains.
 id: sys-speed
 hypothesis: >-
-  With 100 managed households and two strategies, doubling the speed from 96 finds the highest speed
+  With 100 managed households and two strategies, doubling the speed from 24 finds the highest speed
   at which 99 % of steps are released within one step of wall time.
 data:
   kind: synthetic
@@ -13,4 +13,4 @@ run:
   strategies: [NoBattery, SelfConsumption]
   live: SelfConsumption
 sweep:
-  speed: {start: 96, factor: 2, max: 1536}
+  speed: {start: 24, factor: 2, max: 1536}
