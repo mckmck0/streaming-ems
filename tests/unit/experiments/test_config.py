@@ -96,12 +96,12 @@ def test_ac_012_36_sys_scale_is_households_by_strategies_at_speed_96() -> None:
     assert {s.run.speed for s in specs} == {96}
 
 
-def test_ac_012_36_sys_speed_doubles_from_96_to_1536() -> None:
+def test_ac_012_36_sys_speed_doubles_from_24_to_1536() -> None:
     exp = _load("sys-speed")
     assert (exp.data.start, exp.data.days, exp.data.households) == (JUNE_3, 1, 100)
     assert exp.sweep is not None
-    assert (exp.sweep.speed.start, exp.sweep.speed.factor, exp.sweep.speed.max) == (96, 2, 1536)
-    assert [s.run.speed for s in config.expand(exp)] == [96, 192, 384, 768, 1536]
+    assert (exp.sweep.speed.start, exp.sweep.speed.factor, exp.sweep.speed.max) == (24, 2, 1536)
+    assert [s.run.speed for s in config.expand(exp)] == [24, 48, 96, 192, 384, 768, 1536]
 
 
 def test_ac_012_36_sys_recovery_kills_the_sdk_and_the_server_twice() -> None:
