@@ -203,21 +203,8 @@ def test_ac_008_17_changed_events_file_is_refused(history: Recording, tmp_path: 
     assert sink.events == []
 
 
-def test_ac_008_17_speed_is_refused_for_history_recordings(history: Recording) -> None:
-    """``--speed`` paces by ``ingested_at``, which is a fetch time in a history recording."""
-    sink = Collect()
-    with pytest.raises(_refused()):
-        asyncio.run(
-            replay(
-                history.settings,
-                history.name,
-                sink=sink,
-                speed=96.0,
-                clock=lambda: REPLAY_NOW,
-                check_topics=False,
-            )
-        )
-    assert sink.events == []
+# AC-012-22 replaced the refusal of ``--speed`` for history recordings: it now paces by emission
+# time (``test_pacing.py``).
 
 
 def test_ac_008_18_background_needs_a_history_recording(spec002: tuple[Any, str]) -> None:

@@ -360,7 +360,11 @@ def record_cmd(
 def replay_cmd(
     name: Annotated[str, typer.Option(help="Recording name under data/recordings/.")],
     speed: Annotated[
-        float | None, typer.Option(help="Pace by recorded ingest times / speed (not for history).")
+        float | None,
+        typer.Option(
+            help="Pace at this speed: a spec 002 recording by its ingest times, a history "
+            "recording by when each event becomes usable."
+        ),
     ] = None,
     root: Annotated[
         Path | None, typer.Option(help="Recording folder (default data/recordings/NAME).")

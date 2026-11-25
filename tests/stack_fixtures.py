@@ -35,7 +35,7 @@ from ems.actors.strategy import StrategyState
 from ems.assembler.offline import Offline
 from ems.assembler.params import RunParams
 from ems.experiments import stack
-from ems.experiments.runs import CONFIG, managed_params
+from ems.experiments.runs import CONFIG, managed_params, pse_table
 from ems.ingest.kafka.config import base_config
 from ems.settings import EmsSettings
 
@@ -124,6 +124,7 @@ def configure_run(
         start=utc(start),
         days=days,
         locations=locations,
+        rcem=pse_table(),
         late_slots=late_slots,
         generator_config=generator_config or CONFIG / "generator.yaml",
     )
