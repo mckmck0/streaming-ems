@@ -118,3 +118,24 @@ record also drives the actors.
   Restate documents no order across invocations, so the hold-back stays; the in-memory network test covers it.
 - Peak memory: Restate 1,833 MiB of its 2 GiB limit (1,556 with the probe), Kafka 838 MiB, ingress containers
   284–565 MiB; no container was OOM-killed.
+
+## After the harness, memory and serde fixes (spec 012)
+
+`make measure MODE=skew` again on 2026-11-25, commit `90bb678` with the tree carrying uncommitted spec 012 work that
+is not on the measured path (new test files and interface stubs of the experiment runner), same machine
+(`experiments/results/ingress-skew-20261125T101839Z/results.json`). Changed since the spec 011 run: the harness
+polls failed invocations in SQL instead of reading every invocation of the run (H5), Restate's memory pools fit its
+container (K15), and the serde decodes every value it writes to refuse a NaN or an infinity (A15). Journal retention
+stayed at the development default of 1 day, as in the spec 011 run.
+
+- Every key's ingress log equals the offline fold, with 0 rejected records and 0 regressions; every receiving
+  service counted 0 messages early and 0 stale.
+- 285.6 records per second between the first invocation's creation and the last one's completion (121.2 s), against
+  257.8 (134.3 s) in the spec 011 run: 11 % more, with the polling load gone and the serde check's extra decode
+  included. Two runs on a laptop; the difference is not tested for significance.
+- Leads move with the arrival order of an unpaced backfill (prices over consumption median 108, forecasts over
+  production 128 quarter-hours) and are not compared between runs.
+- Peak memory as `docker stats` reports it: Restate 1,897 MiB of 2 GiB (1,833 before), Kafka 990 MiB, ingress
+  containers 301–562 MiB, `kafka-ui` 282 MiB of its new 512 MiB limit; no container was OOM-killed. `docker stats`
+  counts page cache: right after the run Restate's cgroup held 1,506 MiB of anonymous memory and 160 MiB of file
+  cache (`memory.stat`), under the 1.8 GiB that would raise its limit (spec 012, plan §9).

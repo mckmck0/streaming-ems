@@ -97,6 +97,15 @@ MODE=skew` now runs on configured households and reports the price leads and the
   0 within 8.6 s; 3,385 invocations waited `pending` and 41 `ready` (one at the head of each key's queue: 20
   `Household`, 20 `Weather`, 1 `Tariff`); the backlog drained 10.4 s after the service came back.
 
+### After the harness, memory and serde fixes (spec 012)
+
+- `ingress-skew-20261125T101839Z` (commit `90bb678`; the tree carried uncommitted spec 012 tests and runner stubs,
+  not on the measured path): the same 100 × 2-day unpaced run with 35 managed households. Every ingress log equal
+  to the offline fold, 0 rejected, 0 regressions, re-order counters 0. 285.6 records/s server-side (121.2 s),
+  against 257.8 before the fixes (H5 polling in SQL, K15 memory pools, A15 serde check). Peak memory (`docker
+  stats`, page cache included): Restate 1,897 MiB of 2 GiB, Kafka 990 MiB; no OOM kill; Restate's anonymous memory
+  after the run 1,506 MiB. Details in `docs/thesis/kafka-ingress.md`.
+
 ## What to build
 
 - Stage 4 (brief in `01-architecture.md`): the experiment runner (`make exp`), the export of Restate state to
