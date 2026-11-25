@@ -198,11 +198,14 @@ def recovery(
     kill: KillEvent, lines: Sequence[Line], lags: Mapping[tuple[str, int], float]
 ) -> Recovery:
     """The phases of one kill: kill → healthy, healthy → first commit after it, and → the first
-    release whose lag is back under the p99 of the lags released before the kill.
+    release whose lag is back under the p99 of the lags released before the kill. A line written
+    between the kill and healthy belongs to a handler whose commit may have died with the server,
+    so the first commit counts only from healthy.
     """
     kill_ns = round(kill.kill_unix * 1e9)
+    healthy_ns = round(kill.healthy_unix * 1e9)
     healthy_s = kill.healthy_unix - kill.kill_unix
-    after = sorted(line.ns for line in lines if line.ns > kill_ns)
+    after = sorted(line.ns for line in lines if line.ns > healthy_ns)
     if not after:
         return Recovery(kill.target, healthy_s, None, None)
     first_ns = after[0]
@@ -213,7 +216,7 @@ def recovery(
     caught_up_s = None
     if bound is not None:
         for step, ns in sorted(rel.items(), key=lambda x: x[1]):
-            if ns > kill_ns and step in lags and lags[step] <= bound:
+            if ns >= first_ns and step in lags and lags[step] <= bound:
                 caught_up_s = (ns - first_ns) / 1e9
                 break
     return Recovery(kill.target, healthy_s, first_commit_s, caught_up_s)

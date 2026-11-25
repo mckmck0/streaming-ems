@@ -253,6 +253,16 @@ def test_ac_012_30_a_run_that_never_catches_up_has_an_open_window() -> None:
     assert released_late.count == 0
 
 
+def test_ac_012_30_a_line_written_while_the_server_was_down_is_not_the_first_commit() -> None:
+    # A handler that finished after the kill writes its line, but its commit died with the server:
+    # the first commit counts only from healthy (a server kill, 2026-11-25: it came out negative).
+    lines, lags = _before_kill()
+    lines += [hh(2001 * S, B, 10), hh(2005 * S, A, 11), hh(2006 * S, A, 12)]
+    lags |= {(B, 10): 1.0, (A, 11): 30.0, (A, 12): 1.0}
+    rec = metrics.recovery(KILL, lines, lags)
+    assert rec == Recovery("sdk", healthy_s=3.0, first_commit_s=2.0, caught_up_s=1.0)
+
+
 def test_ac_012_30_no_commit_after_the_kill() -> None:
     lines, lags = _before_kill()
     rec = metrics.recovery(KILL, lines, lags)
