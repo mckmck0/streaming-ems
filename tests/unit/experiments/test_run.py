@@ -705,7 +705,7 @@ def test_ac_012_28_the_inbox_check_waits_until_nothing_is_pending(sim_run: SimRu
 
 def test_ac_012_26_the_run_directory_holds_every_file(sim_run: SimRun) -> None:
     run_dir = _run_dir(sim_run.out)
-    for name in (*TABLES, "steps"):
+    for name in (*TABLES, "steps", "lags"):
         path = run_dir / f"{name}.parquet"
         assert path.is_file(), name
         assert (pq.read_schema(path).metadata or {}).get(b"ems.schema_version") == b"1.0.0"
@@ -750,6 +750,17 @@ def test_ac_012_29_release_lag_counts_from_the_record_that_made_the_step_releasa
     assert lag["missing"] == 0 and lag["count"] > 0
     assert lag["max"] == pytest.approx(RELEASE_S, abs=1e-6)
     assert _summary(sim_run.out)["sustained"]["sustained"] is True
+
+
+def test_ac_012_26_lags_hold_each_released_step_with_its_releasing_record(sim_run: SimRun) -> None:
+    rows = pq.read_table(_run_dir(sim_run.out) / "lags.parquet").to_pylist()
+    assert len(rows) == _summary(sim_run.out)["release_lag_s"]["count"]
+    assert len({(r["household_key"], r["t"]) for r in rows}) == len(rows)
+    assert {r["stream"] for r in rows} <= {"price", "weather_forecast", "production", "consumption"}
+    assert "weather_forecast" in {r["stream"] for r in rows}  # the first steps wait for a forecast
+    for r in rows:
+        assert r["released_unix"] - r["due_unix"] == pytest.approx(r["lag_s"], abs=1e-9)
+        assert r["lag_s"] == pytest.approx(RELEASE_S, abs=1e-6)
 
 
 # ── failures ─────────────────────────────────────────────────────────────────────────────────────
@@ -902,6 +913,7 @@ def test_ac_012_25_a_live_run_publishes_in_real_time_from_first_step(tmp_path: P
     assert (result.status, result.reason) == ("ok", None), result.reason
     run_dir = _run_dir(tmp_path)
     assert not (run_dir / "steps.parquet").exists()
+    assert not (run_dir / "lags.parquet").exists()
     for name in TABLES:
         assert (run_dir / f"{name}.parquet").is_file(), name
     summary = _summary(tmp_path)

@@ -26,10 +26,10 @@ from ems.assembler.params import RunParams
 from ems.assembler.schedule import windows
 from ems.domain.calendar import civil_month
 from ems.domain.settlement import costs
-from ems.experiments.metrics import Line
+from ems.experiments.metrics import Due, Line, releases
 
 SCHEMA_VERSION = "1.0.0"
-TABLES = ("households", "strategies", "months", "steps", "timings")
+TABLES = ("households", "strategies", "months", "steps", "timings", "lags")
 REAL = "real"  # the strategy name of the real battery and meter in the tables
 
 
@@ -285,6 +285,32 @@ def timing_rows(lines: Sequence[Line]) -> list[dict[str, Any]]:
     ]
 
 
+def lag_rows(
+    run_id: str, due: Mapping[tuple[str, int], Due], lines: Sequence[Line]
+) -> list[dict[str, Any]]:
+    """Per released household-step (sim runs): when its releasing record was published, which
+    stream it came from, when the `Household` released the step, and the lag between the two.
+    """
+    rows: list[dict[str, Any]] = []
+    for (key, t), ns in sorted(releases(lines).items()):
+        d = due.get((key, t))
+        if d is None:
+            continue
+        released = ns / 1e9
+        rows.append(
+            {
+                "run_id": run_id,
+                "household_key": key,
+                "t": t,
+                "stream": d.stream,
+                "due_unix": d.unix,
+                "released_unix": released,
+                "lag_s": released - d.unix,
+            }
+        )
+    return rows
+
+
 def write_table(
     rows: Sequence[Mapping[str, Any]], path: Path, *, schema_version: str = SCHEMA_VERSION
 ) -> Path:
@@ -313,9 +339,10 @@ def export(
     *,
     offline: Mapping[str, Offline] | None = None,
     lines: Sequence[Line] = (),
+    due: Mapping[tuple[str, int], Due] | None = None,
 ) -> dict[str, Path]:
     """Write the tables of a run; ``steps`` only when ``offline`` is given (sim runs whose
-    exactly-once check passed).
+    exactly-once check passed), ``lags`` only when ``due`` is given (sim runs).
     """
     tables: dict[str, list[dict[str, Any]]] = {
         "households": household_rows(run_id, states),
@@ -325,6 +352,8 @@ def export(
     }
     if offline is not None:
         tables["steps"] = step_rows(run_id, offline, states)
+    if due is not None:
+        tables["lags"] = lag_rows(run_id, due, lines)
     return {name: write_table(rows, out_dir / f"{name}.parquet") for name, rows in tables.items()}
 
 

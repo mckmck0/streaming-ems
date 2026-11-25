@@ -289,7 +289,7 @@ Runner, export and metrics
   software and image versions, git commit, the RCEm table and the entries used with their source, the
   recording's hash if any, the timing-log format version, the measured offset between the host and the Docker VM
   clocks), `config.yaml`, `households.parquet`,
-  `strategies.parquet`, `months.parquet`, `steps.parquet` (sim runs), `timings.parquet` and `summary.json`; every
+  `strategies.parquet`, `months.parquet`, `steps.parquet` and `lags.parquet` (sim runs), `timings.parquet` and `summary.json`; every
   table, the manifest and the summary SHALL carry a `schema_version`, and no file SHALL contain a NaN or an
   infinity; IF any of them cannot be written, THEN the run SHALL be marked failed in `summary.json`.
 - **AC-012-27**: WHEN the export runs, THE SYSTEM SHALL read object state only through SQL on the `state` table,
@@ -349,7 +349,7 @@ Done-when and validation runs
   `sys-recovery` (100 managed households, 1 day, two SDK and two server kills) with 0 mismatches and the
   recovery phases of every kill; `sys-strategy-change` (from 2026-06-29T04:00Z for 2 days, so June closes; one
   strategy added on day 1, removed on day 2) with 0 mismatches; `sys-scale` (100 and 400 households with 1 and
-  2 strategies, speed 96) and `sys-speed` (100 households, speed doubling from 96) with the metrics of AC-012-29
+  2 strategies, speed 96) and `sys-speed` (100 households, speed doubling from 24) with the metrics of AC-012-29
   and the highest sustained speed; `sys-live` (synthetic data in real time, RCE-basis sites, 2 h,
   10 households, faults) with every step of the window released by its end plus `G` plus 5 s and the
   distribution of that delay reported, `Battery` equal to the SelfConsumption shadow, and the deadline firings

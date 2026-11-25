@@ -419,6 +419,7 @@ response, decodes with `serde_for`, and writes:
 | `months` | household × strategy × closed month | the `MonthSettlement` scalars |
 | `steps` (sim) | household × strategy × step, from `offline.trace` | `t`, `pv_kwh`, `load_kwh`, `rce_pln_per_kwh`, the flags, `forecast_issue_s`, `action`, `p_kw`, `soc_kwh`, `grid_kwh` |
 | `timings` | the deduplicated timing lines | `ns`, `svc`, `h`, `key`, `inv`, `in_t`, `sent` (list of service and `t`), `lines` (lines seen for the invocation) |
+| `lags` (sim) | released household-step | `household_key`, `t`, `stream` and `due_unix` of the releasing record, `released_unix`, `lag_s` (added during validation, so a slow tail can be traced to its input after the run's topics are gone) |
 
 Every table carries `ems.schema_version = 1.0.0` in its Parquet metadata. `steps` is written only after the
 exactly-once check passes.
@@ -448,7 +449,7 @@ exactly-once check passes.
 | Config | Data | Run |
 |---|---|---|
 | `sys-scale` | synthetic, 2026-06-03, 1 day; `locations` 1400 | matrix households {100, 400} × strategies {[SelfConsumption], [NoBattery, SelfConsumption]}, 4 runs; speed 96 |
-| `sys-speed` | synthetic, 2026-06-03, 1 day; 100 households | sweep speed 96 → 1536 (×2); stops after the first speed that is not sustained |
+| `sys-speed` | synthetic, 2026-06-03, 1 day; 100 households | sweep speed 24 → 1536 (×2; it started at 96 until `sys-recovery` and `sys-strategy-change` showed 96 borderline at 100 households); stops after the first speed that is not sustained |
 | `sys-recovery` | synthetic, 2026-06-03, 1 day; 100 households | 2 repetitions × kills `[sdk at 0.3, server at 0.7]` |
 | `sys-strategy-change` | synthetic, from **2026-06-29T04:00Z**, 2 days; 100 households | starts with `[SelfConsumption]`; at hour 12 `[NoBattery, SelfConsumption]`; at hour 36 `[SelfConsumption]`. June closes on the actors (06-30T22:00Z + 2L) |
 | `sys-live` | synthetic in real time, live profile, faults; 10 households (RCE-basis only) | `first_step` = the next full UTC hour, 2 h, `grace_s` 120 |

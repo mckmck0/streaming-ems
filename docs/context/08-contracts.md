@@ -158,6 +158,7 @@ applies: within a major version a column or key is only added.
 | `months.parquet` | household, strategy and closed month | the `MonthSettlement` scalars and its basis |
 | `steps.parquet` | household, strategy and released step (from the offline fold, written only when it equals the actors' state) | the `Step` inputs and flags, action, `p_kw`, `soc_kwh`, `grid_kwh` |
 | `timings.parquet` | invocation (first timing line kept) | `ns`, `svc`, `h`, `key`, `inv`, `in_t`, `sent` (service, `t`), `lines` |
+| `lags.parquet` | released household-step (sim runs) | `household_key`, `t`, `stream` of the record that made the step releasable, `due_unix` (its `ingested_at`), `released_unix`, `lag_s` |
 | `summary.json` | run | status and reason, the exactly-once check, the systems metrics of `11-experiments.md`, samples (memory, CPU), kills |
 | `manifest.json` | run | `stack.manifest` (git commit, versions, hardware, config), seed, window, households, the RCEm table and its source, `rcem_used`, the timing log version, the host and VM clock offset |
 

@@ -47,6 +47,16 @@ class Sustained:
 
 
 @dataclass(frozen=True)
+class Due:
+    """When a household-step became releasable: the publication time (unix s, ``ingested_at``) and
+    the stream of the record that released it.
+    """
+
+    unix: float
+    stream: str
+
+
+@dataclass(frozen=True)
 class KillEvent:
     target: str  # "sdk" or "server"
     kill_unix: float

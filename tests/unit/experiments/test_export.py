@@ -32,7 +32,7 @@ from ems.assembler import offline
 from ems.assembler.params import RunParams
 from ems.domain import settlement
 from ems.experiments import export
-from ems.experiments.metrics import Line
+from ems.experiments.metrics import Due, Line
 from tests.network import CONSUMPTION, PRODUCTION, Generated, Network, Order, generate
 
 RUN_ID = "net"
@@ -354,6 +354,27 @@ LINES = [
 ]  # fmt: skip
 
 
+DUE = {
+    ("net:PL-LOC-000001", 5): Due(4e-9, "production"),
+    ("net:PL-LOC-000001", 6): Due(5e-9, "price"),  # not released: no row
+}
+
+
+def test_ac_012_26_lags_pair_each_release_with_its_releasing_record() -> None:
+    rows = export.lag_rows(RUN_ID, DUE, LINES)
+    assert rows == [
+        {
+            "run_id": RUN_ID,
+            "household_key": "net:PL-LOC-000001",
+            "t": 5,
+            "stream": "production",
+            "due_unix": 4e-9,
+            "released_unix": 10e-9,
+            "lag_s": 10e-9 - 4e-9,
+        }
+    ]
+
+
 def _sent(value: Any) -> list[tuple[str, int]]:
     return [tuple(x.values()) if isinstance(x, Mapping) else tuple(x) for x in value]
 
@@ -434,7 +455,7 @@ def test_ac_012_27_export_writes_steps_with_the_offline_fold(
 ) -> None:
     gen, states = closes
     twins = {k: gen.offline(k) for k in states.params}
-    written = export.export(states, RUN_ID, tmp_path, offline=twins, lines=LINES)
+    written = export.export(states, RUN_ID, tmp_path, offline=twins, lines=LINES, due=DUE)
     assert set(written) == set(export.TABLES)
     assert pq.read_table(written["steps"]).num_rows == len(export.step_rows(RUN_ID, twins, states))
     assert _version(written["steps"]) == b"1.0.0"

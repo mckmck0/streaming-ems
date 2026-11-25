@@ -36,7 +36,7 @@ from ems.domain.units import QUARTERS_PER_HOUR
 from ems.experiments import config, export, metrics, stack
 from ems.experiments.config import CHANGE_SEND_STEPS, Experiment, RunSpec
 from ems.experiments.export import RunStates
-from ems.experiments.metrics import KillEvent, Line
+from ems.experiments.metrics import Due, KillEvent, Line
 
 SUMMARY_SCHEMA = "1.0.0"
 MANIFEST_SCHEMA = "1.0.0"
@@ -222,11 +222,12 @@ def run_one(
         written_twins = None if (live or problems) else twins
         lines_all = ops.timing_lines()
         kept, retries = metrics.dedup(lines_all)
-        export.export(states, run_id, out_dir, offline=written_twins, lines=kept)
+        due = None if live else release_due(params, records)
+        export.export(states, run_id, out_dir, offline=written_twins, lines=kept, due=due)
         pacing = pub.manifest().get("pacing") or {}
         samples = ops.samples()
         manifest["clock_offset_s"] = samples.get("clock_offset_s")
-        summary |= _metrics(spec, params, first, end, kept, retries, records, twins, kills, pacing)
+        summary |= _metrics(spec, first, end, kept, retries, records, twins, kills, pacing, due)
         summary["samples"] = samples
         summary["kills"] = [dataclasses.asdict(k) for k in kills]
         if problems:
@@ -436,7 +437,6 @@ def _invariants(params: Mapping[str, RunParams], states: RunStates) -> list[str]
 
 def _metrics(
     spec: RunSpec,
-    params: Mapping[str, RunParams],
     first: int,
     end: int,
     lines: Sequence[Line],
@@ -445,6 +445,7 @@ def _metrics(
     twins: Mapping[str, Offline],
     kills: Sequence[KillEvent],
     pacing: Mapping[str, Any],
+    due: Mapping[tuple[str, int], Due] | None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {"retries": retries}
     start_unix = float(pacing.get("paced_from_unix") or 0.0)
@@ -455,19 +456,18 @@ def _metrics(
     out["publisher_lateness_s"] = pacing.get("lateness")
     steps = [(s.t, s.forecast_issue_s) for twin in twins.values() for s in twin.steps]
     out["forecast_age_h"] = dataclasses.asdict(metrics.forecast_age_h(steps))
-    if spec.run.mode == "live":
+    if due is None:  # live
         out["decision_latency_ms"] = dataclasses.asdict(metrics.decision_latency_ms(lines))
         out["release_lag_s"] = None
         out["live_release_delay_s"] = dataclasses.asdict(metrics.live_release_delay_s(lines))
         return out
-    due = release_due(params, records)
-    lags = metrics.release_lags_s(lines, due)
+    lags = metrics.release_lags_s(lines, {step: d.unix for step, d in due.items()})
     recoveries = [metrics.recovery(k, lines, lags) for k in kills]
     windows = [metrics.recovery_window(k, r) for k, r in zip(kills, recoveries, strict=True)]
     out["decision_latency_ms"] = dataclasses.asdict(metrics.decision_latency_ms(lines, windows))
     out["release_lag_s"] = dataclasses.asdict(metrics.stats(list(lags.values())))
     out["recovery"] = [dataclasses.asdict(r) for r in recoveries]
-    last_publish = max(due.values(), default=start_unix)
+    last_publish = max((d.unix for d in due.values()), default=start_unix)
     rel = metrics.releases(lines)
     last_release = max(rel.values(), default=0) / 1e9
     out["sustained"] = dataclasses.asdict(
@@ -483,15 +483,15 @@ def _metrics(
 
 def release_due(
     params: Mapping[str, RunParams], records: Sequence[stack.Record]
-) -> dict[tuple[str, int], float]:
-    """``(key, t)`` -> the publication time (unix s, the record's ``ingested_at``) of the record
-    that made step ``t`` of household ``key`` releasable: the household's records and its market's
-    prices, merged in publication order, through ``offline.released_by``.
+) -> dict[tuple[str, int], Due]:
+    """``(key, t)`` -> the publication time (unix s, the record's ``ingested_at``) and the stream of
+    the record that made step ``t`` of household ``key`` releasable: the household's records and
+    its market's prices, merged in publication order, through ``offline.released_by``.
     """
     by_key: dict[str, list[stack.Record]] = {}
     for rec in records:
         by_key.setdefault(rec.key, []).append(rec)
-    out: dict[tuple[str, int], float] = {}
+    out: dict[tuple[str, int], Due] = {}
     for key, p in params.items():
         events: list[tuple[float, str, bytes]] = []
         for rec in (*by_key.get(key, ()), *by_key.get(p.market_key, ())):
@@ -501,7 +501,7 @@ def release_due(
                 events.append((published, stream, rec.value))
         events.sort(key=lambda e: e[0])  # stable: partition order within a tie
         released = released_by(p, [(stream, raw) for _, stream, raw in events])
-        out |= {(key, t): events[i][0] for t, i in released.items()}
+        out |= {(key, t): Due(events[i][0], events[i][1]) for t, i in released.items()}
     return out
 
 

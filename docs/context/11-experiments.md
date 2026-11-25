@@ -135,7 +135,8 @@ A run that fails is recorded with `status: failed` and its reason; the next run 
   releasable, found by merging the household's records and its market's prices in publication order through the
   same join (`ems.assembler.offline.released_by`). So a step that waited for a forecast run or a price curve
   counts from that record: the first steps of a window wait for its first forecast run (about 2 h of data time),
-  and counting from their readings would charge that wait to the system.
+  and counting from their readings would charge that wait to the system. Sim runs keep each step's lag, with
+  the releasing record's stream, in `lags.parquet`, so a slow tail can be traced to its input after the run.
 - `sustained`: speed `S` is sustained when the p99 release lag is at most `900/S` s and the last step is released
   within `2·900/S` s after the last record that releases a step is published.
 - `recovery` per kill: kill → healthy, healthy → first commit, first commit → the first release whose lag is back
@@ -154,7 +155,7 @@ the corrections for its last `2L` slots. The deposit reported is the one after t
 dropped as `after_end_late` touch only held rows, never `bill_pln`.
 
 Configs ready (`experiments/configs/`): `sys-scale` (100 and 400 households × one and two strategies, speed 96,
-1 day), `sys-speed` (100 households, speed doubling from 96 to 1536), `sys-recovery` (100 households, `kill -9` of
+1 day), `sys-speed` (100 households, speed doubling from 24 to 1536; it started at 96 until the first validation runs showed 96 borderline), `sys-recovery` (100 households, `kill -9` of
 the SDK service at 30 % and of the server at 70 %, two repetitions), `sys-strategy-change` (SelfConsumption, add
 NoBattery at hour 12, remove it at hour 36, 2 days across the end of June), `sys-live` (10 households, 2 h real
 time, faults). Scaling up is a config change.
