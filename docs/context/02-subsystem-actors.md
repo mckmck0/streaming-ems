@@ -155,6 +155,26 @@ HTTP/2 transport errors between Restate and the SDK service (`h2 pool connection
 a broken pipe`) on single attempts, which Restate retried with success (risk K14). `make measure` has two modes: `skew` (configured households: leads per stream
 pair, prices included, and the re-order counters of every receiving service) and `backlog`.
 
+### Operations: paused invocations (spec 012)
+
+An invocation that keeps failing pauses after the retry policy's 70 attempts (risk A7), for example when the SDK
+service stays down for about an hour or a handler keeps raising. It waits for a manual resume.
+
+- List them: `curl -s 127.0.0.1:9070/query --json "{\"query\": \"SELECT id, target_service_name,
+  target_service_key, target_handler_name, last_failure FROM sys_invocation WHERE status = 'paused'\"}"`.
+- Resume one through the admin API: `curl -X PATCH 127.0.0.1:9070/invocations/<id>/resume`. To resume it on a
+  newer deployment after a code fix, add `?deployment=latest` or `?deployment=<deployment id>`
+  (<https://docs.restate.dev/services/invocation/managing-invocations> and the admin API reference "Resume an
+  invocation", read 2026-11-25).
+- The CLI ships in the server image (`restate-cli` 1.8.1-hotfix.2, checked 2026-11-22):
+  `docker exec -it ems-restate-1 restate invocations list --status paused`,
+  `docker exec -it ems-restate-1 restate invocations resume <id> [--deployment latest]`. Pipe JSON from
+  `docker exec` without `-t` (for example `docker exec ems-restate-1 restate sql --json "…"`): with `-t` the
+  statistics line and `\r\n` land on stdout.
+- A resume on a new deployment replays the journal against the new code. If the fix changes a journaled
+  operation before the one that failed, the replay fails with RT0016 ("journal mismatch"). Then kill the
+  invocation and redo its effect in a new run (a new `run_id`).
+
 ### How R1–R7 hold (stage 3)
 
 - R1, R2: every edge between actors is a one-way `generic_send`, including the two cycles (Household and Tariff;
