@@ -139,8 +139,11 @@ async def _count(ctx: ObjectContext) -> None:
 
 
 def _commit[S](ctx: ObjectContext, state_serde: DataclassSerde[S], out: Out[S]) -> None:
+    """Write the state, then send. Every message is encoded first, so a value the serde refuses
+    (AC-012-40) fails the invocation before anything is stored or sent.
+    """
     state, sends = out
+    args = [serde_for(type(s.message)).serialize(s.message) for s in sends]
     ctx.set(STATE, state, serde=state_serde)
-    for s in sends:
-        arg = serde_for(type(s.message)).serialize(s.message)
+    for s, arg in zip(sends, args, strict=True):
         ctx.generic_send(s.service, s.handler, arg=arg, key=s.key)

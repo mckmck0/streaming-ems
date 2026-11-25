@@ -119,7 +119,10 @@ handlers stay a few lines each.
 - **Serialisation.** State, parameters and messages are frozen dataclasses encoded by one serde over
   `pydantic.TypeAdapter` (`ems.actors.serde`): floats round-trip bit for bit. No stored or sent type contains a
   set: Restate compares a retried handler's writes with its journal (RT0016), and a set's JSON order depends on
-  the hash seed (`National.holidays` became a sorted tuple for this). Tests check both.
+  the hash seed (`National.holidays` became a sorted tuple for this). Tests check both. JSON has no NaN or
+  infinity, so the serde refuses a value that does not decode back equal to itself, before it is stored or sent
+  (spec 012): the invocation fails with a retryable error and pauses where the value was produced, and
+  `shell._commit` encodes every message before it writes the state.
 - **Configuration** (ADR 0019). `configure` stores the parameters once; an equal second call changes nothing,
   other parameters or another key fail the call without a retry (`TerminalError`). An internal message at an
   unconfigured object fails the same way, and the key goes on with its next invocation.
