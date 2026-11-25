@@ -631,14 +631,17 @@ def stop_restate(timeout: float = 60.0) -> None:
 
 def start_restate(restate: Restate, timeout: float = 180.0) -> float:
     """Start the stack's Restate container again with its configuration unchanged; seconds to
-    healthy.
+    healthy. Every restart the harness makes is one it caused, so it opens ``restate``'s kill
+    window: `/query` can answer 500 for a moment after the server reports healthy.
     """
     cid = container_of("restate")
     if cid is None:
         raise RuntimeError("the restate service has no container: run `make up`")
+    restate.note_kill()
     started = time.monotonic()
     docker("start", cid)
     restate.wait_healthy(timeout)
+    restate.note_kill()  # the 60 s count from healthy, however long the start took
     return time.monotonic() - started
 
 

@@ -173,8 +173,9 @@ pair, prices included, and the re-order counters of every receiving service) and
 The experiment runner (`make exp`, spec 012) uses the same harness on a fresh stack per run (`reset_stack`
 removes the Kafka and Restate volumes and starts them with journal retention `0s`), with ingress projects named
 `ems-exp-<prefix>` so the test cleanup, which removes `ems-it-*`, never touches them. `Restate.wait_run` and
-`wait_handled` treat connection errors and 5xx answers as transient for 60 s after a server kill
-(`Restate.note_kill`) and raise any other error at once.
+`wait_handled` treat connection errors and 5xx answers as transient for 60 s after the harness kills or restarts the server
+(`Restate.note_kill`, opened by `kill_restate` and `start_restate`: `/query` answered 500 for about 0.4 s after
+the server reported healthy) and raise any other error at once.
 
 ### Operations: paused invocations (spec 012)
 
@@ -195,6 +196,9 @@ service stays down for about an hour or a handler keeps raising. It waits for a 
 - A resume on a new deployment replays the journal against the new code. If the fix changes a journaled
   operation before the one that failed, the replay fails with RT0016 ("journal mismatch"). Then kill the
   invocation and redo its effect in a new run (a new `run_id`).
+- A pending live deadline shows in `sys_invocation` with `status = 'scheduled'`. On the pinned server
+  `scheduled_start_at` comes back null unless `scheduled_at` is selected in the same query (seen 2026-11-25,
+  `tests/integration/test_deadline.py`).
 
 ### How R1–R7 hold (stages 3 and 4)
 

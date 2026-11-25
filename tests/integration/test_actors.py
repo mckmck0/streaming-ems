@@ -33,7 +33,7 @@ from ems.contracts.envelope import AssetType, Direction, Stream, to_json_bytes
 from ems.contracts.examples import energy, measurement_event
 from ems.contracts.time import QUARTER
 from ems.experiments import stack
-from ems.experiments.runs import managed_params
+from ems.experiments.runs import managed_params, pse_table
 from ems.ingest.kafka.config import base_config
 from tests.stack_fixtures import decoded
 
@@ -46,6 +46,7 @@ TIMEOUT_S = 120.0
 
 
 def _site(run_id: str, **kwargs: Any) -> tuple[str, RunParams]:
+    kwargs.setdefault("rcem", pse_table())  # required since spec 012 (T27)
     params = managed_params(run_id=run_id, start=START_UTC, days=DAYS, locations=1, **kwargs)
     assert list(params) == [f"{run_id}:{LOCATION}"]
     return next(iter(params.items()))

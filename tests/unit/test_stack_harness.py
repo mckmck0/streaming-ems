@@ -898,6 +898,20 @@ def test_ac_012_38_a_500_after_the_kill_window_stops_the_wait(
         _wait(r, which)
 
 
+def test_ac_012_38_start_restate_opens_the_kill_window(
+    canned: list[CannedRestate], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every restart the harness makes is one it caused: /query answers 500 for a moment after
+    # Restate reports healthy (measured 2026-11-25), whether it was killed, stopped or both.
+    r = _restate(canned)
+    monkeypatch.setattr(stack, "container_of", lambda service: "cid")
+    monkeypatch.setattr(stack, "docker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(r, "wait_healthy", lambda timeout: None)
+    before = time.monotonic()
+    stack.start_restate(r)
+    assert r.kill_window_until >= before + 60.0
+
+
 # ── spec 012: the experiment runner's plumbing (AC-012-17, -21, -29, -37; plan §7) ──────────────
 
 
