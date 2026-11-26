@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import restate
 
+from ems.actors import timing
 from ems.actors.battery import battery
 from ems.actors.ems import ems
 from ems.actors.household import household
@@ -28,3 +29,6 @@ SERVICES = (
 )
 
 app = restate.app(services=list(SERVICES))
+
+# Spec 012: the timing log, on only when EMS_TIMING_LOG names a file.
+timing.start()

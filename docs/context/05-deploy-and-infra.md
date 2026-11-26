@@ -24,6 +24,12 @@
   test-unit. Each tier writes coverage to `logs/.coverage.<tier>` (pytest-cov 7.1.0, coverage 7.17.3 with
   `patch = ["subprocess"]`, so the SDK service a tier starts is measured too); `make report-coverage` combines
   them into `logs/coverage.xml`.
+- Experiments (spec 012): `make exp NAME=<id> [CONFIRM=yes]` runs `experiments/configs/<id>.yaml` through `python -m
+  ems.experiments.run`, under `caffeinate -i` where that exists (macOS: no idle sleep during a run). It asks once, because every run wipes the Kafka and Restate volumes and starts `kafka` and
+  `restate` with journal retention `0s` (no `kafka-init`: `up --wait` failed at random when the one-shot job exited
+  before compose looked, and a run ensures its own prefixed topics); it starts its own SDK service on 9080 with
+  `EMS_TIMING_LOG` set (the optional timing log path; unset means no log) and ingress projects `ems-exp-*`. Results
+  go to `experiments/results/` (gitignored).
 
 ### CI (spec 010)
 
@@ -45,9 +51,9 @@ scope (risk K9), so there is no multi-broker profile; the fault experiments targ
 |---|---|---|
 | `kafka` | `apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837` (released 2026-06-25) | JVM image; single KRaft broker+controller; host `127.0.0.1:9092` |
 | `kafka-init` | `ems-gen:local` (built from `infra/ems-gen.Dockerfile`) | `ems-gen topics ensure`; one-shot |
-| `kafka-ui` | `ghcr.io/kafbat/kafka-ui:v1.5.0@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1` (2026-04-20) | read-only, host `127.0.0.1:8088` |
+| `kafka-ui` | `ghcr.io/kafbat/kafka-ui:v1.5.0@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1` (2026-04-20) | read-only, host `127.0.0.1:8088`; `mem_limit` 512 MB (peak 405 MiB; spec 012: every long-running service has a limit) |
 | `ems-gen` (profile `gen`) | `ems-gen:local` | realtime generator |
-| `restate` (spec 010) | `restatedev/restate:1.8.1-hotfix.2-20261102@sha256:e3a11e7c694cfe0c134eca1652992c068bef0bcba3caeec9d2a3b3bc50daa62e` | one node `restate-1`, cluster `ems`, RocksDB 512 MiB, volume `restate-data`; ingress `127.0.0.1:8080`, admin `127.0.0.1:9070`; healthy when admin `/health` and ingress `/restate/health` answer; `mem_limit` 2 GB (peak 1,556 MiB) |
+| `restate` (spec 010) | `restatedev/restate:1.8.1-hotfix.2-20261102@sha256:e3a11e7c694cfe0c134eca1652992c068bef0bcba3caeec9d2a3b3bc50daa62e` | one node `restate-1`, cluster `ems`, memory pools RocksDB 512 MiB, invoker 512 MiB, query engine 384 MiB, Bifrost record cache 128 MiB (spec 012), journal retention `${EMS_RESTATE_JOURNAL_RETENTION:-1d}`, volume `restate-data`; ingress `127.0.0.1:8080`, admin `127.0.0.1:9070`; healthy when admin `/health` and ingress `/restate/health` answer; `mem_limit` 2 GB (peak 1,556 MiB) |
 | `ingress-meters`, `ingress-forecasts`, `ingress-prices` (profile `ingress`, spec 010) | `ghcr.io/restatedev/ingress-integration-kafka:0.1.1-20261109@sha256:20704c886ee4dcc4046bab1743dc424bb08b2317ce1bc6da55ce738345ce01b1` | linux/amd64 only (emulated on Apple Silicon); started by `make register`, removed by `make down`; `restart: unless-stopped`; `-Xmx256m`, `mem_limit` 768 MB (peaks 475, 558 and 288 MiB); healthcheck bash `/dev/tcp` on the metrics port 9464; no host port |
 
 Generator image bases: `python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b`
@@ -117,6 +123,22 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
 - Configuration in compose, all confirmed with `restate-server --dump-config`: `RESTATE_NODE_NAME=restate-1`,
   `RESTATE_CLUSTER_NAME=ems`, `RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE="512 MiB"` (shown as `512.0 MiB`). The server's
   default retry policy (500 ms, ×2, at most 1 min, 70 attempts, then pause) is left as it is.
+- Memory pools (spec 012, risk K15). Restate's pools are budgets, and the defaults of the other three (invoker
+  1.5 GiB, query engine 1 GiB, Bifrost record cache 250 MiB) summed above the 2 GiB `mem_limit`
+  (<https://docs.restate.dev/server/memory>, read 2026-11-22). Compose now sets
+  `RESTATE_WORKER__INVOKER__MEMORY_LIMIT="512 MiB"` (`[worker.invoker] memory-limit`; an invocation starts at
+  32 KiB, so 512 MiB still leaves room for thousands at once), `RESTATE_ADMIN__QUERY_ENGINE__MEMORY_SIZE="384 MiB"`
+  (`[admin.query-engine] memory-size`; the largest query left is the export's `state` read, one service at a time)
+  and `RESTATE_BIFROST__RECORD_CACHE_MEMORY_SIZE="128 MiB"`: 1.5 GiB with RocksDB, plus the runtime, under the
+  limit. Confirmed with `--dump-config` on 2026-11-25 (`512.0 MiB`, `384.0 MiB`, `128.0 MiB`;
+  `tests/integration/test_restate_config.py`). If a validation run is OOM-killed or Restate's anonymous memory
+  passes about 1.8 GiB, `mem_limit` goes to `2560m`.
+- Journal retention (spec 012, risk A6): `RESTATE_DEFAULT_JOURNAL_RETENTION` comes from
+  `EMS_RESTATE_JOURNAL_RETENTION`, `1d` when unset (development keeps journals for debugging); `make exp` starts
+  the stack with `0s`. Restate refuses a bare `0` (`RT0002 … expected a human-friendly duration string`). Measured
+  on 2026-11-25 (`tests/integration/test_retention.py`): at `0s` a completed invocation without an idempotency
+  key leaves `sys_invocation` at once, while a keyed one (`configure`) keeps its status for the idempotency
+  retention (24 h) with an empty journal (`P0D`); a service registered before the restart takes the new default.
 - Registration guard (spec 011): after the POST, `make register` checks with `curl -fsS` that Restate lists the
   three ingress targets (`Household/on_measurement`, `Weather/on_forecast`, `Tariff/on_price`) and stops before
   any ingress container starts if one is missing, because a deployment at the same URI keeps its old handlers
@@ -126,8 +148,9 @@ peaks are from `experiments/results/ingress-skew-20261116T081120Z`, an unpaced b
 
 - Refresh the pins that predate the version policy of 2026-11-15 to their newest releases (risk H4), in a
   change of their own.
-- Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Scale
-  experiments run on Docker Compose.
+- Optional, behind the gate in `00-overview.md` (spec 006): Helm deployment spec, umbrella chart on kind. Where the
+  evaluation's scale experiments run is OPEN (`00-overview.md`, spec 012); the laptop validation runs use Docker
+  Compose.
 
 ## Prerequisites
 

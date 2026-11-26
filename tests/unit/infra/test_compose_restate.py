@@ -10,6 +10,11 @@ policy and no published port; together they cover the four Kafka-fed topics, eac
 AC-011-25: since spec 011 each container names its own target service beside its handler
 (`Household.on_measurement`, `Weather.on_forecast`, `Tariff.on_price`); the shared anchor names
 none, and the harness's `INGRESS_TARGETS` agree with the file.
+AC-012-18 (spec 012, plan §4): Restate takes its journal retention from
+`EMS_RESTATE_JOURNAL_RETENTION`, `1d` when it is unset.
+AC-012-39 (plan §9, F2 and F3): Restate sets its four memory pools (RocksDB, invoker, query engine,
+Bifrost record cache) and their sum stays below its `mem_limit`; every long-running container of the
+stack (what `make up` and `make register` start) has a `mem_limit`.
 """
 
 from __future__ import annotations
@@ -187,3 +192,154 @@ def test_ac_011_25_harness_targets_match_the_compose_file(repo: Path) -> None:
         for name in stack.INGRESS_TARGETS
     }
     assert from_compose == stack.INGRESS_TARGETS
+
+
+# ── spec 012: journal retention and memory limits (AC-012-18, AC-012-39) ───────────────────────
+
+
+def test_ac_012_18_restate_journal_retention_from_the_environment_one_day_by_default(
+    repo: Path,
+) -> None:
+    env = _service(repo, "restate").get("environment") or {}
+    assert env.get("RESTATE_DEFAULT_JOURNAL_RETENTION") == "${EMS_RESTATE_JOURNAL_RETENTION:-1d}"
+
+
+# Restate's memory pools; each variable names a key of `restate-server --dump-config`.
+RESTATE_POOLS = (
+    "RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE",  # rocksdb-total-memory-size
+    "RESTATE_WORKER__INVOKER__MEMORY_LIMIT",  # [worker.invoker] memory-limit
+    "RESTATE_ADMIN__QUERY_ENGINE__MEMORY_SIZE",  # [admin.query-engine] memory-size
+    "RESTATE_BIFROST__RECORD_CACHE_MEMORY_SIZE",  # [bifrost] record-cache-memory-size
+)
+_RESTATE_SIZE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|MiB|GiB|kB|KB|MB|GB)\s*$")
+_RESTATE_UNITS = {
+    "B": 1,
+    "KiB": 2**10,
+    "MiB": 2**20,
+    "GiB": 2**30,
+    "kB": 10**3,
+    "KB": 10**3,
+    "MB": 10**6,
+    "GB": 10**9,
+}
+_MEM_LIMIT = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([bkmg]?)b?\s*$", re.IGNORECASE)
+_MEM_UNITS = {"": 1, "b": 1, "k": 2**10, "m": 2**20, "g": 2**30}
+
+
+def restate_size(text: str) -> int:
+    """A Restate size such as ``512 MiB`` or ``1.5 GiB``, in bytes."""
+    m = _RESTATE_SIZE.match(text)
+    if m is None:
+        raise ValueError(f"not a Restate size: {text!r}")
+    return int(float(m.group(1)) * _RESTATE_UNITS[m.group(2)])
+
+
+def mem_limit(value: str | int) -> int:
+    """A compose ``mem_limit`` such as ``2g``, ``2560m`` or a byte count, in bytes (binary
+    units)."""
+    if isinstance(value, int):
+        return value
+    m = _MEM_LIMIT.match(value)
+    if m is None:
+        raise ValueError(f"not a compose memory limit: {value!r}")
+    return int(float(m.group(1)) * _MEM_UNITS[m.group(2).lower()])
+
+
+@pytest.mark.parametrize(
+    ("text", "size"),
+    [
+        ("512 MiB", 512 * 2**20),
+        ("512.0 MiB", 512 * 2**20),
+        ("384 MiB", 384 * 2**20),
+        ("1.5 GiB", 3 * 2**29),
+        ("250.0 MiB", 250 * 2**20),
+        ("128MiB", 128 * 2**20),
+    ],
+)
+def test_ac_012_39_restate_sizes_parse(text: str, size: int) -> None:
+    assert restate_size(text) == size
+
+
+@pytest.mark.parametrize(
+    ("value", "size"),
+    [
+        ("2g", 2 * 2**30),
+        ("2560m", 2560 * 2**20),
+        ("768m", 768 * 2**20),
+        ("1g", 2**30),
+        (1024, 1024),
+    ],
+)
+def test_ac_012_39_compose_memory_limits_parse(value: str | int, size: int) -> None:
+    assert mem_limit(value) == size
+
+
+@pytest.mark.parametrize("text", ["512", "512 mebibytes", "", "two GiB"])
+def test_ac_012_39_an_unknown_size_is_refused(text: str) -> None:
+    with pytest.raises(ValueError):
+        restate_size(text)
+
+
+def test_ac_012_39_restate_sets_its_four_memory_pools(repo: Path) -> None:
+    env = _service(repo, "restate").get("environment") or {}
+    missing = [name for name in RESTATE_POOLS if name not in env]
+    assert missing == [], f"restate leaves these pools at their defaults: {missing}"
+    for name in RESTATE_POOLS:
+        assert restate_size(str(env[name])) > 0, (name, env[name])
+
+
+def test_ac_012_39_restate_memory_pools_stay_below_its_mem_limit(repo: Path) -> None:
+    service = _service(repo, "restate")
+    env = service.get("environment") or {}
+    pools = {name: restate_size(str(env[name])) for name in RESTATE_POOLS if name in env}
+    assert set(pools) == set(RESTATE_POOLS), f"pools set: {sorted(pools)}"
+    assert "mem_limit" in service, "restate has no mem_limit"
+    assert sum(pools.values()) < mem_limit(service["mem_limit"]), (pools, service["mem_limit"])
+
+
+def _one_shot(services: dict[str, Any]) -> set[str]:
+    """Jobs another service waits for to finish (`condition: service_completed_successfully`)."""
+    out: set[str] = set()
+    for service in services.values():
+        depends = service.get("depends_on") or {}
+        if isinstance(depends, dict):
+            out |= {
+                name
+                for name, spec in depends.items()
+                if (spec or {}).get("condition") == "service_completed_successfully"
+            }
+    return out
+
+
+def long_running(compose: dict[str, Any]) -> list[str]:
+    """The services `make up` starts (every service without a profile) and those `make register`
+    starts (the `ingress` profile), without one-shot jobs such as `kafka-init`. `ems-gen` (profile
+    `gen`, started by hand) needs no limit (user decision, 2026-11-24)."""
+    services = compose["services"]
+    started = {
+        name
+        for name, service in services.items()
+        if not service.get("profiles") or "ingress" in service["profiles"]
+    }
+    return sorted(started - _one_shot(services))
+
+
+LONG_RUNNING = long_running(_compose(stack.REPO))
+
+
+def test_ac_012_39_long_running_services_are_what_make_up_and_make_register_start() -> None:
+    assert LONG_RUNNING == [
+        "ingress-forecasts",
+        "ingress-meters",
+        "ingress-prices",
+        "kafka",
+        "kafka-ui",
+        "restate",
+    ]
+
+
+@pytest.mark.parametrize("name", LONG_RUNNING)
+def test_ac_012_39_every_long_running_service_has_a_mem_limit(repo: Path, name: str) -> None:
+    service = _service(repo, name)
+    assert "mem_limit" in service, f"{name} has no mem_limit"
+    assert mem_limit(service["mem_limit"]) > 0, (name, service["mem_limit"])

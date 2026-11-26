@@ -52,7 +52,7 @@ line says otherwise.
 | Valuation | value = max(P, 0) · export, P = RCE of the quarter-hour (quarter-hourly since 2025-10-01) or the month's RCEm | art. 4b ust. 1–2 |
 | No RCE for a period | When RCE cannot be determined for a period t, the value of period t on the nearest preceding day for which it was determined applies. The actors use this replacement for a quarter-hour whose curve is not yet visible at its start, at most two days back, else 0, flagged `price_replaced` (ADR 0018). Where PSE published late, the legal bill would use the published price; the model cannot, because a step reads only what was visible at its start (risk A12). PSE published two days only on the day itself in 2025-10-01 … 2026-11-21 | art. 4b ust. 10 (read 2026-11-20 in Dz.U. 2021 poz. 2376; unchanged by Dz.U. 2024 poz. 1847) |
 | Negative prices | Floored at 0 "z zastrzeżeniem ust. 17 i 18": a prosumer who refuses the seller's clause of ust. 12 may be valued at the negative price. **Assumption:** every EMS site accepted the clause (D10) | art. 4b ust. 2 pkt 2, ust. 12, 17–18 |
-| RCEm | Σ E_t · max(RCE_t, 0) / Σ E_t, E = feed-in of prosumers at DSOs with ≥ 200,000 customers. PSE OIRE publishes it on the 11th of the next month (https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej). A correction that moves it by more than 2 % is re-published until the end of the 12th month, and sellers re-settle (correction rule: likely) | art. 4b ust. 6–7; Prawo energetyczne art. 11y |
+| RCEm | Σ E_t · max(RCE_t, 0) / Σ E_t, E = feed-in of prosumers at DSOs with ≥ 200,000 customers. PSE OIRE publishes it on the 11th of the next month (https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej; every publication 2025-10 … 2026-10, read 2026-11-23). The 11th is PSE's practice; the legal deadline is delegated to IRiESP (Prawo energetyczne art. 11y ust. 4): VERIFY. A correction that moves it by more than 2 % is re-published until the end of the 12th month, and sellers re-settle (correction rule: likely) | art. 4b ust. 6–7; Prawo energetyczne art. 11y |
 | Deposit tranche | 1.23 × the month's export value, for every cohort since 2025-02-01; assigned to the prosumer account in the next month; usable for 12 months from assignment, oldest first. A month's tranche never offsets that month | art. 4c ust. 4–5, 7; 1.23 from 2025-02-01 under Dz.U. 2024 poz. 1847 art. 31 |
 | Offset | Only the energy cost: the seller's price with excise and VAT ("ceny … uwzględniającej obowiązkowe obciążenia podatkowe i fiskalne"). Distribution, fixed and capacity charges are always paid | art. 4c ust. 2–3 |
 | Refund | At expiry, the unused part up to 20 % (RCEm) or 30 % (RCE) of the value of the energy fed in during the tranche's month, taken **before** the 1.23 factor; paid by the end of the 13th month after the month of feed-in; the rest is extinguished (cap base: likely, from the statute's wording "wartości energii elektrycznej wprowadzonej do sieci", with no seller example) | art. 4 ust. 11 pkt 2, ust. 11a; art. 4c ust. 6 |
@@ -159,6 +159,17 @@ line says otherwise.
   it, because a longer `price_curve` call differs in the last digits (AR burn-in). A real-data run uses PSE
   values only and fails on a missing month; the RCEm table must have contiguous months, and a value published
   inside its own month is rejected.
+- **Proxy table of a run** (spec 012, `ems.experiments.rcem.proxy_table`). The experiment runner builds the proxy
+  for every month from M−2 (M = the month of the first step, so the signal of the first days has a known month)
+  to `civil_month(end_step − 1)`, from the run's own generator config and seed, and records the table and the
+  entries used in the manifest. History runs keep PSE values.
+- **Costs of a result** (spec 012, `settlement.costs(rules, months, acc) -> Costs`):
+  - `bill_pln` = Σ `payable_pln` − Σ `refund_pln` over the closed months, None with none closed;
+  - `deposit_closing_pln` = Σ `remaining_pln` over the account's tranches, None with no closed month: the deposit
+    after the last closed month, without the offsets and the tranche of a month whose rows are still held;
+  - `ledger_net_cost_pln` = Σ (energy + distribution − `deposit_factor` · export value) over the closed months and
+    the held hour rows (during the `2L` lag they can span two months), None when there are neither. The open hour
+    (fewer than four quarters) has no row.
 
 ### Price signal and its gaps (`settlement.price_signal`)
 
@@ -219,6 +230,10 @@ bill differs (D2):
   always arrives at most `2L` steps after its quarter, so its hour's row is still open. With `lag` 0 and no
   corrections everything equals spec 009. `step(…, recent, corrections, lag)` returns the kept flows beside the
   `RefState` (`StepOut.recent`), so `RefState` still equals `reference.run`'s.
+- **A correction for a slot at or after `end_step`** (spec 012) is dropped and counted in `after_end_late` (a
+  subset of `late`): its step is never released, so no strategy would apply it. The estimate stays; it touches
+  only held rows, never `bill_pln`, in windows of whole months plus `2L`. A strategy that starts later than the
+  run (ADR 0021) drops and counts a correction for a slot before its first step (`dropped_corrections`).
 - **The estimate** for a missing reading is the value its stream used for the slot before (0 before the first
   reading), flagged `estimated`; if the reading never arrives the estimate stays in the ledger. A corrected quarter
   keeps the battery power resolved on the estimate, so the mode-action invariants above hold for the step's
@@ -258,7 +273,8 @@ fuse ≤ 63 A, otherwise C21 (not settled). Metering points (PPE) are 18-digit G
 
 - Built by spec 009: tariffs, settlement, price signal, actions, `Policy`, offline reference and stepper.
 - Built by spec 011: the split of `quarter()`, corrections of late readings and the month close with a lag.
-- Next: stage 4's export reports the cost metric of `11-experiments.md`.
+- Built by spec 012: the cost helper the export reports (the cost metric of `11-experiments.md`) and the proxy
+  RCEm table of a synthetic run.
 
 ## Prerequisites
 
@@ -269,3 +285,4 @@ fuse ≤ 63 A, otherwise C21 (not settled). Metering points (PPE) are 18-digit G
 - VERIFY: typical household consumption (GUS BDL primary figure; secondary sources give a median of about
   2,000–2,500 kWh/yr, plus 5–6 MWh/yr with a heat pump).
 - OPEN: battery wear model.
+- VERIFY: the legal RCEm publication deadline in IRiESP (above); the model uses PSE's practice, the 11th.

@@ -1,0 +1,18 @@
+# Validation run (spec 012, AC-012-36): systems metrics at two fleet sizes and one or two strategies.
+id: sys-scale
+hypothesis: >-
+  At speed 96 the stack sustains 100 and 400 managed households with one and two strategies, with
+  results equal to the offline side; decision latency, throughput, memory and state size are measured.
+data:
+  kind: synthetic
+  start: "2026-06-03T00:00:00Z"
+  days: 1
+  locations: 1400
+  households: 100
+run:
+  strategies: [NoBattery, SelfConsumption]
+  live: SelfConsumption
+  speed: 96
+matrix:
+  households: [100, 400]
+  strategies: [[SelfConsumption], [NoBattery, SelfConsumption]]

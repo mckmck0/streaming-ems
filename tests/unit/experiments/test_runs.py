@@ -16,7 +16,7 @@ import pytest
 from ems.assembler.params import RunParams
 from ems.contracts.time import quarter_index
 from ems.domain.netbilling import RcemTable
-from ems.experiments.runs import CONFIG, managed_params, scoped
+from ems.experiments.runs import CONFIG, managed_params, pse_table, scoped
 from ems.ingest.catalog.sites import Site
 from ems.ingest.generator import load_generator_config, load_sites
 from ems.tariffs import load_book, load_rcem, site_model
@@ -32,7 +32,9 @@ QUARTERS_IN_30_H = 120
 
 @pytest.fixture(scope="module")
 def params() -> dict[str, RunParams]:
-    return managed_params(run_id=RUN_ID, start=START, days=DAYS, locations=LOCATIONS)
+    return managed_params(
+        rcem=pse_table(), run_id=RUN_ID, start=START, days=DAYS, locations=LOCATIONS
+    )
 
 
 def _sites() -> dict[str, Site]:
@@ -57,7 +59,9 @@ def test_ac_011_37_keys_are_scoped_by_the_run_id(params: dict[str, RunParams]) -
 
 
 def test_ac_011_37_without_run_id_the_keys_are_unscoped() -> None:
-    params = managed_params(run_id=None, start=START, days=DAYS, locations=LOCATIONS)
+    params = managed_params(
+        rcem=pse_table(), run_id=None, start=START, days=DAYS, locations=LOCATIONS
+    )
     assert list(params) == list(MANAGED)
     for key, p in params.items():
         assert (p.run_id, p.household_key, p.market_key) == (None, key, "PL:RCE")
@@ -92,11 +96,12 @@ def test_ac_011_37_run_settings_are_the_defaults(params: dict[str, RunParams]) -
         assert p.late_slots == 8
         assert p.strategies == ("NoBattery", "SelfConsumption")
         assert p.live == "SelfConsumption"
-        assert p.schema_version == "1.0.0"
+        assert p.schema_version == "1.1.0"
 
 
 def test_ac_011_37_late_slots_and_strategies_are_passed_through() -> None:
     params = managed_params(
+        rcem=pse_table(),
         run_id=RUN_ID,
         start=START,
         days=DAYS,
@@ -133,11 +138,15 @@ def test_ac_011_37_a_window_outside_the_tariffs_fails_before_anything_is_built(
     start: datetime, days: float
 ) -> None:
     with pytest.raises(ValueError):
-        managed_params(run_id=RUN_ID, start=start, days=days, locations=LOCATIONS)
+        managed_params(rcem=pse_table(), run_id=RUN_ID, start=start, days=days, locations=LOCATIONS)
 
 
 def test_ac_011_37_a_first_step_off_the_utc_hour_fails() -> None:
     with pytest.raises(ValueError, match="UTC hour"):
         managed_params(
-            run_id=RUN_ID, start=START + timedelta(minutes=15), days=DAYS, locations=LOCATIONS
+            rcem=pse_table(),
+            run_id=RUN_ID,
+            start=START + timedelta(minutes=15),
+            days=DAYS,
+            locations=LOCATIONS,
         )

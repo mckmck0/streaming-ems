@@ -26,6 +26,9 @@ a new ADR that supersedes the old one, and `docs/context/` is updated in the sam
 | 0017 | [Per-household event-time watermarks order the actors' inputs](0017-per-household-event-time-ordering.md) | Accepted |
 | 0018 | [Late and missing inputs: allowed lateness, estimates and the replacement price](0018-late-and-missing-inputs.md) | Accepted |
 | 0019 | [Run parameters arrive as control messages](0019-run-parameters-as-control-messages.md) | Accepted |
+| 0020 | [The live deadline clock](0020-live-deadline-clock.md) | Accepted |
+| 0021 | [Strategy changes at run time](0021-strategy-changes-at-run-time.md) | Accepted |
+| 0022 | [How experiments measure the system](0022-experiment-measurement.md) | Accepted |
 
 ## Template
 

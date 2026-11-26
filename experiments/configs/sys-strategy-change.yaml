@@ -1,0 +1,18 @@
+# Validation run (spec 012, AC-012-34, -36): a strategy added on day 1 and removed on day 2; June closes.
+id: sys-strategy-change
+hypothesis: >-
+  A strategy added at an hour and removed at a later one joins and leaves every household exactly at
+  those hours, with every state equal to the offline twin given the recorded schedules.
+data:
+  kind: synthetic
+  start: "2026-06-29T04:00:00Z"
+  days: 2
+  locations: 350
+  households: 100
+run:
+  strategies: [SelfConsumption]
+  live: SelfConsumption
+  speed: 96
+changes:
+  - {at_hour: 12, strategies: [NoBattery, SelfConsumption]}
+  - {at_hour: 36, strategies: [SelfConsumption]}

@@ -11,12 +11,19 @@ counters outside ``==`` kept, and encodes again to the same bytes. Empty bytes d
 No type reachable from these, through dataclass fields and type arguments, is a ``set`` or a
 ``frozenset``: their order depends on the hash seed, and a retried handler that wrote other bytes
 would fail its journal check (A11).
+
+AC-012-40 (spec 012, plan §9 F4): a value that does not decode back equal to itself is refused
+before it is stored or sent. JSON has no NaN or infinity, so pydantic writes them as ``null``: a
+``float`` field then fails to read, and a ``float | None`` field reads ``None``. ``serialize``
+raises a ``ValueError`` (retryable, unlike a ``TerminalError``) instead. Valid values, -0.0 and an
+integer in a float field included, still pass.
 """
 
 from __future__ import annotations
 
 import collections.abc
 import dataclasses
+import math
 import struct
 import types
 import typing
@@ -65,6 +72,12 @@ def _leaves(value: Any, path: str = "") -> list[tuple[str, str, Any]]:
 
 @pytest.fixture(scope="module")
 def values() -> dict[type[Any], list[Any]]:
+    return stored_and_sent_values()
+
+
+def stored_and_sent_values() -> dict[type[Any], list[Any]]:
+    """The values of the ``values`` fixture; the 1.0.0 state fixtures of spec 012 start from them
+    (``tests/fixtures/state/generate.py``)."""
     gen = generate(START, HOURS, LATE_SLOTS, False)
     out: dict[type[Any], list[Any]] = {tp: [] for tp in STORED_AND_SENT}
     for params in gen.params.values():
@@ -178,3 +191,41 @@ def test_ac_011_33_the_walk_reaches_the_holidays(values: dict[type[Any], list[An
     assert National in seen
     holidays = values[RunParams][0].model.tariff.national.holidays
     assert isinstance(holidays, tuple) and list(holidays) == sorted(set(holidays))
+
+
+# ── spec 012: values that do not survive JSON are refused (AC-012-40) ───────────────────────────
+
+
+@dataclasses.dataclass(frozen=True)
+class _Floats:
+    x_kwh: float
+    y_kwh: float | None = None
+
+
+NOT_FINITE = [math.nan, math.inf, -math.inf]
+
+
+@pytest.mark.parametrize("bad", NOT_FINITE, ids=["nan", "inf", "-inf"])
+@pytest.mark.parametrize("field", ["x_kwh", "y_kwh"], ids=["float", "float-or-none"])
+def test_ac_012_40_a_nan_or_an_infinity_is_refused_before_it_is_stored(
+    field: str, bad: float
+) -> None:
+    value = _Floats(**{"x_kwh": 1.0, field: bad})
+    with pytest.raises(ValueError, match="NaN or an infinity"):
+        DataclassSerde(_Floats).serialize(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        _Floats(-0.0),  # the sign survives JSON
+        _Floats(0.0, 0.0),  # the floor's +0.0
+        _Floats(-0.42, None),  # a negative price, an unset optional
+        _Floats(5, 3),  # integers in float fields compare equal after the round trip
+        _Floats(1e-300, 1.7976931348623157e308),
+    ],
+    ids=["minus-zero", "zero", "negative-and-none", "integers", "extremes"],
+)
+def test_ac_012_40_finite_values_pass_the_guard(value: _Floats) -> None:
+    serde = DataclassSerde(_Floats)
+    assert serde.deserialize(serde.serialize(value)) == value

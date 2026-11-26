@@ -109,7 +109,7 @@ def _env(tag: str, out: Path) -> Any:
 
 
 def run_skew(out: Path, locations: int, days: float, faults: bool) -> dict[str, Any]:
-    from ems.experiments.runs import managed_params
+    from ems.experiments.runs import managed_params, pse_table
     from ems.experiments.stack import (
         MemorySampler,
         offline_logs,
@@ -121,7 +121,9 @@ def run_skew(out: Path, locations: int, days: float, faults: bool) -> dict[str, 
     env = _env("ms", out)
     run_id = f"m{uuid.uuid4().hex[:10]}"
     start = datetime.fromisoformat(START.replace("Z", "+00:00"))
-    params = managed_params(run_id=run_id, start=start, days=days, locations=locations)
+    params = managed_params(
+        run_id=run_id, start=start, days=days, locations=locations, rcem=pse_table()
+    )
     sampler = MemorySampler()
     env.open()
     sampler.start()

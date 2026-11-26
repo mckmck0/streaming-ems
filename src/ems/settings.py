@@ -33,6 +33,8 @@ class EmsSettings(BaseSettings):
     restate_ingress_url: str = "http://127.0.0.1:8080"
     restate_admin_url: str = "http://127.0.0.1:9070"
     service_url: str = "http://host.docker.internal:9080"
+    # Spec 012: the SDK service writes one timing line per handler commit to this file (optional).
+    timing_log: Path | None = None
     open_meteo_api_key: SecretStr | None = None
     entsoe_token: SecretStr | None = None
 

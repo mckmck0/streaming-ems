@@ -10,6 +10,12 @@ does not depend on how the household's other streams interleave with it. With ``
   ``Late`` correction, attached to the first step after the stream's newest slot;
 - a reading older still is counted (``too_old``) and dropped.
 The first reading of a slot wins; a second one is counted (``duplicate`` or ``conflict``).
+
+Live mode adds the wall clock (spec 012, ADR 0020): ``meter_close`` closes every slot below a clock
+step, on its reading or on the estimate. The stream's *horizon*, the higher of its newest reading
+and its last closed slot, then stands in for the newest reading wherever lateness is judged. In sim
+the two are always equal (a slot closes only on its reading or ``L`` newer ones), so nothing
+changes.
 """
 
 from __future__ import annotations
@@ -54,6 +60,11 @@ class MeterStream:
     skipped: int = 0  # unusable entries inside accepted readings
 
 
+def horizon(s: MeterStream) -> int:
+    """The higher of the newest reading and the last closed slot: lateness is judged against it."""
+    return s.closed - 1 if s.newest is None else max(s.newest, s.closed - 1)
+
+
 def meter_apply(
     s: MeterStream, first_step: int, end_step: int, late_slots: int, r: Reading
 ) -> tuple[MeterStream, tuple[Closed, ...], Late | None]:
@@ -63,7 +74,8 @@ def meter_apply(
         return replace(s, before_start=s.before_start + 1), (), None
     if t >= end_step:
         return replace(s, after_end=s.after_end + 1), (), None
-    if s.newest is not None and t <= s.newest - 2 * late_slots:
+    before = horizon(s)
+    if t <= before - 2 * late_slots:
         return replace(s, too_old=s.too_old + 1), (), None
     for slot_t, event_id, _ in s.slots:
         if slot_t == t:
@@ -75,10 +87,10 @@ def meter_apply(
     slots[t] = (r.event_id, r.kwh)
     late = None
     late_count = s.late
-    # Below `closed` and not stored: the slot closed on an estimate (closing needs a reading first,
-    # so `newest` is set).
-    if t < s.closed and s.newest is not None:
-        late = Late(t, r.kwh, s.newest + 1)
+    # Below `closed` and not stored: the slot closed on an estimate (after `L` newer readings, or
+    # on the clock in live mode, when the stream may have no reading at all).
+    if t < s.closed:
+        late = Late(t, r.kwh, before + 1)
         late_count += 1
     newest = t if s.newest is None else max(s.newest, t)
 
@@ -94,10 +106,11 @@ def meter_apply(
         last_kwh = item.kwh
         closed += 1
 
+    after = max(newest, closed - 1)
     keep = tuple(
         (slot_t, eid, kwh)
         for slot_t, (eid, kwh) in sorted(slots.items())
-        if slot_t > newest - 2 * late_slots
+        if slot_t > after - 2 * late_slots
     )
     stream = MeterStream(
         closed=closed,
@@ -114,3 +127,29 @@ def meter_apply(
         skipped=s.skipped + r.skipped,
     )
     return stream, tuple(out), late
+
+
+def meter_close(
+    s: MeterStream, until: int, late_slots: int
+) -> tuple[MeterStream, tuple[Closed, ...]]:
+    """Close every slot below ``until`` on its reading or on the estimate, then every slot after it
+    that already holds a reading (live mode's clock, spec 012). Pruning follows the horizon.
+    """
+    slots = {slot_t: kwh for slot_t, _, kwh in s.slots}
+    out: list[Closed] = []
+    closed, last_kwh, estimated = s.closed, s.last_kwh, s.estimated
+    while closed < until or closed in slots:
+        if closed in slots:
+            item = Closed(closed, slots[closed], False)
+        else:
+            item = Closed(closed, last_kwh, True)
+            estimated += 1
+        out.append(item)
+        last_kwh = item.kwh
+        closed += 1
+    if not out:
+        return s, ()
+    stream = replace(s, closed=closed, last_kwh=last_kwh, estimated=estimated)
+    edge = horizon(stream) - 2 * late_slots
+    stream = replace(stream, slots=tuple(x for x in s.slots if x[0] > edge))
+    return stream, tuple(out)

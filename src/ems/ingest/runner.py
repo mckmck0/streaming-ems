@@ -46,6 +46,79 @@ class PreflightError(RuntimeError):
     pass
 
 
+# Upper edges of the lateness histogram, in seconds (spec 012, AC-012-29).
+LATENESS_EDGES_S = (
+    0.001,
+    0.002,
+    0.005,
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2,
+    0.5,
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    60.0,
+    float("inf"),
+)
+
+
+class Lateness:
+    """How far a paced publisher fell behind its schedule: a fixed-bucket histogram, its count and
+    exact maximum. ``p99_s`` is the upper edge of the bucket that holds the 99th percentile (the
+    exact maximum when that bucket is open-ended).
+    """
+
+    def __init__(self) -> None:
+        self.counts = [0] * len(LATENESS_EDGES_S)
+        self.count = 0
+        self.max_s = 0.0
+
+    def add(self, seconds: float) -> None:
+        i = next(i for i, edge in enumerate(LATENESS_EDGES_S) if seconds <= edge)
+        self.counts[i] += 1
+        self.count += 1
+        self.max_s = max(self.max_s, seconds)
+
+    def as_dict(self) -> dict[str, float | int]:
+        return {"count": self.count, "max_s": self.max_s, "p99_s": self._p99()}
+
+    def _p99(self) -> float:
+        if self.count == 0:
+            return 0.0
+        rank = -(-99 * self.count // 100)  # nearest rank: ceil(0.99 n)
+        seen = 0
+        for edge, n in zip(LATENESS_EDGES_S, self.counts, strict=True):
+            seen += n
+            if seen >= rank:
+                return self.max_s if edge == float("inf") else edge
+        return self.max_s
+
+
+async def pace(
+    due: float,
+    sink: Sink,
+    *,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], Any] | None = None,
+) -> float:
+    """Wait until the monotonic clock reaches ``due``, in slices of at most 0.5 s so the sink's
+    delivery callbacks keep being served; return how late it is after waiting (0 when on time).
+    """
+    now_of = monotonic or time.monotonic
+    nap = sleep or asyncio.sleep
+    delay = due - now_of()
+    while delay > 0:
+        await nap(min(delay, 0.5))
+        sink.poll(0)
+        delay = due - now_of()
+    return max(0.0, -delay)
+
+
 @dataclass
 class RunResult:
     counts: Counter[str]
@@ -106,10 +179,12 @@ def write_manifest(
     counts: Counter[str],
     stats: SinkStats | None,
     sites: int,
+    pacing: dict[str, Any] | None = None,
 ) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     manifest = {
         "kind": "ems-gen-run",
+        "pacing": pacing,
         "run_id": run_id,
         "mode": mode,
         "window": {"start": start.isoformat(), "end": end.isoformat() if end else None},
@@ -176,9 +251,14 @@ def preflight(
     start: datetime,
     end: datetime | None,
     now: datetime,
+    *,
+    realtime: bool = False,
 ) -> None:
+    """A realtime run publishes each record at its own timestamp, so only the records already due
+    at ``now`` can be ahead of the wall clock: their newest is ``now``, however far ``end`` is.
+    """
     lo, hi = record_time_bounds(model, cfg, start, end or now)
-    preflight_topics(settings, lo, hi, now)
+    preflight_topics(settings, lo, min(hi, now) if realtime else hi, now)
 
 
 async def paced_publish(
@@ -195,20 +275,20 @@ async def paced_publish(
     counts: Counter[str],
     wall0: float,
     max_events: int | None = None,
+    lateness: Lateness | None = None,
 ) -> None:
-    """Publish the synthetic emissions; in non-backfill modes, pace them against the wall clock."""
+    """Publish the synthetic emissions; in non-backfill modes, pace them against the wall clock
+    and record how late each one went out.
+    """
     source = emissions(model, cfg, start, end, run_id)
     faults = FaultConfig.from_dict(cfg.faults)
     if faults.enabled:
         source = apply_faults(source, faults, cfg.seed)
     for emit_at, stream, build in source:
         if mode != "backfill":
-            due = wall0 + (emit_at - start).total_seconds() / speed
-            delay = due - time.monotonic()
-            while delay > 0:  # sleep in slices so delivery callbacks keep being served
-                await asyncio.sleep(min(delay, 0.5))
-                sink.poll(0)
-                delay = due - time.monotonic()
+            late = await pace(wall0 + (emit_at - start).total_seconds() / speed, sink)
+            if lateness is not None:
+                lateness.add(late)
         sink.publish(build(clock()))
         counts[stream] += 1
         if max_events is not None and sum(counts.values()) >= max_events:
@@ -243,7 +323,7 @@ async def run(
     sites = load_sites(settings.config_dir, cfg)
     model = SyntheticModel(sites, cfg.seed, settings.config_dir)
     if check_topics:
-        preflight(settings, model, cfg, start, end, now)
+        preflight(settings, model, cfg, start, end, now, realtime=mode == "realtime")
     sink = (
         sink
         if sink is not None
@@ -254,6 +334,8 @@ async def run(
         )
     )
     wall0 = time.monotonic()
+    paced_from_unix = time.time()
+    lateness = Lateness() if mode != "backfill" else None
     counts: Counter[str] = Counter()
     log.info(
         "run_start",
@@ -278,6 +360,7 @@ async def run(
             counts=counts,
             wall0=wall0,
             max_events=max_events,
+            lateness=lateness,
         )
     finally:
         # Also on Ctrl+C / SIGTERM: flush, then record what was produced (principle 14).
@@ -295,6 +378,7 @@ async def run(
             counts=counts,
             stats=stats,
             sites=len(sites),
+            pacing=_pacing(paced_from_unix, speed, lateness),
         )
         total = sum(counts.values())
         log.info(
@@ -489,6 +573,15 @@ class _History:
     meter_delay: timedelta
 
 
+def _pacing(
+    paced_from_unix: float, speed: float, lateness: Lateness | None
+) -> dict[str, Any] | None:
+    """What a run manifest records about its pacing; None when it was not paced."""
+    if lateness is None:
+        return None
+    return {"paced_from_unix": paced_from_unix, "speed": speed, "lateness": lateness.as_dict()}
+
+
 def _history(
     settings: EmsSettings, root: Path, *, speed: float | None, background: bool
 ) -> _History | None:
@@ -503,11 +596,6 @@ def _history(
         if background:
             raise ReplayRefused("--background needs a history recording (ems-gen history build)")
         return None
-    if speed:
-        raise ReplayRefused(
-            "--speed paces by ingested_at, which is a fetch time in a history recording; replay "
-            "it without --speed (the consumer orders by availability)"
-        )
     try:
         info = read_build_info(root)
     except ValueError as exc:
@@ -586,6 +674,8 @@ async def replay(
     )
     counts: Counter[str] = Counter()
     wall0 = time.monotonic()
+    paced_from_unix = time.time()
+    lateness = Lateness() if speed else None
     first: datetime | None = None
     try:
         if hist is not None:
@@ -602,19 +692,21 @@ async def replay(
                     for _at, _s, build in emissions(model, synth_cfg, hist.start, hist.end, run_id)
                 )
                 stream = heapq.merge(stream, ((key(e), 1, e) for e in generated))
-            for _key, origin, event in stream:
+            for k, origin, event in stream:
+                if speed and lateness is not None:
+                    # paced by when the event becomes usable (spec 012, AC-012-22)
+                    due = wall0 + (k[0] - hist.start).total_seconds() / speed
+                    lateness.add(await pace(due, sink))
                 sink.publish(as_replay(event, clock()) if origin == 0 else event)
                 counts[event.stream.value] += 1
                 if sum(counts.values()) % 1000 == 0:
                     await asyncio.sleep(0)
         else:
             for event in events:
-                if speed:
+                if speed and lateness is not None:
                     first = first or event.ingested_at
                     due = wall0 + (event.ingested_at - first).total_seconds() / speed
-                    while (delay := due - time.monotonic()) > 0:
-                        await asyncio.sleep(min(delay, 0.5))
-                        sink.poll(0)
+                    lateness.add(await pace(due, sink))
                 sink.publish(as_replay(event, clock()))
                 counts[event.stream.value] += 1
     finally:
@@ -632,6 +724,7 @@ async def replay(
             counts=counts,
             stats=stats,
             sites=len(hist.cfg.live_locations) + bg_sites,
+            pacing=_pacing(paced_from_unix, speed or 0.0, lateness),
         )
     return RunResult(
         counts=counts, stats=stats, manifest=manifest, elapsed_s=time.monotonic() - wall0

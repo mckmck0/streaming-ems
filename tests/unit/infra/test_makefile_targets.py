@@ -15,6 +15,10 @@ AC-011-44: after the POST, `register` checks with `curl -fsS` that Restate lists
 handler (`Household.on_measurement`, `Weather.on_forecast`, `Tariff.on_price`), and only then starts
 the ingress profile; a failed check stops the recipe.
 AC-011-46: `measure` has the modes `skew` and `backlog`; `state-cost` is gone.
+
+Spec 012:
+AC-012-25: `exp` is phony; it refuses an empty `NAME`, asks for confirmation unless `CONFIRM=yes`
+(as `reset` does), then runs the config through `ems.experiments.run` with `--yes`.
 """
 
 from __future__ import annotations
@@ -179,3 +183,46 @@ def test_ac_011_46_measure_help_names_skew_and_backlog_only(repo: Path) -> None:
 
 def test_ac_011_46_no_state_cost_mode_in_the_makefile(repo: Path) -> None:
     assert "state-cost" not in (repo / "Makefile").read_text()
+
+
+# ── spec 012: `make exp` (AC-012-25) ────────────────────────────────────────────────────────────
+
+EXP_RUN = "uv run python -m ems.experiments.run experiments/configs/$(NAME).yaml"
+
+
+def _exp_lines(repo: Path) -> tuple[list[str], int, int, int]:
+    """The `exp` recipe and the indices of its NAME check, its prompt and its run line."""
+    lines = _recipe(repo, "exp")
+    names = [i for i, line in enumerate(lines) if 'test -n "$(NAME)"' in line]
+    prompts = [i for i, line in enumerate(lines) if '"$(CONFIRM)" != "yes"' in line]
+    runs = [i for i, line in enumerate(lines) if EXP_RUN in line]
+    assert names, 'exp does not refuse an empty NAME with `test -n "$(NAME)"`'
+    assert prompts, "exp does not skip its prompt only with CONFIRM=yes"
+    assert runs, f"exp does not run `{EXP_RUN}`"
+    return lines, names[0], prompts[0], runs[0]
+
+
+def test_ac_012_25_exp_is_phony(repo: Path) -> None:
+    _, phony = _parse(repo)
+    assert "exp" in phony
+
+
+def test_ac_012_25_exp_refuses_an_empty_name_before_anything_else(repo: Path) -> None:
+    lines, name, prompt, run = _exp_lines(repo)
+    assert name == 0
+    assert "exit 1" in lines[name]
+    assert name < prompt < run
+
+
+def test_ac_012_25_exp_asks_for_confirmation_like_reset(repo: Path) -> None:
+    lines, _, prompt, run = _exp_lines(repo)
+    asking = "\n".join(lines[prompt:run])
+    assert "read -r -p" in asking
+    assert '[ "$$ans" = "yes" ] || { echo "aborted"; exit 1; }' in asking
+    reset = "\n".join(_recipe(repo, "reset"))
+    assert '"$(CONFIRM)" != "yes"' in reset  # the same switch as `make reset`
+
+
+def test_ac_012_25_exp_runs_the_config_with_yes_once_confirmed(repo: Path) -> None:
+    lines, _, _, run = _exp_lines(repo)
+    assert lines[run].split(EXP_RUN, 1)[1].split() == ["--yes"]

@@ -1,0 +1,17 @@
+{"soc_kwh":5.0,"commands":{"expected":1992756,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":2.5,"commands":{"expected":1992756,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":2.2666382506356966,"commands":{"expected":1992762,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.345622311186475,"commands":{"expected":1992769,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":1.0,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":3}
+{"soc_kwh":1.6969014344502502,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.046924432750053,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.533417352574587,"commands":{"expected":1992759,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":2.174798994540773,"commands":{"expected":1992764,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":1.69031501759675,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.053213344545808,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.843642998798806,"commands":{"expected":1992757,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":2.3320945620836278,"commands":{"expected":1992760,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.950264832827414,"commands":{"expected":1992758,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":1.6967276113709684,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":4.1233402220579345,"commands":{"expected":1992780,"held":[],"reordered":0,"stale":0},"clamped":0}
+{"soc_kwh":1.0,"commands":{"expected":1992780,"held":[[1992781,{"t":1992756,"action":{"kind":"export","level":0.5,"p_kw":null},"pv_kwh":0.0,"load_kwh":0.046940142615390035,"rce_pln_per_kwh":0.39022,"corrections":[],"schema_version":"1.0.0"}],[1992782,{"t":1992756,"action":{"kind":"setpoint","level":null,"p_kw":-1.25},"pv_kwh":0.0,"load_kwh":0.046940142615390035,"rce_pln_per_kwh":0.39022,"corrections":[],"schema_version":"1.0.0"}]],"reordered":0,"stale":0},"clamped":3}

@@ -12,6 +12,17 @@
 - Pruning: curves of days more than two days before ``next``'s day, and runs older than the last
   one visible at ``next``, are dropped without changing a step.
 
+Spec 012 (plan §2), the live clock, in the last section:
+- AC-012-01, -05: a correction that could only attach at or after ``end_step`` is dropped and
+  counted in ``Join.after_end_late`` (a subset of the stream's ``late``); spec 011 kept it
+  unapplied;
+- AC-012-02: ``on_clock`` closes every needed meter side below ``min(clock, end_step)``, raises both
+  watermarks to at least that step and releases by the usual rule; a clock before the window
+  releases nothing;
+- AC-012-03: a reading for a slot the clock closed is a correction for the step after the horizon;
+- AC-012-04: a curve or run that arrives behind the join's watermark is made visible from the
+  watermark (the one before the update) and counted; at or after it, nothing moves.
+
 Prices in these tests are ``seq * 1000 + slot`` (``cases.day_curve``): each value names its curve.
 """
 
@@ -23,6 +34,7 @@ from datetime import date
 
 import pytest
 
+from ems.assembler import join
 from ems.assembler.join import Join, MeterSide, Step, on_curves, on_reading, on_run, start
 from ems.assembler.mapping import Reading
 from ems.assembler.meter_stream import Late, MeterStream
@@ -87,6 +99,9 @@ class Feed:
 
     def run(self, covered: int, run: Run) -> tuple[Step, ...]:
         return self._take(on_run(self.p, self.j, covered, run))
+
+    def clock(self, clock_step: int) -> tuple[Step, ...]:
+        return self._take(join.on_clock(self.p, self.j, clock_step))
 
 
 def params(
@@ -255,7 +270,9 @@ def test_ac_011_18_corrections_production_first_and_removed() -> None:
     assert f.steps[-1].corrections == ()
 
 
-def test_a_correction_for_a_step_never_released_stays_unapplied() -> None:
+def test_ac_012_01_a_correction_due_at_end_step_is_dropped_and_counted() -> None:
+    """Spec 011 kept this ``Late`` unapplied; spec 012 drops it and counts it in the join's
+    ``after_end_late``, while each stream still counts it in ``late`` (AC-012-01, -05)."""
     end = FIRST + 4
     f = Feed(params(end=end))
     f.curves(FAR, day_curve(1, D20, FIRST - 40))
@@ -264,7 +281,27 @@ def test_a_correction_for_a_step_never_released_stays_unapplied() -> None:
     f.meters([FIRST + 1])  # late on both sides, for step FIRST + 4 = end
     assert [s.t for s in f.steps] == [FIRST, FIRST + 1, FIRST + 2, FIRST + 3]
     assert all(s.corrections == () for s in f.steps)
-    assert f.j.consumption.late == (Late(FIRST + 1, load(FIRST + 1), end),)
+    assert f.j.production is not None
+    assert f.j.consumption.late == () and f.j.production.late == ()
+    assert f.j.after_end_late == 2
+    assert (f.j.consumption.stream.late, f.j.production.stream.late) == (1, 1)
+
+
+def test_ac_012_05_a_correction_due_at_the_last_step_is_applied() -> None:
+    """The boundary below: due at ``end_step - 1``, it rides on the last step."""
+    end = FIRST + 5
+    f = Feed(params(end=end))
+    f.curves(FAR, day_curve(1, D20, FIRST - 40))
+    f.run(FAR, Run(1, S00, FIRST - 4))
+    f.meters([FIRST, FIRST + 2, FIRST + 3])
+    f.meters([FIRST + 1])  # late on both sides, for step FIRST + 4 = end - 1
+    released = f.meters([FIRST + 4])
+    assert [s.t for s in released] == [FIRST + 4]
+    assert released[0].corrections == (
+        Correction("production", FIRST + 1, pv(FIRST + 1)),
+        Correction("consumption", FIRST + 1, load(FIRST + 1)),
+    )
+    assert f.j.after_end_late == 0
 
 
 # ── prices ────────────────────────────────────────────────────────────────────────────────────────
@@ -450,8 +487,11 @@ def test_pruning_keeps_two_days_of_curves_and_the_runs_still_needed() -> None:
     days = [date(2026, 10, d) for d in (17, 18, 19, 20, 21)]
     f.curves(FAR, *(day_curve(i + 1, d, first - 400) for i, d in enumerate(days)))
     r1, r2, r3 = Run(1, 1, first - 30), Run(2, 2, first - 5), Run(3, 3, first + 2)
-    for r in (r1, r2, r3):
-        f.run(FAR, r)
+    # Each run arrives with the watermark its stream had after it: never above the next run's
+    # visibility, as `forecast_apply` guarantees (spec 012: a run behind the join's watermark
+    # would be clamped).
+    for r, covered in ((r1, first - 5), (r2, first + 2), (r3, FAR)):
+        f.run(covered, r)
     f.meters([first])  # next = first + 1, still the 20th
     assert [c.day for c in f.j.curves] == days[1:]
     assert f.j.runs == (r2, r3)
@@ -461,3 +501,188 @@ def test_pruning_keeps_two_days_of_curves_and_the_runs_still_needed() -> None:
     assert [s.forecast_issue_s for s in f.steps] == [2, 2, 3, 3, 3, 3, 3, 3]
     assert [s.rce_pln_per_kwh for s in f.steps] == [price_of(f.j.curves, s.t)[0] for s in f.steps]
     assert not any(s.price_replaced for s in f.steps)
+
+
+# ── the live clock (spec 012) ─────────────────────────────────────────────────────────────────────
+
+
+def test_ac_012_02_on_clock_closes_raises_both_watermarks_and_releases() -> None:
+    """L = 2. Slots 0 and 1 read on both sides, consumption's slot 3 waits behind a missing 2, and
+    both watermarks still cover nothing. The clock at 4 closes 2 and 3 on both sides (with the held
+    reading where there is one), raises both watermarks to 4 and releases 0 … 3."""
+    f = Feed(params())
+    f.curves(FIRST, day_curve(1, D20, FIRST - 40))
+    f.run(FIRST, Run(1, S00, FIRST - 4))
+    f.meters([FIRST, FIRST + 1])
+    f.reading("consumption", FIRST + 3)
+    assert f.steps == []
+    released = f.clock(FIRST + 4)
+    assert [(s.t, s.pv_estimated, s.load_estimated) for s in released] == [
+        (FIRST, False, False),
+        (FIRST + 1, False, False),
+        (FIRST + 2, True, True),
+        (FIRST + 3, True, False),
+    ]
+    assert [(s.pv_kwh, s.load_kwh) for s in released[2:]] == [
+        (pv(FIRST + 1), load(FIRST + 1)),
+        (pv(FIRST + 1), load(FIRST + 3)),
+    ]
+    assert [(s.rce_pln_per_kwh, s.price_replaced) for s in released] == [
+        (1000.0 + t - T0_D20, False) for t in range(FIRST, FIRST + 4)
+    ]
+    assert [s.forecast_issue_s for s in released] == [S00] * 4
+    assert (f.j.next, f.j.price_covered, f.j.forecast_covered) == (FIRST + 4, FIRST + 4, FIRST + 4)
+    assert f.j.production is not None
+    assert (f.j.production.stream.closed, f.j.production.stream.estimated) == (FIRST + 4, 2)
+    assert (f.j.consumption.stream.closed, f.j.consumption.stream.estimated) == (FIRST + 4, 1)
+    assert f.j.consumption.ready == () and f.j.production.ready == ()
+
+
+def test_ac_012_02_on_clock_never_lowers_a_watermark() -> None:
+    f = ready()
+    f.meters([FIRST])
+    released = f.clock(FIRST + 3)
+    assert [(s.t, s.pv_estimated, s.load_estimated) for s in released] == [
+        (FIRST + 1, True, True),
+        (FIRST + 2, True, True),
+    ]
+    assert (f.j.price_covered, f.j.forecast_covered) == (FAR, FAR)
+
+
+def test_ac_012_05_on_clock_caps_at_end_step() -> None:
+    """No reading and no run at all: the clock far past the window closes every slot below
+    ``end_step`` on the estimate 0 and releases them, and nothing at or after ``end_step``."""
+    end = FIRST + 8
+    f = Feed(params(end=end))
+    f.curves(FIRST, day_curve(1, D20, FIRST - 40))
+    released = f.clock(FIRST + 100)
+    assert [s.t for s in released] == list(range(FIRST, end))
+    assert all(s.pv_estimated and s.load_estimated for s in released)
+    assert all(s.pv_kwh == 0.0 and s.load_kwh == 0.0 for s in released)
+    assert all(s.forecast_issue_s is None and not s.price_replaced for s in released)
+    assert (f.j.next, f.j.price_covered, f.j.forecast_covered) == (end, end, end)
+    assert f.j.production is not None
+    assert f.j.consumption.stream.closed == f.j.production.stream.closed == end
+    before = f.j
+    assert f.clock(FIRST + 200) == () and f.j == before
+
+
+def test_ac_012_02_a_clock_before_the_window_releases_nothing() -> None:
+    """A window that starts in the future: the clock at or before ``first_step`` neither closes a
+    slot nor lets a watermark cover a step, even with the first step's readings held."""
+    f = Feed(params())
+    f.meters([FIRST])
+    for clock_step in (FIRST - 50, FIRST - 1, FIRST):
+        sides = (f.j.consumption, f.j.production)
+        assert f.clock(clock_step) == ()
+        assert (f.j.next, f.j.consumption, f.j.production) == (FIRST, *sides)
+    assert [s.t for s in f.clock(FIRST + 1)] == [FIRST]
+
+
+def test_ac_012_02_on_clock_for_a_site_without_pv() -> None:
+    f = Feed(params(NO_PV_SITE))
+    f.reading("consumption", FIRST)
+    released = f.clock(FIRST + 2)
+    assert [(s.t, s.pv_kwh, s.pv_estimated, s.load_estimated) for s in released] == [
+        (FIRST, 0.0, False, False),
+        (FIRST + 1, 0.0, False, True),
+    ]
+    assert f.j.production is None
+
+
+def test_ac_012_03_a_reading_for_a_slot_the_clock_closed_corrects_a_later_step() -> None:
+    """L = 2, nothing read: the clock at 5 closes 0 … 4 on 0 (horizon 4). Consumption's slot 1 then
+    is a correction for step 5; production's slot 0 is at ``horizon - 2L``: too old."""
+    f = Feed(params())
+    f.curves(FIRST, day_curve(1, D20, FIRST - 40))
+    f.run(FIRST, Run(1, S00, FIRST - 4))
+    f.clock(FIRST + 5)
+    assert [(s.t, s.load_estimated) for s in f.steps] == [
+        (t, True) for t in range(FIRST, FIRST + 5)
+    ]
+    f.reading("consumption", FIRST + 1, 0.75)
+    assert f.j.consumption.late == (Late(FIRST + 1, 0.75, FIRST + 5),)
+    f.reading("production", FIRST, 0.5)
+    assert f.j.production is not None and f.j.production.stream.too_old == 1
+    released = f.clock(FIRST + 6)
+    assert [s.t for s in released] == [FIRST + 5]
+    assert released[0].corrections == (Correction("consumption", FIRST + 1, 0.75),)
+    assert f.j.consumption.late == () and f.j.after_end_late == 0
+
+
+def test_ac_012_05_a_reading_after_the_clock_closed_the_window_is_counted_after_end() -> None:
+    end = FIRST + 8
+    f = Feed(params(end=end))
+    f.clock(FIRST + 100)
+    assert f.j.next == end
+    f.reading("consumption", end - 1, 0.6)  # a Late for step `end`: dropped
+    assert f.j.consumption.late == ()
+    assert (f.j.after_end_late, f.j.consumption.stream.late) == (1, 1)
+    assert [s.t for s in f.steps] == list(range(FIRST, end))
+
+
+def test_ac_012_04_a_curve_behind_the_watermark_is_clamped_and_counted() -> None:
+    """The clock raised the price watermark to 4 before any curve came, so steps 0 … 3 ran on the
+    replacement price. A snapshot then brings a curve visible from step -40 (moved to 4, counted)
+    and one visible from step 6 (left as it is): no released step can read either."""
+    f = Feed(params())
+    f.run(FAR, Run(1, S00, FIRST - 4))
+    f.clock(FIRST + 4)
+    assert [(s.rce_pln_per_kwh, s.price_replaced) for s in f.steps] == [(0.0, True)] * 4
+    behind = day_curve(1, D20, visible_step=FIRST - 40)
+    ahead = day_curve(2, D20, visible_step=FIRST + 6, issued_s=100)
+    f.curves(FAR, behind, ahead)
+    assert f.j.clamped_price == 1 and f.j.clamped_forecast == 0
+    assert f.j.curves == (dataclasses.replace(behind, visible_step=FIRST + 4), ahead)
+    assert f.j.price_covered == FAR
+    f.clock(FIRST + 7)
+    assert [(s.t, s.rce_pln_per_kwh, s.price_replaced) for s in f.steps[4:]] == [
+        (FIRST + 4, 1000.0 + FIRST + 4 - T0_D20, False),
+        (FIRST + 5, 1000.0 + FIRST + 5 - T0_D20, False),
+        (FIRST + 6, 2000.0 + FIRST + 6 - T0_D20, False),
+    ]
+
+
+def test_ac_012_04_a_run_behind_the_watermark_is_clamped_and_counted() -> None:
+    """The floor is the watermark before each update: 4 (from the clock) for the first run, which
+    moves, then 5 (the first run's own watermark) for the second, visible from 6, which does not."""
+    f = Feed(params())
+    f.curves(FAR, day_curve(1, D20, FIRST - 40))
+    f.clock(FIRST + 4)
+    assert [s.forecast_issue_s for s in f.steps] == [None] * 4
+    behind, ahead = Run(1, S00, FIRST - 4), Run(2, S03, FIRST + 6)
+    f.run(FIRST + 5, behind)
+    assert f.j.clamped_forecast == 1
+    assert f.j.runs == (dataclasses.replace(behind, visible_step=FIRST + 4),)
+    f.run(FAR, ahead)
+    assert (f.j.clamped_forecast, f.j.runs[-1]) == (1, ahead)
+    f.clock(FIRST + 7)
+    assert [s.forecast_issue_s for s in f.steps[4:]] == [S00, S00, S03]
+    assert f.j.clamped_price == 0
+
+
+def test_ac_012_04_records_at_or_after_the_watermark_are_not_moved() -> None:
+    """Without a clock, every update a sparse stream emits is visible no earlier than the watermark
+    it arrived behind (here equal to it): nothing moves and nothing is counted."""
+    f = Feed(params())
+    c1, c2 = day_curve(1, D20, FIRST - 40), day_curve(2, D20, FIRST + 2, issued_s=100)
+    r1, r2 = Run(1, S00, FIRST - 20), Run(2, S03, FIRST + 1)
+    f.curves(FIRST + 2, c1)
+    f.curves(FIRST + 44, c2)
+    f.run(FIRST + 1, r1)
+    f.run(FIRST + 10, r2)
+    assert (f.j.clamped_price, f.j.clamped_forecast) == (0, 0)
+    assert (f.j.curves, f.j.runs) == ((c1, c2), (r1, r2))
+    f.meters(range(FIRST, FIRST + 3))
+    assert [s.forecast_issue_s for s in f.steps] == [S00, S03, S03]
+    assert [s.rce_pln_per_kwh for s in f.steps] == [
+        1000.0 + FIRST - T0_D20,
+        1000.0 + FIRST + 1 - T0_D20,
+        2000.0 + FIRST + 2 - T0_D20,
+    ]
+
+
+def test_ac_012_04_a_clean_feed_clamps_nothing() -> None:
+    f = ready()
+    f.meters(range(FIRST, FIRST + 4))
+    assert (f.j.clamped_price, f.j.clamped_forecast, f.j.after_end_late) == (0, 0, 0)

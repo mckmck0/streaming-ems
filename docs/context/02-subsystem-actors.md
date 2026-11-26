@@ -10,8 +10,9 @@ parameters ADR 0019.
 ### Runtime and SDK service
 
 - Restate server `1.8.1-hotfix.2` in compose (service `restate`, pins in `05-deploy-and-infra.md`): one node,
-  node name `restate-1`, cluster `ems`, RocksDB memory 512 MiB (`RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE`, confirmed
-  with `restate-server --dump-config`), data on the named volume `restate-data`. Ingress `127.0.0.1:8080`,
+  node name `restate-1`, cluster `ems`, memory pools sized to fit its 2 GiB container (RocksDB 512 MiB, invoker
+  512 MiB, query engine 384 MiB, Bifrost record cache 128 MiB; spec 012, confirmed with
+  `restate-server --dump-config`), data on the named volume `restate-data`. Ingress `127.0.0.1:8080`,
   admin API and UI `127.0.0.1:9070`; the node port 5122 is not published. Healthy when the admin `/health` and
   the ingress `/restate/health` both answer 200.
 - The SDK service is `ems.actors.app`, served by hypercorn on `127.0.0.1:9080` (`make dev`, with `--reload`).
@@ -97,14 +98,15 @@ parameters ADR 0019.
 **One shape for every handler.** An actor file holds its state dataclass and its pure transitions
 `(params, state, message) -> (state, sends)`, which import no Restate, and short handlers that call
 `ems.actors.shell`: read own state, call the transition, write own state, send. Sends are `Send(service,
-handler, key, message)` values delivered with `ctx.generic_send`, addressed by service name, so a household routes
+handler, key, message, delay_s=None)` values delivered with `ctx.generic_send` (with `send_delay` when
+`delay_s` is set; only the live deadline uses it), addressed by service name, so a household routes
 steps to the strategies named in its parameters and no actor file imports another. Why: every transition can be
 tested without a server (and as an in-memory network with any delivery order, `tests/network.py`), and the
 handlers stay a few lines each.
 
 | Actor | Key | Exclusive handlers | Shared handler (returns `state`) |
 |---|---|---|---|
-| `Household` | `[run_id:]location_id` | `configure`, `on_measurement` (Kafka), `on_prices`, `on_forecast` | `status` |
+| `Household` | `[run_id:]location_id` | `configure`, `on_measurement` (Kafka), `on_prices`, `on_forecast`, `on_deadline` (live), `set_strategies` | `status` |
 | `Tariff` | `[run_id:]market_key` | `on_price` (Kafka), `subscribe` | `status` |
 | `Weather` | `[run_id:]location_id` | `configure`, `on_forecast` (Kafka) | `status` |
 | `NoBattery`, `SelfConsumption` | `[run_id:]location_id` | `configure`, `on_step` | `summary` |
@@ -118,7 +120,10 @@ handlers stay a few lines each.
 - **Serialisation.** State, parameters and messages are frozen dataclasses encoded by one serde over
   `pydantic.TypeAdapter` (`ems.actors.serde`): floats round-trip bit for bit. No stored or sent type contains a
   set: Restate compares a retried handler's writes with its journal (RT0016), and a set's JSON order depends on
-  the hash seed (`National.holidays` became a sorted tuple for this). Tests check both.
+  the hash seed (`National.holidays` became a sorted tuple for this). Tests check both. JSON has no NaN or
+  infinity, so the serde refuses a value that does not decode back equal to itself, before it is stored or sent
+  (spec 012): the invocation fails with a retryable error and pauses where the value was produced, and
+  `shell._commit` encodes every message before it writes the state.
 - **Configuration** (ADR 0019). `configure` stores the parameters once; an equal second call changes nothing,
   other parameters or another key fail the call without a retry (`TerminalError`). An internal message at an
   unconfigured object fails the same way, and the key goes on with its next invocation.
@@ -130,6 +135,20 @@ handlers stay a few lines each.
   acknowledgements and flows by `t`, price and forecast updates by `seq`; early ones are held, stale ones
   dropped, both counted outside the compared state.
 - **Unmanaged sites** are never configured: their `Household` and `Weather` keep only `log` and `n`.
+- **Live deadline** (spec 012, ADR 0020). `Household.on_deadline(Deadline(t))` is the only handler that reads the
+  clock: `shell.handle_timed` takes `await ctx.time()` (journaled, so a retry sees the same value) and passes it to
+  the pure transition, which releases the due steps and returns the next `Deadline` as a delayed self-send. In
+  sim no `Deadline` is ever sent. A unit test allows `ctx.time` and `send_delay` only in this path.
+- **Strategy changes** (spec 012, ADR 0021). `Household.set_strategies(StrategyChange(t, strategies))`, sent by the
+  operator through HTTP ingress with an `Idempotency-Key`, accepts or refuses the change (`ems.assembler.schedule`)
+  and records it in `state.schedule`. The runner configures an added strategy object with
+  `strategy_params(params, change)` before it sends the change, and checks the stored parameters.
+- **Timing log** (spec 012, ADR 0022). With `EMS_TIMING_LOG=<path>` set, `ems.actors.timing` writes one JSON line
+  per handler commit at a configured object: host time in ns, service, handler, key, invocation id, the `t` of the
+  message handled and of each message sent. It makes no `ctx` call and writes nothing to state, messages or the
+  journal; a queue thread writes the file, and atexit and a chained SIGTERM handler flush it. A retried
+  invocation writes its line again: the analysis keeps the first line per invocation id and counts the rest as
+  retries. A `kill -9` loses the lines still queued.
 
 The stage 2 `Probe` and the measurement-only `StateCostEager` and `StateCostLazy` were deleted in stage 3; their
 results stay in `docs/thesis/kafka-ingress.md` (reproducing the state-cost numbers needs the spec 010 commit).
@@ -151,27 +170,58 @@ HTTP/2 transport errors between Restate and the SDK service (`h2 pool connection
 a broken pipe`) on single attempts, which Restate retried with success (risk K14). `make measure` has two modes: `skew` (configured households: leads per stream
 pair, prices included, and the re-order counters of every receiving service) and `backlog`.
 
-### How R1–R7 hold (stage 3)
+The experiment runner (`make exp`, spec 012) uses the same harness on a fresh stack per run (`reset_stack`
+removes the Kafka and Restate volumes and starts them with journal retention `0s`), with ingress projects named
+`ems-exp-<prefix>` so the test cleanup, which removes `ems-it-*`, never touches them. `Restate.wait_run` and
+`wait_handled` treat connection errors and 5xx answers as transient for 60 s after the harness kills or restarts the server
+(`Restate.note_kill`, opened by `kill_restate` and `start_restate`: `/query` answered 500 for about 0.4 s after
+the server reported healthy) and raise any other error at once.
+
+### Operations: paused invocations (spec 012)
+
+An invocation that keeps failing pauses after the retry policy's 70 attempts (risk A7), for example when the SDK
+service stays down for about an hour or a handler keeps raising. It waits for a manual resume.
+
+- List them: `curl -s 127.0.0.1:9070/query --json "{\"query\": \"SELECT id, target_service_name,
+  target_service_key, target_handler_name, last_failure FROM sys_invocation WHERE status = 'paused'\"}"`.
+- Resume one through the admin API: `curl -X PATCH 127.0.0.1:9070/invocations/<id>/resume`. To resume it on a
+  newer deployment after a code fix, add `?deployment=latest` or `?deployment=<deployment id>`
+  (<https://docs.restate.dev/services/invocation/managing-invocations> and the admin API reference "Resume an
+  invocation", read 2026-11-25).
+- The CLI ships in the server image (`restate-cli` 1.8.1-hotfix.2, checked 2026-11-22):
+  `docker exec -it ems-restate-1 restate invocations list --status paused`,
+  `docker exec -it ems-restate-1 restate invocations resume <id> [--deployment latest]`. Pipe JSON from
+  `docker exec` without `-t` (for example `docker exec ems-restate-1 restate sql --json "…"`): with `-t` the
+  statistics line and `\r\n` land on stdout.
+- A resume on a new deployment replays the journal against the new code. If the fix changes a journaled
+  operation before the one that failed, the replay fails with RT0016 ("journal mismatch"). Then kill the
+  invocation and redo its effect in a new run (a new `run_id`).
+- A pending live deadline shows in `sys_invocation` with `status = 'scheduled'`. On the pinned server
+  `scheduled_start_at` comes back null unless `scheduled_at` is selected in the same query (seen 2026-11-25,
+  `tests/integration/test_deadline.py`).
+
+### How R1–R7 hold (stages 3 and 4)
 
 - R1, R2: every edge between actors is a one-way `generic_send`, including the two cycles (Household and Tariff;
   Ems and Battery). Request-response is used only from outside (tests, jobs) to the shared handlers. A test
   scans `src/ems/actors/` for `object_call`, `service_call` and `generic_call`.
-- R3, R5: handlers make no external call, read no clock and never wait: waiting is buffering in state until the
-  watermarks pass. Stored bytes are deterministic (no sets), so a retry matches its journal.
+- R3, R5: handlers make no external call and never wait: waiting is buffering in state until the watermarks
+  pass. Only `Household.on_deadline` reads the clock, through the journaled `ctx.time()`. Stored bytes are deterministic (no sets), so a retry matches its journal.
 - R4: Restate's offset dedup at the ingress; the slot table and the sparse streams drop a record published twice;
   `configure` carries an `Idempotency-Key`; a handler's own sends are deduplicated by Restate.
-- R6: no timer and no self-rescheduling chain yet (the live deadline is stage 4).
+- R6: the live deadline is the only self-rescheduling chain. Household stores the step it expects; a
+  `Deadline` for another step is stale, counted and dropped; an early one is set again for the same step.
 - R7: every message carries `schema_version` and `t` (the simulated time), updates also `seq`; receivers apply
   them in order through `ems.actors.reorder`.
 
 ## What to build
 
-- Built: stage 3 (spec 011). Stage 4 adds the live deadline (`Household.on_deadline`) and adding a strategy at
-  run time (`Household.set_strategies`).
+- Built: stage 3 (spec 011); the live deadline, strategy changes and the timing log in stage 4 (spec 012).
 
 ## Prerequisites
 
-- Spec 010 (this environment); spec 009 (the domain core the handlers call); spec 011 (the actors).
+- Spec 010 (this environment); spec 009 (the domain core the handlers call); spec 011 (the actors); spec 012
+  (the clock, strategy changes, the timing log).
 
 ## Open questions
 

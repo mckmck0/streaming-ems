@@ -5,6 +5,10 @@ updates also carry ``seq``; the control record ``RunParams`` carries ``schema_ve
 ``t``. The field names of every message and of every type nested in it are pinned here, in order:
 a rename, a removal or a reordering fails this test (within version 1 a new field must be
 optional, with a default, and added here deliberately).
+
+Spec 012 (T20; AC-012-07, -12, R7): ``Deadline`` (Household to itself) and ``StrategyChange``
+(operator to Household) start at 1.0.0, with ``t`` first and ``schema_version`` last. They are
+looked up when a test runs, so this module still collects before they exist.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from ems.actors import messages
 from ems.actors.messages import Ack, Apply, Flows, ForecastUpdate, PriceUpdate, Subscribe
 from ems.assembler.join import Step
 from ems.assembler.params import RunParams
@@ -72,9 +77,16 @@ RUN_PARAMS = (
     "initial_soc_kwh",
     "model",
     "rcem",
+    "mode",  # 1.1.0 (spec 012)
+    "grace_s",  # 1.1.0 (spec 012)
     "schema_version",
 )
 UPDATES = (PriceUpdate, ForecastUpdate)
+# Spec 012: the messages of the deadline and of strategy changes, by name in ``messages``.
+NEW_MESSAGES: dict[str, tuple[str, ...]] = {
+    "Deadline": ("t", "schema_version"),
+    "StrategyChange": ("t", "strategies", "schema_version"),
+}
 
 
 def _names(tp: type[Any]) -> tuple[str, ...]:
@@ -118,7 +130,7 @@ def test_ac_011_32_run_params_carries_schema_version_and_no_t() -> None:
     hints = typing.get_type_hints(RunParams)
     assert "t" not in hints
     assert hints["schema_version"] is str
-    assert _default(RunParams, "schema_version") == "1.0.0"
+    assert _default(RunParams, "schema_version") == "1.1.0"  # spec 012: + mode, grace_s
 
 
 def test_ac_011_32_action_kinds_are_pinned() -> None:
@@ -155,3 +167,27 @@ def test_ac_011_32_no_type_nested_in_a_message_escapes_the_pins() -> None:
     for tp in MESSAGES:
         _reachable(tp, seen)
     assert seen == {*MESSAGES, *NESTED, ActionKind}
+
+
+# ── spec 012: Deadline and StrategyChange (T20) ─────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", sorted(NEW_MESSAGES))
+def test_ac_012_07_new_message_fields_are_pinned_in_order(name: str) -> None:
+    tp = getattr(messages, name)
+    assert dataclasses.is_dataclass(tp) and tp.__dataclass_params__.frozen
+    assert _names(tp) == NEW_MESSAGES[name]
+    hints = typing.get_type_hints(tp)
+    assert hints["t"] is int and hints["schema_version"] is str
+    assert _default(tp, "schema_version") == "1.0.0"
+
+
+def test_ac_012_12_a_strategy_change_names_its_strategies() -> None:
+    assert typing.get_type_hints(messages.StrategyChange)["strategies"] == tuple[str, ...]
+
+
+@pytest.mark.parametrize("name", sorted(NEW_MESSAGES))
+def test_ac_012_07_new_messages_nest_no_type(name: str) -> None:
+    seen: set[type[Any]] = set()
+    _reachable(getattr(messages, name), seen)
+    assert seen == {getattr(messages, name)}

@@ -61,7 +61,7 @@ Path-scoped rules in `.claude/rules/` load when you touch matching files: `domai
 ## Commands
 
 The `Makefile` is the only entry point. It holds only the targets the repo can use today; planned ones
-(`exp`, kind and Helm) sit commented out at its bottom, grouped by the spec that enables them. Enable a block
+(kind and Helm) sit commented out at its bottom, grouped by the spec that enables them. Enable a block
 with its spec, never ad hoc.
 
 | Command | Purpose |
@@ -78,6 +78,7 @@ with its spec, never ad hoc.
 | `make gen-backfill DAYS=2` / `make validate` / `make tail TOPIC=` | backfill to Kafka (sim profile) / validate topics / inspect |
 | `make gen-live` / `make record NAME=` / `make replay NAME= [BACKGROUND=1]` | hybrid live run / record live sources / replay a recording (with a synthetic fleet) |
 | `make history NAME= START= END=` | fetch and build a real-data window (spec 008) |
+| `make exp NAME= [CONFIRM=yes]` | run `experiments/configs/NAME.yaml` on a fresh stack (wipes the volumes; asks once) (spec 012) |
 | `make clean` | Remove caches and build artefacts |
 
 Dev tools come from the `dev` group in `pyproject.toml` (ruff and ty pinned exactly; the ruff pin must equal

@@ -74,6 +74,9 @@ TOPIC_SERVICE = {t: INGRESS_TARGETS[svc][0] for svc, ts in INGRESS_TOPICS.items(
 STEP_INBOX = {"Ems": "acks", "Battery": "commands", "Meter": "flows"}  # strategies: "steps"
 CONFIGURED = ("Household", "Weather", "Ems", "Battery", "Meter")  # plus each strategy of the run
 STRICT_ATTEMPTS = 4  # failed attempts after which a strict wait calls an invocation failed
+# After a kill the harness itself caused, the admin API may answer with any 5xx while partitions
+# recover: a wait retries those for this long (spec 012, AC-012-38; the fault tier records them).
+KILL_WINDOW_S = 60.0
 _NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -177,6 +180,11 @@ class SdkService:
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
+    @property
+    def pgid(self) -> int | None:
+        """The running service's process group (its own session: the leader's pid)."""
+        return self.proc.pid if self.running and self.proc is not None else None
+
     def kill9(self, timeout: float = 30.0) -> int:
         """SIGKILL to the whole process group; returns the group id once nothing listens on the
         port.
@@ -224,6 +232,22 @@ class Restate:
         self.ingress = s.restate_ingress_url.rstrip("/")
         self.service_url = s.service_url
         self._http = httpx.Client(timeout=timeout)
+        self.kill_window_until = 0.0  # monotonic; in the past until the harness kills something
+
+    def note_kill(self) -> None:
+        """Open the window in which a wait retries any 5xx (a kill the harness caused)."""
+        self.kill_window_until = time.monotonic() + KILL_WINDOW_S
+
+    def transient(self, exc: httpx.HTTPError) -> bool:
+        """Worth another poll: a connection that failed, the query service still starting (503), or
+        any 5xx inside the window a kill by the harness opened. Anything else is a real error.
+        """
+        if isinstance(exc, httpx.TransportError):
+            return True
+        if not isinstance(exc, httpx.HTTPStatusError):
+            return False
+        code = exc.response.status_code
+        return code == 503 or (code >= 500 and time.monotonic() < self.kill_window_until)
 
     def close(self) -> None:
         self._http.close()
@@ -346,8 +370,11 @@ class Restate:
         start = time.monotonic()
         seen = -1
         while True:
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 seen = self.handled(run_id, services)
+            except httpx.HTTPError as exc:
+                if not self.transient(exc):
+                    raise
             if seen >= expected:
                 return time.monotonic() - start
             if time.monotonic() - start > timeout:
@@ -375,17 +402,35 @@ class Restate:
             if "log" in values
         }
 
-    def invocations(self, run_id: str) -> list[dict[str, Any]]:
-        """Every invocation of the run's objects: target, status, result, last failure, attempts."""
+    def invocations(
+        self, run_id: str, *, suspect_only: bool = False, min_retries: int = STRICT_ATTEMPTS
+    ) -> list[dict[str, Any]]:
+        """The invocations of the run's objects: target, status, result, last failure, attempts.
+
+        With ``suspect_only``, only those that are paused, failed or retried at least
+        ``min_retries`` times (and, below ``STRICT_ATTEMPTS``, backing off): the filter runs in SQL,
+        so a poll does not grow with the run (AC-012-38). It selects a superset of ``failed``.
+        """
+        where = f"starts_with(target_service_key, '{_check_name(run_id)}:')"
+        if suspect_only:
+            terms = [
+                "status = 'paused'",
+                "completion_result = 'failure'",
+                f"retry_count >= {int(min_retries)}",
+            ]
+            if min_retries < STRICT_ATTEMPTS:
+                terms.append("status = 'backing-off'")
+            where += f" AND ({' OR '.join(terms)})"
         return self.query(
-            "SELECT target_service_name, target_service_key, target_handler_name, status, "
+            "SELECT id, target_service_name, target_service_key, target_handler_name, status, "
             "invoked_by, completion_result, last_failure, retry_count FROM sys_invocation "
-            f"WHERE starts_with(target_service_key, '{_check_name(run_id)}:')"
+            f"WHERE {where}"
         )
 
-    def configure(self, params: Mapping[str, Any]) -> None:
+    def configure(self, params: Mapping[str, Any], services: Sequence[str] | None = None) -> None:
         """Send ``configure`` to every object of each managed household (ADR 0019), with an
-        idempotency key, so a repeated call changes nothing.
+        idempotency key, so a repeated call changes nothing. ``services`` limits it to those
+        objects (a strategy added at run time, spec 012).
         """
         from ems.actors.serde import serde_for
         from ems.assembler.params import RunParams
@@ -393,7 +438,7 @@ class Restate:
         serde = serde_for(RunParams)
         for key, p in params.items():
             body = serde.serialize(p)
-            for service in (*CONFIGURED, *p.strategies):
+            for service in services or (*CONFIGURED, *p.strategies):
                 idempotency_key = f"{key}:{service}:configure"
                 self.send(service, key, "configure", body, idempotency_key=idempotency_key)
 
@@ -414,18 +459,22 @@ class Restate:
         """
         start = time.monotonic()
         while True:
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 failures = self.failures(run_id, strict=strict)
                 if failures:
                     raise RuntimeError(f"failed invocations in run {run_id}: {failures[:5]}")
                 if self.handled(run_id) >= records and self._at_end(run_id, ends):
                     return time.monotonic() - start
+            except httpx.HTTPError as exc:
+                if not self.transient(exc):
+                    raise
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"run {run_id} did not finish within {timeout:.0f} s")
             time.sleep(poll)
 
     def failures(self, run_id: str, *, strict: bool = True) -> list[dict[str, Any]]:
-        return [row for row in self.invocations(run_id) if failed(row, strict=strict)]
+        rows = self.invocations(run_id, suspect_only=True)
+        return [row for row in rows if failed(row, strict=strict)]
 
     def _at_end(self, run_id: str, ends: Mapping[str, Mapping[str, int]]) -> bool:
         for service, by_key in ends.items():
@@ -559,11 +608,15 @@ def close_stack_ingestion() -> list[str]:
     return running
 
 
-def kill_restate(timeout: float = 60.0) -> int:
-    """SIGKILL to the stack's Restate server; returns the container's exit code."""
+def kill_restate(timeout: float = 60.0, restate: Restate | None = None) -> int:
+    """SIGKILL to the stack's Restate server; returns the container's exit code. With ``restate``,
+    its waits retry any 5xx for ``KILL_WINDOW_S`` (``Restate.note_kill``).
+    """
     cid = container_of("restate")
     if cid is None:
         raise RuntimeError("the restate service has no container: run `make up`")
+    if restate is not None:
+        restate.note_kill()
     docker("kill", "--signal", "KILL", cid)
     wait_for(lambda: not container_state(cid).get("Running"), timeout, "restate still running")
     return int(container_state(cid)["ExitCode"])
@@ -578,23 +631,32 @@ def stop_restate(timeout: float = 60.0) -> None:
 
 def start_restate(restate: Restate, timeout: float = 180.0) -> float:
     """Start the stack's Restate container again with its configuration unchanged; seconds to
-    healthy.
+    healthy. Every restart the harness makes is one it caused, so it opens ``restate``'s kill
+    window: `/query` can answer 500 for a moment after the server reports healthy.
     """
     cid = container_of("restate")
     if cid is None:
         raise RuntimeError("the restate service has no container: run `make up`")
+    restate.note_kill()
     started = time.monotonic()
     docker("start", cid)
     restate.wait_healthy(timeout)
+    restate.note_kill()  # the 60 s count from healthy, however long the start took
     return time.monotonic() - started
 
 
 class IngressSet:
     """The three ingress containers of a test project, reading the topics with ``prefix``."""
 
-    def __init__(self, prefix: str, *, retry_max_attempts: int | None = None) -> None:
+    def __init__(
+        self,
+        prefix: str,
+        *,
+        retry_max_attempts: int | None = None,
+        project_prefix: str = TEST_PROJECT_PREFIX,
+    ) -> None:
         self.prefix = _check_name(prefix)
-        self.project = TEST_PROJECT_PREFIX + re.sub(r"[^a-z0-9]", "", prefix.lower())
+        self.project = project_prefix + re.sub(r"[^a-z0-9]", "", prefix.lower())
         self.env = {"EMS_INGRESS_PREFIX": prefix}
         if retry_max_attempts is not None:
             self.env["EMS_INGRESS_RETRY_MAX_ATTEMPTS"] = str(retry_max_attempts)
@@ -781,10 +843,18 @@ def records_by_stream(records: Iterable[Record], key: str) -> dict[str, list[byt
     out: dict[str, list[bytes]] = defaultdict(list)
     for rec in records:
         if rec.key == key:
-            for t, name in _STREAM_OF_TOPIC.items():
-                if rec.meta[0].endswith(t):
-                    out[name].append(rec.value)
+            name = stream_of(rec)
+            if name is not None:
+                out[name].append(rec.value)
     return out
+
+
+def stream_of(rec: Record) -> str | None:
+    """The stream a record's topic carries (its name without the run's prefix)."""
+    for t, name in _STREAM_OF_TOPIC.items():
+        if rec.meta[0].endswith(t):
+            return name
+    return None
 
 
 _STREAM_OF_TOPIC = {topic: stream.value for stream, topic in STREAM_TOPICS.items()}
@@ -810,12 +880,31 @@ def offline_run(params: Mapping[str, Any], records: Sequence[Record]) -> dict[st
     return out
 
 
-def run_ends(params: Mapping[str, Any], offline: Mapping[str, Any]) -> dict[str, dict[str, int]]:
-    """``{service: {key: next step}}``: where each stepping object stands at the end of a run."""
+def run_ends(
+    params: Mapping[str, Any],
+    offline: Mapping[str, Any],
+    schedules: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, int]]:
+    """``{service: {key: next step}}``: where each stepping object stands at the end of a run.
+
+    With a household's strategy schedule (spec 012), a strategy removed at ``stop`` ends at
+    ``min(stop, next)`` and one added at ``t`` at ``max(t, next)`` (``t`` if never reached).
+    """
+    from ems.assembler.schedule import windows
+
     ends: dict[str, dict[str, int]] = defaultdict(dict)
     for key, p in params.items():
-        for service in (*p.strategies, "Ems", "Battery", "Meter"):
-            ends[service][key] = offline[key].join.next
+        nxt = offline[key].join.next
+        schedule = (schedules or {}).get(key)
+        if schedule is None:
+            spans: dict[str, tuple[int, int | None]] = {n: (nxt, None) for n in p.strategies}
+        else:
+            spans = windows(p, schedule)
+        for name, (start, stop) in spans.items():
+            end = nxt if stop is None else min(stop, nxt)
+            ends[name][key] = end if schedule is None else max(start, end)
+        for service in ("Ems", "Battery", "Meter"):
+            ends[service][key] = nxt
     return dict(ends)
 
 
@@ -859,6 +948,7 @@ class StackEnv:
         data_dir: Path | None = None,
         retry_max_attempts: int | None = None,
         sdk_env: Mapping[str, str] | None = None,
+        ingress_project_prefix: str = TEST_PROJECT_PREFIX,
     ) -> None:
         self.settings = settings or EmsSettings()
         self.prefix = _check_name(prefix)
@@ -866,14 +956,16 @@ class StackEnv:
         self.data_dir = data_dir or (log_dir / "data" / prefix.strip("."))
         self.restate = Restate(self.settings)
         self.sdk = SdkService(env=sdk_env, log_path=log_dir / f"sdk-{prefix.strip('.')}.log")
-        self.ingress = IngressSet(prefix, retry_max_attempts=retry_max_attempts)
+        self.ingress = IngressSet(
+            prefix, retry_max_attempts=retry_max_attempts, project_prefix=ingress_project_prefix
+        )
         self.plan: TopicPlan | None = None
         self.deployment: dict[str, Any] = {}
 
-    def open(self, *, start_ingress: bool = True) -> StackEnv:
+    def open(self, *, start_ingress: bool = True, profile: str = "sim") -> StackEnv:
         self.restate.wait_healthy()
         close_stack_ingestion()
-        self.plan = ensure_topics(self.settings, self.prefix)
+        self.plan = ensure_topics(self.settings, self.prefix, profile)
         self.sdk.start()
         self.deployment = self.restate.ensure_registered(registered_handlers())
         if start_ingress:
@@ -925,26 +1017,38 @@ def parse_size(text: str) -> int:
 class MemorySampler(threading.Thread):
     """Samples `docker stats` every ``interval`` seconds and keeps each container's peak memory."""
 
-    def __init__(self, interval: float = 2.0) -> None:
+    def __init__(self, interval: float = 2.0, anon_of: Sequence[str] = ()) -> None:
         super().__init__(daemon=True)
         self.interval = interval
         self.peaks: dict[str, int] = {}
         self.limits: dict[str, int] = {}
+        self.cpu_peaks: dict[str, float] = {}  # spec 012: `docker stats` CPU percent
+        self.anon_peaks: dict[str, int] = {}  # spec 012: cgroup anonymous memory (no page cache)
+        self.anon_of = tuple(anon_of) or (RESTATE_CONTAINER,)
         self._stop = threading.Event()
 
     def run(self) -> None:
+        fmt = "{{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}"
         while not self._stop.is_set():
-            out = docker(
-                "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}", check=False
-            )
+            out = docker("stats", "--no-stream", "--format", fmt, check=False)
             for line in out.stdout.splitlines():
-                name, _, usage = line.partition("\t")
+                name, _, rest = line.partition("\t")
+                usage, _, cpu = rest.partition("\t")
                 used, _, limit = usage.partition("/")
                 try:
                     self.peaks[name] = max(self.peaks.get(name, 0), parse_size(used))
                     self.limits[name] = parse_size(limit)
+                    value = parse_cpu(cpu)
+                    self.cpu_peaks[name] = max(self.cpu_peaks.get(name, 0.0), value)
                 except ValueError:
                     continue
+            for name in self.anon_of:
+                res = docker("exec", name, "cat", "/sys/fs/cgroup/memory.stat", check=False)
+                try:
+                    anon = parse_anon(res.stdout)
+                except ValueError:
+                    continue
+                self.anon_peaks[name] = max(self.anon_peaks.get(name, 0), anon)
             self._stop.wait(self.interval)
 
     def stop(self) -> None:
@@ -1016,3 +1120,252 @@ def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
         "hardware": hardware(),
         "docker": docker_info(),
     }
+
+
+# ── spec 012: the experiment runner's plumbing (plan §7) ──────────────────────────────────────────
+
+EXP_PROJECT_PREFIX = "ems-exp-"  # the runner's ingress projects: test cleanup leaves them alone
+# What a fresh experiment stack starts. No kafka-ui, and no kafka-init: a run ensures its own
+# prefixed topics (`StackEnv.open`), and `up --wait` fails at random when that one-shot job exits
+# before compose looks at it ("container ems-kafka-init-1 exited (0)", Compose v5.4.0).
+STACK_SERVICES = ("kafka", "restate")
+RESTATE_CONTAINER = "ems-restate-1"
+
+
+def reset_stack(retention: str = "0s", *, timeout: float = 600.0) -> None:
+    """A fresh stack for one run: ``compose --profile ingress down -v`` for the project ``ems``
+    (Kafka and Restate volumes), every ``ems.role=ingress`` container removed, then
+    ``compose up -d --wait`` of ``STACK_SERVICES`` with ``EMS_RESTATE_JOURNAL_RETENTION``.
+    """
+    compose("--profile", "ingress", "down", "-v", project=STACK_PROJECT, timeout=timeout)
+    listed = docker("ps", "-aq", "--filter", f"label={INGRESS_LABEL}", check=False)
+    ids = listed.stdout.split()
+    if ids:
+        docker("rm", "-f", *ids, check=False)
+    compose(
+        "up",
+        "-d",
+        "--wait",
+        *STACK_SERVICES,
+        project=STACK_PROJECT,
+        env={"EMS_RESTATE_JOURNAL_RETENTION": retention},
+        timeout=timeout,
+    )
+
+
+class Publisher:
+    """``ems-gen run`` as a child process (backfill, accelerated or realtime), so the runner can
+    kill, change strategies and sample while it publishes. Its output goes to ``log_path``.
+    """
+
+    def __init__(
+        self,
+        settings: EmsSettings,
+        prefix: str,
+        run_id: str,
+        *,
+        mode: str,
+        start: str,
+        end: str,
+        locations: int,
+        data_dir: Path,
+        log_path: Path,
+        speed: float | None = None,
+        faults: bool = False,
+        config: Path | None = None,
+        profile: str = "sim",
+    ) -> None:
+        if mode not in ("backfill", "accelerated", "realtime"):
+            raise ValueError(f"unknown publishing mode {mode!r}")
+        if mode == "accelerated" and speed is None:
+            raise ValueError("an accelerated publication needs a speed")
+        self.settings = settings
+        self.prefix = _check_name(prefix)
+        self.run_id = _check_name(run_id)
+        self.mode, self.start_at, self.end_at = mode, start, end
+        self.locations, self.speed = locations, speed
+        self.data_dir, self.log_path = data_dir, log_path
+        self.faults, self.config, self.profile = faults, config, profile
+        self.proc: subprocess.Popen[bytes] | None = None
+        self.started_unix = 0.0
+
+    def command(self) -> list[str]:
+        """The ``ems-gen run`` command line."""
+        cmd = [str(Path(sys.executable).with_name("ems-gen")), "run", "--mode", self.mode]
+        cmd += ["--start", self.start_at, "--end", self.end_at]
+        if self.mode == "accelerated":
+            cmd += ["--speed", str(float(self.speed or 0.0))]
+        cmd += ["--run-id", self.run_id, "--locations", str(self.locations)]
+        if self.faults:
+            cmd.append("--faults")
+        if self.config is not None:
+            cmd += ["--config", str(self.config)]
+        return cmd
+
+    def env(self) -> dict[str, str]:
+        """The child's environment: Kafka bootstrap, topic profile and prefix, data dir."""
+        return {
+            **os.environ,
+            "EMS_KAFKA_BOOTSTRAP": self.settings.kafka_bootstrap,
+            "EMS_TOPICS_PROFILE": self.profile,
+            "EMS_TOPIC_PREFIX": self.prefix,
+            "EMS_DATA_DIR": str(self.data_dir),
+        }
+
+    def start(self) -> Publisher:
+        """Start the child without blocking; records ``started_unix``."""
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.log_path.open("ab") as out:  # the child keeps its own descriptor
+            self.started_unix = time.time()
+            self.proc = subprocess.Popen(
+                self.command(),
+                env=self.env(),
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                cwd=REPO,
+                start_new_session=True,
+            )
+        return self
+
+    @property
+    def running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.proc is None:
+            raise RuntimeError("the publisher was not started")
+        return self.proc.wait(timeout=timeout)
+
+    def kill(self) -> None:
+        if self.proc is not None and self.proc.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            try:
+                self.proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+                self.proc.wait(timeout=30)
+
+    def log_tail(self, lines: int) -> str:
+        """The last ``lines`` lines of the publisher's log (why it exited)."""
+        if not self.log_path.exists():
+            return ""
+        return "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
+
+    def manifest(self) -> dict[str, Any]:
+        """The generator's run manifest (``data_dir/runs/<run_id>/manifest.json``)."""
+        return json.loads((self.data_dir / "runs" / self.run_id / "manifest.json").read_text())
+
+
+def ps_group(pgid: int) -> tuple[float, int]:
+    """CPU percent and RSS bytes summed over every process of a process group (``pgrep -g`` and
+    ``ps -o %cpu=,rss=``); ``(0.0, 0)`` when the group is gone.
+    """
+    found = subprocess.run(["pgrep", "-g", str(pgid)], capture_output=True, text=True, check=False)
+    pids = found.stdout.split()
+    if found.returncode != 0 or not pids:
+        return 0.0, 0
+    res = subprocess.run(
+        ["ps", "-o", "%cpu=,rss=", "-p", ",".join(pids)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        return 0.0, 0
+    cpu, rss_kib = 0.0, 0
+    for line in res.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            cpu += float(parts[0])
+            rss_kib += int(parts[1])
+    return cpu, rss_kib * 1024
+
+
+class HostSampler(threading.Thread):
+    """Samples the SDK service's whole process group (hypercorn's master and its worker) every
+    ``interval`` seconds and keeps the CPU and RSS peaks. ``pgid`` is called each time, so a
+    restarted service is followed.
+    """
+
+    def __init__(self, pgid: Any, interval: float = 2.0) -> None:
+        super().__init__(daemon=True)
+        self.pgid = pgid
+        self.interval = interval
+        self.cpu_peak = 0.0
+        self.rss_peak = 0
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            group = self.pgid()
+            if group is not None:
+                cpu, rss = ps_group(group)
+                self.cpu_peak = max(self.cpu_peak, cpu)
+                self.rss_peak = max(self.rss_peak, rss)
+            self._stop.wait(self.interval)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.join(timeout=30)
+
+
+def parse_cpu(text: str) -> float:
+    """`docker stats` CPU such as ``12.34%`` as a float."""
+    m = re.match(r"^\s*([0-9.]+)\s*%\s*$", text)
+    if not m:
+        raise ValueError(f"not a CPU percentage: {text!r}")
+    return float(m.group(1))
+
+
+def parse_anon(memory_stat: str) -> int:
+    """The ``anon`` bytes of a cgroup v2 ``memory.stat``."""
+    for line in memory_stat.splitlines():
+        name, _, value = line.partition(" ")
+        if name == "anon":
+            return int(value)
+    raise ValueError("no anon line in memory.stat")
+
+
+class LagSampler(threading.Thread):
+    """Samples each ingress group's consumer lag (end minus committed offsets) every ``interval``
+    seconds and keeps the peaks.
+    """
+
+    def __init__(
+        self, settings: EmsSettings, groups: Mapping[str, Sequence[str]], interval: float = 2.0
+    ) -> None:
+        super().__init__(daemon=True)
+        self.settings = settings
+        self.groups = dict(groups)
+        self.interval = interval
+        self.peaks: dict[str, int] = {g: 0 for g in self.groups}
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            for group, topics in self.groups.items():
+                try:
+                    committed, end = group_progress(self.settings, group, topics)
+                except Exception:  # a broker that is restarting: the next sample tries again
+                    continue
+                self.peaks[group] = max(self.peaks[group], end - committed)
+            self._stop.wait(self.interval)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.join(timeout=60)
+
+
+def clock_offset_s(samples: int = 5, container: str = RESTATE_CONTAINER) -> float:
+    """The Docker VM's clock minus the host's, in seconds: the median of ``samples`` readings of
+    ``date +%s.%N`` in the container against ``time.time()`` taken around each.
+    """
+    offsets: list[float] = []
+    for _ in range(samples):
+        before = time.time()
+        res = docker("exec", container, "date", "+%s.%N")
+        after = time.time()
+        offsets.append(float(res.stdout.strip()) - (before + after) / 2)
+    offsets.sort()
+    return offsets[len(offsets) // 2]

@@ -1,0 +1,5 @@
+1.0.0/*.jsonl: actor state, run parameters and messages as stage 3 (spec 011) encoded them, written by
+generate.py in this folder for spec 012 (AC-012-41). The values come from this repository: the synthetic
+generator's catalog and its data, the tariffs in config/tariffs (official tariffs are public documents; only
+their rates are reproduced) and PSE's published RCEm values in config/tariffs/rcem.yaml (source: Polskie
+Sieci Elektroenergetyczne S.A., https://www.pse.pl/oire). No personal data.

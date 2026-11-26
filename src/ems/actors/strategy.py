@@ -50,11 +50,13 @@ def strategy_object(name: str) -> VirtualObject:
 
     @obj.handler(input_serde=shell.PARAMS_SERDE)
     async def configure(ctx: ObjectContext, params: RunParams) -> None:
-        await shell.configure(ctx, params, start, STATE)
+        await shell.configure(ctx, (name, "configure"), params, start, STATE)
 
     @obj.handler(name="on_step", input_serde=serde_for(Step))
     async def on_step_handler(ctx: ObjectContext, step: Step) -> None:
-        await shell.handle(ctx, STATE, lambda p, s: on_step(name, p, s, step))
+        await shell.handle(
+            ctx, (name, "on_step"), STATE, lambda p, s: on_step(name, p, s, step), step.t
+        )
 
     @obj.handler(kind="shared", output_serde=STATE)
     async def summary(ctx: ObjectSharedContext) -> StrategyState | None:
