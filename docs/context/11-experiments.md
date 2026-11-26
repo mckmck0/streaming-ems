@@ -125,7 +125,8 @@ sustained) or `repetitions`. Each run, on a fresh stack (`ems.experiments.run.ru
    that no object still holds messages;
 6. exports the Parquet tables of `08-contracts.md` and writes `summary.json` and `manifest.json`.
 
-A run that fails is recorded with `status: failed` and its reason; the next run still starts. A run during which
+A run that fails is recorded with `status: failed` and its reason; the next run still starts. A publisher that
+exits with an error fails the run at once, with the end of its log in the reason (live runs check it every 5 s). A run during which
 the host slept (the wall clock ran more than 1 s ahead of the monotonic clock, which stops in sleep) fails as
 `the host slept N s`, since a sleep stalls the stack and the publisher and inflates every lag; `host_slept_s` is in
 every summary. On macOS `make exp` runs under `caffeinate -i`, which prevents idle sleep but not a closed lid.

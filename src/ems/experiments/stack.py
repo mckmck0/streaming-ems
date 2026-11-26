@@ -1246,6 +1246,12 @@ class Publisher:
                 os.killpg(self.proc.pid, signal.SIGKILL)
                 self.proc.wait(timeout=30)
 
+    def log_tail(self, lines: int) -> str:
+        """The last ``lines`` lines of the publisher's log (why it exited)."""
+        if not self.log_path.exists():
+            return ""
+        return "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
+
     def manifest(self) -> dict[str, Any]:
         """The generator's run manifest (``data_dir/runs/<run_id>/manifest.json``)."""
         return json.loads((self.data_dir / "runs" / self.run_id / "manifest.json").read_text())

@@ -63,6 +63,8 @@ class Publication(Protocol):
 
     def manifest(self) -> dict[str, Any]: ...
 
+    def log_tail(self, lines: int) -> str: ...
+
 
 class Ops(Protocol):
     """What the runner needs from the stack."""
@@ -201,11 +203,11 @@ def run_one(
             _sleep_until(ops, at)
             kills.append(ops.kill(kill.target, kill.downtime_s))
         if live:
-            _sleep_until(ops, QUARTER_S * end + spec.run.grace_s + 1.0)
+            _publish_until(ops, pub, QUARTER_S * end + spec.run.grace_s + 1.0)
             if pub.running:
                 pub.kill()
         else:
-            pub.wait()
+            _check_exit(pub, pub.wait())
         records = ops.records(run_id)
         joins = _fold(params, records, {})
         ends = dict.fromkeys(params, end) if live else {k: o.join.next for k, o in joins.items()}
@@ -340,6 +342,22 @@ def _send_change(
                     raise
                 ops.sleep(1.0)
         current[key] = names
+
+
+def _publish_until(ops: Ops, pub: Publication, at: float) -> None:
+    """Live: wait until ``at`` while the publisher runs; a publisher that exits with an error fails
+    the run at once instead of leaving the window without data.
+    """
+    while ops.now() < at:
+        if not pub.running:
+            _check_exit(pub, pub.wait())
+        ops.sleep(min(POLL_S, at - ops.now()))
+
+
+def _check_exit(pub: Publication, code: int) -> None:
+    if code != 0:
+        tail = " | ".join(pub.log_tail(STDERR_LINES).strip().splitlines())
+        raise _Failed(f"the publisher exited {code}: {tail}")
 
 
 def _sleep_until(ops: Ops, at: float) -> None:

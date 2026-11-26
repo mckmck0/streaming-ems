@@ -75,11 +75,14 @@ class FakePublication:
         self.spec = spec
         self.started_unix = ops.t
         self.speed = spec.run.speed
-        if spec.run.mode == "live":
+        if ops.publisher_exit:
+            self.end_unix = ops.t
+        elif spec.run.mode == "live":
             self.end_unix = 900.0 * end + 30.0
         else:
             self.end_unix = ops.t + 900.0 * (end - first) / self.speed + 1.0
         self.killed = False
+        self.code = ops.publisher_exit
 
     @property
     def running(self) -> bool:
@@ -88,12 +91,15 @@ class FakePublication:
     def wait(self, timeout: float | None = None) -> int:
         self.ops.log("publication.wait", timeout)
         if self.killed or self.ops.t >= self.end_unix:
-            return 0
+            return self.code
         if timeout is not None and self.ops.t + timeout < self.end_unix:
             self.ops.t += timeout
             raise subprocess.TimeoutExpired(["ems-gen"], timeout)
         self.ops.t = self.end_unix
-        return 0
+        return self.code
+
+    def log_tail(self, lines: int) -> str:
+        return "preflight refused: records ahead of now" if self.code else ""
 
     def kill(self) -> None:
         self.ops.log("publication.kill")
@@ -127,6 +133,7 @@ class FakeOps:
     release_delay_s: Mapping[float, float] = dataclasses.field(default_factory=dict)
     nan_samples: bool = False
     host_slept_s: float = 0.0  # the host sleeps this long on the first sleep() of a run
+    publisher_exit: int = 0  # non-zero: the publisher exits at once with this code
 
     def __post_init__(self) -> None:
         self.t = self.clock
@@ -909,6 +916,25 @@ def _live() -> Experiment:
         data={"start": None, "days": None, "hours": LIVE_HOURS},
         run={"mode": "live", "grace_s": GRACE_S},
     )
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_ac_012_25_a_publisher_that_exits_with_an_error_fails_the_run_at_once(
+    tmp_path: Path, live: bool
+) -> None:
+    exp = _live() if live else _experiment()
+    if live:
+        ops = FakeOps(
+            start=LIVE_FIRST, hours=LIVE_HOURS, clock=LIVE_NOW.timestamp(), publisher_exit=1
+        )
+    else:
+        ops = FakeOps(publisher_exit=1)
+    result = _run_one(exp, ops, tmp_path)
+    assert result.status == "failed"
+    assert result.reason == "the publisher exited 1: preflight refused: records ahead of now"
+    publish_at = _publish(ops)[0]
+    closed_at = ops.calls[ops.last("close")][1]
+    assert closed_at <= publish_at + 2 * run.POLL_S  # not after the whole window
 
 
 def test_ac_012_25_a_live_run_publishes_in_real_time_from_first_step(tmp_path: Path) -> None:

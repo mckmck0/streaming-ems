@@ -301,7 +301,9 @@ gaps); the amendment, the plan and this list await approval together.
   - every step released by its end plus `G` plus 5 s, with the distribution of the delay;
   - peaks and OOM flags reported;
   - `Battery` equals the SelfConsumption shadow;
-  - firings, estimates and `price_replaced` reported.
+  - firings, estimates and `price_replaced` reported;
+  - (added during validation) the realtime preflight checks only the records due at the start, and a
+    publisher that exits with an error fails the run at once (the first `sys-live` ran 2 h without data).
 
 ## Phase 7: Docs and pull request
 
