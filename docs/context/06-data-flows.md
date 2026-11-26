@@ -25,7 +25,9 @@ from 2026-10-20T00:00Z gives 192 production, 192 consumption, 16 forecast and 3 
 - `backfill`: as fast as possible, simulated time only (experiments, tests). Topics must use the `sim` profile.
 - `accelerated`: simulated seconds per wall second = `--speed` (default 96: one day per 15 min). `sim` profile.
 - `realtime`: starts at the current quarter-hour, wall-clock pacing; `live` profile.
-- Preflight refuses a run whose record timestamps the target topics would reject or expire.
+- Preflight refuses a run whose record timestamps the target topics would reject or expire. A realtime run
+  publishes each record at its own timestamp, so its future check covers only the records due at the start
+  (spec 012: `sys-live` was refused on the live profile for a window ending 2 h ahead).
 - A paced run (`accelerated`, `realtime`, or a replay with `--speed`) records in its manifest under `pacing` the
   Unix time pacing started, the speed, and how far publication fell behind its schedule (a fixed-bucket
   histogram with count, p99 bucket edge and exact maximum; spec 012). The experiment runner reads the start time

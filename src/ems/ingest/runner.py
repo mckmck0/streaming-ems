@@ -251,9 +251,14 @@ def preflight(
     start: datetime,
     end: datetime | None,
     now: datetime,
+    *,
+    realtime: bool = False,
 ) -> None:
+    """A realtime run publishes each record at its own timestamp, so only the records already due
+    at ``now`` can be ahead of the wall clock: their newest is ``now``, however far ``end`` is.
+    """
     lo, hi = record_time_bounds(model, cfg, start, end or now)
-    preflight_topics(settings, lo, hi, now)
+    preflight_topics(settings, lo, min(hi, now) if realtime else hi, now)
 
 
 async def paced_publish(
@@ -318,7 +323,7 @@ async def run(
     sites = load_sites(settings.config_dir, cfg)
     model = SyntheticModel(sites, cfg.seed, settings.config_dir)
     if check_topics:
-        preflight(settings, model, cfg, start, end, now)
+        preflight(settings, model, cfg, start, end, now, realtime=mode == "realtime")
     sink = (
         sink
         if sink is not None

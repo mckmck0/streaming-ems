@@ -577,3 +577,27 @@ def test_ac_012_22_spec_002_replay_paces_through_pace(spec002: tuple[EmsSettings
     published = _replay_spec002(s, name)
     due = [T0 + dt / SPEC002_SPEED for dt in INGEST_OFFSETS_S]
     assert published.clock.dues == pytest.approx(due, abs=EPS_S)
+
+
+# ── preflight of a realtime run (AC-012-36: sys-live) ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("mode", "capped"), [("realtime", True), ("accelerated", False)])
+def test_ac_012_36_realtime_preflight_checks_only_records_due_by_now(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, capped: bool
+) -> None:
+    # A realtime run publishes each record at its own timestamp, so a window ending hours ahead
+    # never puts a record ahead of the wall clock: the live profile's after.max must not refuse it.
+    seen: list[tuple[datetime, datetime, datetime]] = []
+    monkeypatch.setattr(
+        runner, "preflight_topics", lambda _s, lo, hi, now: seen.append((lo, hi, now))
+    )
+    settings = EmsSettings(config_dir=CONFIG, data_dir=tmp_path)
+    cfg = load_generator_config(CONFIG / "generator.yaml")
+    model = SyntheticModel(load_sites(CONFIG, cfg), cfg.seed, CONFIG)
+    now = RUN_START + timedelta(minutes=10)
+    end = RUN_START + timedelta(hours=2)
+    runner.preflight(settings, model, cfg, RUN_START, end, now, realtime=mode == "realtime")
+    [(lo, hi, at)] = seen
+    assert at == now and lo <= RUN_START
+    assert (hi == now) if capped else (hi >= end)
