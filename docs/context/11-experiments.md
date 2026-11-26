@@ -167,7 +167,66 @@ time, faults). Scaling up is a config change.
 ### Validation runs (spec 012)
 
 Laptop validation of the runner and the measurement, not thesis evidence (the evaluation runs later at growing
-scale; OPEN in `00-overview.md`: where).
+scale; OPEN in `00-overview.md`: where). One host (Apple silicon laptop, Docker Desktop VM), Restate limited to
+2 GiB, one hypercorn worker. Every run below ended `ok` with 0 exactly-once mismatches and no OOM kill. Latency
+is p50 / p99 and release lag is p99, from `summary.json`.
+
+- `sys-recovery-20261125T122428Z` (commit `ee4e40d`): 100 households, 1 day, speed 96, `kill -9` of the SDK
+  service at 30 % and of the server at 70 %, two repetitions. The state equals the offline twin after both kills.
+
+  | Run | SDK kill: healthy / first commit / caught up | Server kill: healthy / first commit / caught up | Decision latency | Release lag | Sustained |
+  |---|---|---|---|---|---|
+  | r0 | 0.22 / 3.75 / 0.08 s | 1.15 / 0.54 / 0.06 s | 252 ms / 2.76 s | 10.6 s | no |
+  | r1 | 0.23 / 3.99 / 0.09 s | 1.53 / 0.64 / 0.00 s | 292 ms / 2.05 s | 3.8 s | yes |
+
+  About 66 records/s and 85 invocations/s. Restate's anonymous memory peaked at 1.5 GB.
+- `sys-strategy-change-20261125T125749Z` (commit `ee4e40d`): NoBattery joined all 100 households at step 48 and
+  left at step 144. Each household has 2 changes and 0 refusals, June closed for SelfConsumption and the real
+  battery, and the state equals the twin. Decision latency 229 ms / 3.05 s; release lag 10.66 s (max 21.8 s),
+  not sustained at 96.
+- `sys-scale-20261125T134051Z` (commit `cef8c21`), speed 96, 1 day:
+
+  | Households × strategies | Sustained | Release lag | Decision latency | Invocations/s | Retries |
+  |---|---|---|---|---|---|
+  | 100 × 1 | yes | 5.88 s | 388 ms / 2.62 s | 74 | 0 |
+  | 100 × 2 | yes | 3.83 s | 548 ms / 2.17 s | 85 | 0 |
+  | 400 × 1 | no | 19.45 s | 963 ms / 18.9 s | 296 | 48 |
+  | 400 × 2 | no | 11.97 s | 1.57 s / 16.3 s | 338 | 28 |
+
+  At 400 households Restate's total memory peaked at 2.13 GB (page cache included) against its 2 GiB limit;
+  anonymous memory stayed at 1.66–1.68 GB. State at 400 × 2 totals 2.1 MB for Household, 3.7 MB for Meter,
+  4.0 MB for NoBattery and 3.7 MB for SelfConsumption. Tariff state is 13.8 kB. So 400 households is beyond what
+  one laptop sustains at speed 96.
+- `sys-speed-20261125T191457Z` (commit `3015765`), 100 households × 2 strategies, `host_slept_s` ≤ 0.07 s in
+  every run:
+
+  | Speed | Sustained | Release lag (p99 / max) | Drain | Decision latency | Invocations/s | Retries |
+  |---|---|---|---|---|---|---|
+  | 24 | yes | 2.81 / 10.71 s | 0.70 s | 256 ms / 2.07 s | 21 | 0 |
+  | 48 | yes | 3.48 / 10.72 s | 0.63 s | 297 ms / 2.78 s | 43 | 0 |
+  | 96 | yes | 3.27 / 11.13 s | 0.81 s | 314 ms / 2.45 s | 85 | 0 |
+  | 192 | no | 7.48 / 42.77 s | 31.57 s | 361 ms / 4.66 s | 160 | 530 |
+
+  The highest sustained speed is 96. At 192, the slow steps are early steps (27–41) released by consumption
+  readings (`lags.parquet`). An earlier sweep (`sys-speed-20261125T144855Z`) is invalid from speed 96 on: the
+  laptop's lid was closed and the stack stalled for 123 s. That run is the reason for the host-sleep check
+  (T46).
+- `sys-live-20261126T001003Z` (commit `b429bf0`): 10 households, 2 h in real time from 01:00 UTC, faults on,
+  grace 120 s. The run published 689 records (1 price curve, 289 production and 399 consumption readings) with a
+  p99 publisher lateness of 0.05 s.
+  - All 80 steps were released by their end + `G` + 5 s: the delay after the quarter's end was 122.03 s at p50
+    and 122.06 s at max.
+  - Each household had 9 deadline firings, 0 early and 0 stale.
+  - `Battery` and `Meter` equal the SelfConsumption shadow. Decision latency was 35 ms / 117 ms.
+  - Restate peaked at 1.20 GB, 0 retries, `host_slept_s` 0.01.
+  - In this window the faults left no reading missing or late (0 estimates, 0 late, one duplicate production
+    reading), `price_replaced` was 0, and no forecast run fell inside it (`forecast_age_h` count 0).
+  - Every step was therefore released by the deadline. The estimate path of a missing reading (ADR 0018) is
+    covered by the integration tier, not by this run.
+
+Observation for the evaluation: the maximum release lag is about 10.7 s at every speed from 24 to 96, so it does
+not scale with the load. It points to a periodic stall somewhere in the stack, not to queueing. Find its source
+(Restate, Kafka or the Docker Desktop VM) when the runs move to the cluster.
 
 ## What to build
 
